@@ -1,0 +1,173 @@
+"""Run a headless agent over collected data, and hold the rails around it.
+
+Each job is two stages, and keeping them separate is the whole design:
+
+* **Collection** is deterministic Python with no dependencies. It gathers facts.
+  It is cheap, it is testable, and it produces the same answer twice.
+* **Triage** is a headless agent that reads those facts, makes the calls a
+  script cannot, and writes a report.
+
+A job that skips the collection stage and asks an agent to go and look produces
+a different answer every night, and none of them are reproducible.
+
+The rails here exist because each was once absent:
+
+* **A job that cannot read its tree does not guess.** It declines, records why,
+  and still pings its heartbeat — an executed-and-declined job must stay
+  distinguishable from a dead cron.
+* **The prompt is a file, named after the module.** That is how the fix policy
+  is resolved, and it means a prompt change is a reviewable diff.
+* **`fix_policy` is passed to the agent explicitly.** An agent that does not
+  know its blast radius will pick one.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PROMPTS = Path(__file__).resolve().parent / "prompts"
+
+sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.reporting import run_ledger  # noqa: E402
+from scripts.reporting.jobs import FIX_POLICIES, JOBS_BY_KEY  # noqa: E402
+
+#: How long an agent may run before it is killed. A job that hangs holds the
+#: tree, and the next job in the grid then runs against a tree somebody else is
+#: mid-write in — so the timeout protects the schedule, not just this job.
+AGENT_TIMEOUT_S = 900
+
+
+def heartbeat(url: Optional[str], status: str = "up") -> None:
+    """Ping the dead-man switch.
+
+    Pinged on `declined` as well as `ok`, on purpose. A job that executed and
+    correctly chose not to answer is working; only a job that did not run at all
+    should read as dead. Conflating the two means every legitimate decline pages
+    somebody.
+    """
+    if not url:
+        return
+    try:
+        import urllib.request
+
+        urllib.request.urlopen(f"{url}?status={status}", timeout=10).read()
+    except Exception:
+        # A heartbeat that fails must never fail the job. The monitor noticing a
+        # missed ping is the correct outcome here.
+        pass
+
+
+def current_branch() -> Optional[str]:
+    result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(REPO_ROOT), capture_output=True, text=True
+    )
+    return result.stdout.strip() or None if result.returncode == 0 else None
+
+
+def tree_is_clean() -> bool:
+    return not subprocess.run(
+        ["git", "status", "--porcelain"], cwd=str(REPO_ROOT), capture_output=True, text=True
+    ).stdout.strip()
+
+
+def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRANCH}}") -> int:
+    """Run one job's agent stage over already-collected data."""
+    job = JOBS_BY_KEY[job_key]
+    started = run_ledger.now()
+    branch = current_branch() or ""
+
+    def decline(reason: str) -> int:
+        print(f"⏸️  {job.key} declined: {reason}")
+        run_ledger.record(
+            run_ledger.Run(
+                job=job.key, outcome="declined", started=started, finished=run_ledger.now(),
+                branch=branch, agent_ran=False, reason=reason,
+            )
+        )
+        # Up, not down: it executed correctly and chose not to answer.
+        heartbeat(os.environ.get(job.heartbeat_var or ""), "up")
+        return 0
+
+    # ── Rails, before anything expensive ────────────────────────────────
+    if branch != base_branch:
+        # A job that grades whatever branch the shared tree was sitting on
+        # produces a verdict about the wrong code — and the error always
+        # flatters the base branch, which is the direction that ships broken.
+        return decline(f"tree is on '{branch}', not '{base_branch}' — refusing to grade the wrong code")
+
+    if job.commits and not tree_is_clean():
+        # Somebody's uncommitted work is here. An unattended run that resolves
+        # an anomaly by stashing or discarding it is worse than one that stops.
+        return decline("the tree has uncommitted changes that belong to somebody")
+
+    prompt_file = PROMPTS / f"{job.module}.md"
+    if not prompt_file.exists():
+        return decline(f"no prompt at {prompt_file.relative_to(REPO_ROOT)} — the fix policy is resolved from its name")
+
+    policy = job.fix_policy
+    prompt = "\n".join(
+        [
+            prompt_file.read_text(encoding="utf-8"),
+            "",
+            "---",
+            "",
+            f"## Your fix policy: `{policy}` — {FIX_POLICIES[policy]}",
+            "",
+            "Do not exceed it. If the right fix is outside it, say so in the report and stop;",
+            "an unattended change nobody authorised is worse than a finding nobody acted on.",
+            "",
+            "## Collected data",
+            "",
+            "```json",
+            json.dumps(collected, indent=2, default=str)[:200_000],
+            "```",
+        ]
+    )
+
+    print(f"→ {job.key}: running triage agent (policy: {policy})")
+    try:
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--permission-mode", "acceptEdits"],
+            cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=AGENT_TIMEOUT_S,
+        )
+    except FileNotFoundError:
+        return decline("the `claude` CLI is not on PATH (cron does not give you your login PATH)")
+    except subprocess.TimeoutExpired:
+        run_ledger.record(
+            run_ledger.Run(
+                job=job.key, outcome="failed", started=started, finished=run_ledger.now(),
+                branch=branch, agent_ran=True, reason=f"agent exceeded {AGENT_TIMEOUT_S}s and was killed",
+            )
+        )
+        heartbeat(os.environ.get(job.heartbeat_var or ""), "down")
+        return 1
+
+    agent_ran = result.returncode == 0
+    committed = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=str(REPO_ROOT), capture_output=True, text=True
+    ).stdout.strip()
+
+    run_ledger.record(
+        run_ledger.Run(
+            job=job.key,
+            outcome="ok" if agent_ran else "failed",
+            started=started,
+            finished=run_ledger.now(),
+            branch=branch,
+            agent_ran=agent_ran,
+            committed=committed if job.commits else None,
+            findings=int(collected.get("finding_count", 0) or 0),
+            reason="" if agent_ran else (result.stderr.strip()[-500:] or "agent exited non-zero"),
+        )
+    )
+    heartbeat(os.environ.get(job.heartbeat_var or ""), "up" if agent_ran else "down")
+    print(result.stdout[-4000:])
+    return 0 if agent_ran else 1

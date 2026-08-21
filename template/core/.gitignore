@@ -1,0 +1,38 @@
+# Secrets — the real .env is NEVER committed. .env.example is the tracked shape.
+.env
+.env.*
+!.env.example
+!.env.ci
+*.pem
+*.key
+
+# Scratch. Rule: no temp files in the project root — they go here.
+tmp/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv-ci/
+venv/
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Editors / OS
+.DS_Store
+.idea/
+*.swp
+
+# Claude Code local state (settings.local.json is per-machine; worktrees are big)
+.claude/settings.local.json
+.claude/worktrees/

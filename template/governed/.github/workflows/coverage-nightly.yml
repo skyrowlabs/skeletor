@@ -1,0 +1,56 @@
+name: Nightly Coverage
+
+# Runs the suites that a pull request does not, on a schedule, because their
+# verdict does not change a merge decision — only a weekly one.
+#
+# The rule this encodes: **detection latency should match consequence latency.**
+# Nothing on the integration branch reaches a user until a release, so a check
+# belongs on a nightly or on the release train unless its cost GROWS before then.
+#
+# It must use the SAME stack setup as ci.yml — see check_workflow_drift.py. The
+# bug that check exists for was exactly this workflow missing a setup step that
+# ci.yml had, so three tests failed every run for two days and had never once
+# been green, while the same tests passed on pull requests.
+
+on:
+  schedule:
+    - cron: '15 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: Coverage & ratchets
+    runs-on: ubuntu-latest
+    env:
+      {{CI_ENV_VAR}}: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: {{BASE_BRANCH}}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '{{PY}}'
+
+      - run: pip install -r scripts/requirements.txt
+
+      - name: Full suite with coverage
+        run: |
+          mkdir -p tmp
+          python -m pytest tests/ -m "unit or integration" -q \
+            --junitxml=tmp/junit.xml \
+            --cov --cov-report=xml:tmp/coverage.xml \
+            --durations=25
+
+      - name: Coverage ratchet
+        run: python scripts/check_coverage_budget.py --suite unit
+
+      - name: Skip budget
+        run: python scripts/check_skip_budget.py --suite unit
+
+      - name: Workflow drift
+        run: python scripts/check_workflow_drift.py

@@ -1,0 +1,9 @@
+# Default owner for everything.
+*                           @{{ORG}}
+
+# The governance layer. A change here changes how every other change is
+# reviewed, so it gets read even when the diff looks mechanical.
+/.claude/                   @{{ORG}}
+/.github/workflows/         @{{ORG}}
+/.pre-commit-config.yaml    @{{ORG}}
+/scripts/docs/              @{{ORG}}

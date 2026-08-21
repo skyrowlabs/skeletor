@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+tmp/
+.venv/
+CHANGELOG.md
+docs/TODO/README.md
+docs/implementations/README.md
+docs/todo_index.json
+docs/implementation_index.json

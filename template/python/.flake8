@@ -1,0 +1,46 @@
+[flake8]
+
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    # The CI-parity venv. The `.venv` entry above does not match it, and flake8
+    # runs as `flake8 .` from the repo root — without this it lints hundreds of
+    # findings' worth of third-party site-packages the moment one is built.
+    .venv-ci,
+    venv,
+    env,
+    build,
+    dist,
+    *.egg-info,
+    node_modules,
+    .pytest_cache,
+    .mypy_cache,
+    # Agent worktrees. `isolation: "worktree"` checks a second copy of the repo
+    # out under .claude/, and an agent building a parity environment puts a venv
+    # inside it. Without this, `flake8 .` lints those site-packages and fails
+    # the unit suite for everyone — including the agent whose worktree it is.
+    .claude,
+    # Documentation only
+    docs,
+    # Scratch (gitignored)
+    tmp
+
+max-line-length = {{LINE_LENGTH}}
+
+# Raised from the default 10 to reduce noise. Functions above this are FLAGGED
+# for future refactoring, not blocked — the blocking set is the E9/F-codes only.
+max-complexity = 15
+
+ignore =
+    # E203: whitespace before ':' — conflicts with black
+    E203,
+    # E226: missing whitespace around arithmetic operator — intentional for math readability
+    E226,
+    # E402: module-level import not at top — common for sys.path setup and conditional imports
+    E402,
+    # W503: line break before binary operator — conflicts with black
+    W503
+
+per-file-ignores =
+    __init__.py:F401

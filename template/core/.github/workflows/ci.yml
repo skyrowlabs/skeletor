@@ -1,0 +1,190 @@
+name: CI
+
+# The cost model this workflow encodes
+# ────────────────────────────────────
+# Two facts drive every gating decision below:
+#
+#   1. Requiring a status context costs nothing. Only RUNNING a job costs
+#      minutes. A required context that reports `skipped` satisfies branch
+#      protection, so size the required list for what must gate — never trim it
+#      to save money. The savings come from job-level gating, below.
+#
+#   2. A `synchronize` event on a READY pull request re-runs everything that PR
+#      earns. Iterating in draft and flipping to ready once, at the end, is the
+#      single largest saving available — in the project this was extracted from,
+#      42% of all Actions minutes ended in a failed or cancelled run because
+#      every PR was opened ready and pushed to four to six times.
+#
+# So: draft PRs run the gate job alone; a ready PR runs what its base branch
+# earns; and the heavy suite runs only where its verdict changes a decision.
+
+on:
+  pull_request:
+    # `ready_for_review` is LOAD-BEARING. Remove it and the gated jobs never
+    # re-run when a PR flips out of draft — they stay `skipped`, which branch
+    # protection ACCEPTS, and the PR merges having run nothing.
+    # tests/test_ci_draft_gate.py fails if it disappears.
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [{{BASE_BRANCH}}, {{RELEASE_BRANCH}}]
+  push:
+    branches: [{{RELEASE_BRANCH}}]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # ── The gate ────────────────────────────────────────────────────────────
+  # Always runs, on every event, and is cheap (~1 min). It answers two
+  # questions the expensive jobs are gated on, so the answer is computed once.
+  gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    outputs:
+      full_suite: ${{ steps.decide.outputs.full_suite }}
+      docs_only: ${{ steps.decide.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '{{PY}}'
+
+      - name: Decide what this PR earns
+        id: decide
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const decide = require('./.github/scripts/docs-only.cjs');
+            const result = await decide({ github, context, core });
+            core.setOutput('docs_only', String(result.docsOnly));
+            core.setOutput('full_suite', String(result.fullSuite));
+            core.summary
+              .addHeading('CI Gate')
+              .addTable([
+                [{data: 'Question', header: true}, {data: 'Answer', header: true}],
+                ['Docs-only change', String(result.docsOnly)],
+                ['Full suite', String(result.fullSuite)],
+                ['Reason', result.reason],
+              ])
+              .write();
+
+      - name: Fast structural checks
+        run: |
+          python scripts/check_doc_tables.py
+          python scripts/check_source_doc_refs.py
+
+  # ── Lint ────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint & Types
+    needs: gate
+    if: needs.gate.outputs.full_suite == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '{{PY}}'
+
+      # Pinned to the SAME versions as .pre-commit-config.yaml, which is the
+      # source of truth. tests/test_lint_tool_parity.py fails if they diverge.
+      - name: Install lint toolchain
+        run: pip install -r scripts/requirements.txt
+
+      - name: flake8 (blocking set)
+        run: flake8 . --select=E9,F63,F7,F82,F401 --show-source --statistics
+
+      - name: flake8 (informational)
+        run: flake8 . --max-complexity=15 --max-line-length={{LINE_LENGTH}} --statistics
+        continue-on-error: true
+
+      - name: isort
+        run: isort --check-only --diff .
+
+      - name: black
+        run: black --check --line-length={{LINE_LENGTH}} .
+
+      # Pyright resolves its interpreter from PATH, so the dependency set it
+      # sees decides which errors exist. .github/pyright-deps.txt must stay a
+      # SUPERSET of the unit-test job's installs — a leaner environment is not a
+      # more permissive check, just a different one.
+      - name: Install type-check dependencies
+        run: pip install -r .github/pyright-deps.txt
+
+      - name: pyright (whole project)
+        run: |
+          pip install pyright==1.1.409
+          pyright --project pyrightconfig.json
+
+  # ── Unit tests ──────────────────────────────────────────────────────────
+  # Ungated by full_suite: the host-side suite is minutes, and it is the check
+  # most likely to catch the thing a docs-only detector got wrong.
+  unit-tests:
+    name: Unit Tests (host-side)
+    needs: gate
+    if: needs.gate.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env:
+      # Under this flag an env-gate skip becomes a FAILURE. CI guarantees the
+      # environment, so a skip here means the harness broke — and a harness that
+      # skips its whole suite reports green.
+      {{CI_ENV_VAR}}: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '{{PY}}'
+      - run: pip install -r scripts/requirements.txt
+
+      - name: Unit suite
+        run: python -m pytest tests/ -m unit -q --durations=25
+
+      - name: Skip budget
+        run: python scripts/check_skip_budget.py
+
+  # ── Integration ─────────────────────────────────────────────────────────
+  # Gated on full_suite. When it is skipped it still REPORTS `skipped`, which
+  # branch protection accepts — that is why it is skipped at the job level and
+  # never via a trigger `paths-ignore`. A never-reported required check blocks
+  # a PR forever.
+  integration:
+    name: Integration Tests
+    needs: gate
+    if: needs.gate.outputs.full_suite == 'true'
+    runs-on: ubuntu-latest
+    env:
+      {{CI_ENV_VAR}}: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '{{PY}}'
+      - run: pip install -r scripts/requirements.txt
+
+      # SCAFFOLD: stand up the stack here. If two workflows both do this, put
+      # the steps in a composite action under .github/actions/ and have both
+      # use it — never hand-copy. See CLAUDE.md Critical Rule 11.
+      - name: Integration suite
+        run: python -m pytest tests/ -m integration -q --durations=25
+
+  # ── Release automation ──────────────────────────────────────────────────
+  release-please:
+    name: Release Please
+    if: github.event_name == 'push' && github.ref == 'refs/heads/{{RELEASE_BRANCH}}'
+    needs: [lint, unit-tests, integration]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .github/.release-please-manifest.json

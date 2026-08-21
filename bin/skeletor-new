@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""Scaffold a new project from the skeletor template.
+
+    bin/skeletor-new ../my-project --name "My Project" --cli mp --tier governed
+
+Copies the requested tier's overlays in order, substitutes every placeholder,
+and leaves you a tree that runs its own gates from the first commit.
+
+The tiers are cumulative — see docs/TIERS.md for what each one buys and, more
+importantly, what it costs. **Do not take a tier you will not maintain**: an
+unmaintained gate is worse than an absent one, because it is red for reasons
+nobody remembers and therefore ignored.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Dict, List
+
+SKELETOR = Path(__file__).resolve().parents[1]
+TEMPLATE = SKELETOR / "template"
+
+#: Tier -> the overlay directories it composes, in application order. Later
+#: overlays overwrite earlier ones, so a tier can specialise a core file.
+TIERS: Dict[str, List[str]] = {
+    "core": ["core"],
+    "governed": ["core", "governed"],
+    "agentic": ["core", "governed", "agentic"],
+}
+
+LANGUAGE_OVERLAYS = {"python": "python", "node": "node", "both": "python,node"}
+
+#: Files whose bytes must not be touched by substitution.
+BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".ico", ".woff", ".woff2"}
+
+
+def substitutions(args) -> Dict[str, str]:
+    slug = args.slug or Path(args.target).resolve().name
+    cli = args.cli or re.sub(r"[^a-z0-9]", "", slug.lower())[:8] or "run"
+    prefix = args.env_prefix or re.sub(r"[^A-Z0-9]", "", cli.upper()) or "APP"
+    return {
+        "PROJECT_NAME": args.name or slug.replace("-", " ").replace(".", " ").title(),
+        "PROJECT_SLUG": slug,
+        "TAGLINE": args.tagline,
+        "CLI": cli,
+        "CLI_ENV_PREFIX": prefix,
+        "CI_ENV_VAR": f"{prefix}_CI",
+        "AGENT_PREFIX": slug.replace(".", "-"),
+        "BASE_BRANCH": args.base_branch,
+        "RELEASE_BRANCH": args.release_branch,
+        "PY": args.python,
+        "PY_NODOT": args.python.replace(".", ""),
+        "LINE_LENGTH": str(args.line_length),
+        "ORG": args.org,
+        "TZ": args.timezone,
+        "CRON_CWD": str(Path(args.target).resolve()),
+        "LANG_RULES": "python" if args.language in ("python", "both") else "javascript",
+    }
+
+
+def render(text: str, values: Dict[str, str]) -> str:
+    def replace(match: re.Match) -> str:
+        key = match.group(1)
+        if key not in values:
+            raise KeyError(key)
+        return values[key]
+
+    return re.sub(r"\{\{(\w+)\}\}", replace, text)
+
+
+def copy_overlay(source: Path, target: Path, values: Dict[str, str], cli_name: str, report: List[str]) -> None:
+    for path in sorted(source.rglob("*")):
+        if path.is_dir():
+            continue
+        relative = path.relative_to(source)
+        if "__pycache__" in relative.parts or relative.suffix == ".pyc":
+            continue
+        # The wrapper is named after the project's CLI, so it cannot live in the
+        # template under its final name.
+        if relative.name == "CLI_WRAPPER":
+            relative = Path(cli_name)
+
+        destination = target / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        if path.suffix.lower() in BINARY_SUFFIXES:
+            shutil.copy2(path, destination)
+        else:
+            try:
+                rendered = render(path.read_text(encoding="utf-8"), values)
+            except KeyError as exc:
+                raise SystemExit(f"❌ {path}: unknown placeholder {{{{{exc.args[0]}}}}}")
+            destination.write_text(rendered, encoding="utf-8")
+            shutil.copymode(path, destination)
+
+        report.append(str(relative))
+
+
+def register_shipped_docs(target: Path, values: Dict[str, str]) -> None:
+    """Add a routing row for every `docs/*.md` an overlay shipped.
+
+    A higher tier brings its own reference docs, and a doc registered in neither
+    index table is a doc no agent will load. Rather than duplicating the tables
+    per overlay — two copies of a table drift, which is the failure mode the
+    tables exist to prevent — they are completed here from what is on disk.
+    """
+    index = target / ".github" / "DOCS_INDEX.md"
+    if not index.exists():
+        return
+    text = index.read_text(encoding="utf-8")
+
+    marker = "<!-- SCAFFOLD: extend as docs are added."
+    rows = []
+    for doc in sorted((target / "docs").glob("*.md")):
+        ref = f"docs/{doc.name}"
+        if doc.name == "README.md" or ref in text:
+            continue
+        heading = next(
+            (line[2:].strip() for line in doc.read_text(encoding="utf-8").splitlines() if line.startswith("# ")),
+            doc.stem,
+        )
+        rows.append(f"| **{heading}** | {doc.name} | `{ref}` |")
+
+    if not rows:
+        return
+    # Insert INSIDE the table (immediately after its last row), not before the
+    # marker — a blank line between rows ends the table in every renderer.
+    text = text.replace("\n\n" + marker, "\n" + "\n".join(rows) + "\n\n" + marker, 1)
+    index.write_text(text, encoding="utf-8")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("target", help="directory to create")
+    parser.add_argument("--name", help='human name, e.g. "Order Service"')
+    parser.add_argument("--slug", help="repo slug (defaults to the directory name)")
+    parser.add_argument("--cli", help="name of the CLI wrapper, e.g. `ord` (defaults from the slug)")
+    parser.add_argument("--env-prefix", help="env-var prefix, e.g. ORD (defaults from the CLI name)")
+    parser.add_argument("--tagline", default="<one line: what this project is>")
+    parser.add_argument("--tier", choices=sorted(TIERS), default="core")
+    parser.add_argument("--language", choices=["python", "node", "both", "none"], default="python")
+    parser.add_argument("--base-branch", default="develop", help="the integration branch")
+    parser.add_argument("--release-branch", default="main")
+    parser.add_argument("--python", default="3.12")
+    parser.add_argument("--line-length", type=int, default=120)
+    parser.add_argument("--org", default="OWNER")
+    parser.add_argument("--timezone", default="UTC", help="the timezone the crontab fires in (agentic tier)")
+    parser.add_argument("--no-git", action="store_true", help="skip `git init` and the first commit")
+    parser.add_argument("--force", action="store_true", help="write into an existing non-empty directory")
+    args = parser.parse_args()
+
+    target = Path(args.target).expanduser().resolve()
+    if target.exists() and any(target.iterdir()) and not args.force:
+        print(f"❌ {target} exists and is not empty (pass --force to write into it)")
+        return 1
+
+    values = substitutions(args)
+    cli_name = values["CLI"]
+    overlays = list(TIERS[args.tier])
+    if args.language != "none":
+        overlays += LANGUAGE_OVERLAYS[args.language].split(",")
+
+    target.mkdir(parents=True, exist_ok=True)
+    written: List[str] = []
+    for overlay in overlays:
+        source = TEMPLATE / overlay
+        if not source.exists():
+            print(f"❌ missing overlay: {source}")
+            return 1
+        copy_overlay(source, target, values, cli_name, written)
+
+    (target / cli_name).chmod(0o755)
+    (target / "tmp").mkdir(exist_ok=True)
+    (target / "tmp" / ".gitkeep").touch()
+
+    # Register whatever docs the chosen overlays actually shipped, then generate
+    # the indexes, so the tree's own checks pass on the first run. A scaffold
+    # whose first `check docs` is red teaches that red is normal, and a gate
+    # people have learned to expect red from is a gate that has stopped working.
+    register_shipped_docs(target, values)
+    subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(target), capture_output=True)
+
+    if not args.no_git and not (target / ".git").exists():
+        subprocess.run(["git", "init", "-q", "-b", args.base_branch], cwd=str(target), check=False)
+
+    # Install the merge driver whenever there IS a repo, including the in-place
+    # `--force --no-git` case. Its definition lives in .git/config, which is not
+    # version controlled — without it, .gitattributes points at a driver that
+    # does not exist and git silently three-way-merges a generated JSON.
+    if (target / ".git").exists():
+        subprocess.run([sys.executable, "scripts/git/install_merge_drivers.py"], cwd=str(target), capture_output=True)
+
+    print(f"✅ scaffolded {target}")
+    print(f"   tier: {args.tier} ({' + '.join(overlays)})   files: {len(written)}")
+    print(f"   CLI:  ./{cli_name}")
+    print()
+    print("Next:")
+    print(f"   cd {target}")
+    print("   pip install -r scripts/requirements.txt && pre-commit install --install-hooks")
+    print(f"   ./{cli_name} check pre-push")
+    print()
+    print("Then fill in the SCAFFOLD markers — they are the parts only you can write:")
+    sys.stdout.flush()   # else the grep below prints above this line
+    subprocess.run(["grep", "-rln", "SCAFFOLD", "--include=*.md", "--include=*.yml", "--include=*.py", "."], cwd=str(target))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

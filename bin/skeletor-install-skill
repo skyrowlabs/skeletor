@@ -1,0 +1,21 @@
+#!/bin/bash
+# Install the /new-project skill into the user's Claude Code config, so a blank
+# repo can be scaffolded by asking rather than by remembering a path.
+#
+# Idempotent. Remove it with: rm -rf ~/.claude/skills/new-project
+set -euo pipefail
+
+SKELETOR="$( cd "$( dirname "$(realpath "${BASH_SOURCE[0]}")" )/.." && pwd )"
+DEST="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/new-project"
+
+mkdir -p "$DEST"
+# The skill hard-codes skeletor's location, so it is rewritten to wherever this
+# checkout actually is rather than assuming the path it was authored at.
+sed "s|SKELETOR=~/skyrow.labs/skeletor|SKELETOR=$SKELETOR|" \
+    "$SKELETOR/.claude/skills/new-project/SKILL.md" > "$DEST/SKILL.md"
+
+echo "✅ installed /new-project → $DEST/SKILL.md"
+echo "   skeletor: $SKELETOR"
+echo
+echo "In any blank repo, say: \"set up this project using skeletor\""
+echo "Remove with: rm -rf $DEST"

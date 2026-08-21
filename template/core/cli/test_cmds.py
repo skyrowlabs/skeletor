@@ -1,0 +1,82 @@
+"""``{{CLI}} test`` — marker-driven suite selection.
+
+Every suite here maps to exactly one pytest marker, and a test file joins a
+suite by declaring that marker. There is **no registry**: no per-suite file
+list, no CI step per feature, nothing to forget to update.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+import click
+
+from cli.helpers import PROJECT_ROOT, run, summarize
+
+#: marker -> (help text, whether the suite needs the stack running)
+SUITES = {
+    "unit": ("host-side tests, no services required", False),
+    "integration": ("requires the stack up and seeded", True),
+    "manual": ("never in scheduled CI — E2E, live third-party, paid APIs", True),
+}
+
+
+def _pytest(marker: str, extra: tuple, ci: bool) -> int:
+    env_note = " (CI semantics: env-gate skips become failures)" if ci else ""
+    print(f"→ {marker} suite{env_note}")
+    env = dict(os.environ)
+    if ci:
+        # Under CI semantics an env-gate skip is a harness failure, not a pass:
+        # CI guarantees the environment, so "skipped everything" must be red.
+        env["{{CI_ENV_VAR}}"] = "1"
+    cmd = [sys.executable, "-m", "pytest", "tests/", "-m", marker, "-q", "--durations=10", *extra]
+    print(f"$ {' '.join(cmd)}")
+    import subprocess
+
+    return subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=env).returncode
+
+
+@click.group(invoke_without_command=True)
+@click.pass_context
+def test(ctx: click.Context) -> None:
+    """Run a test suite by marker."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+def _make(marker: str, description: str):
+    @click.option("--ci", is_flag=True, help="reproduce CI's skip semantics (skips become failures)")
+    @click.argument("pytest_args", nargs=-1, type=click.UNPROCESSED)
+    def command(ci: bool, pytest_args: tuple) -> None:
+        sys.exit(_pytest(marker, pytest_args, ci))
+
+    command.__doc__ = description
+    command.__name__ = marker
+    return click.command(name=marker, context_settings={"ignore_unknown_options": True})(command)
+
+
+for _marker, (_desc, _needs_stack) in SUITES.items():
+    test.add_command(_make(_marker, _desc))
+
+
+@test.command()
+@click.option("--ci", is_flag=True, help="reproduce CI's skip semantics")
+def all(ci: bool) -> None:
+    """Every suite except `manual`, in cost order."""
+    results = [(marker, _pytest(marker, (), ci)) for marker in SUITES if marker != "manual"]
+    sys.exit(summarize(results))
+
+
+@test.command()
+@click.option("-w", "--worst", default=20, show_default=True, help="how many modules to list")
+def coverage(worst: int) -> None:
+    """Measure coverage and list the worst-covered modules.
+
+    The list is the point: it tells you where a new test buys the most, which is
+    a better question than "what is the number".
+    """
+    code = run([sys.executable, "-m", "pytest", "tests/", "-m", "unit", "-q", "--cov", "--cov-report=term-missing"]).returncode
+    if code == 0:
+        run([sys.executable, "scripts/check_coverage_budget.py"])
+    sys.exit(code)
