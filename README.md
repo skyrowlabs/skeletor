@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/skeletor.svg" alt="skeletor — a governance skeleton for new projects; everything but the code" width="100%">
+</p>
+
 # skeletor
 
 A **project shell generator**. Run one command in a blank repo and you get a

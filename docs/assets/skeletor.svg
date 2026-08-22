@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 340" width="1000" height="340" role="img" aria-label="skeletor — a cartoon skull sorcerer holding a staff, beside the project name">
+  <title>skeletor</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a1747"/>
+      <stop offset="1" stop-color="#120b1f"/>
+    </linearGradient>
+    <linearGradient id="hood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7c4bb8"/>
+      <stop offset="1" stop-color="#43276e"/>
+    </linearGradient>
+    <linearGradient id="robe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6b3fa0"/>
+      <stop offset="1" stop-color="#33205a"/>
+    </linearGradient>
+    <linearGradient id="bone" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7f0e2"/>
+      <stop offset="1" stop-color="#d9cbb0"/>
+    </linearGradient>
+    <radialGradient id="orb">
+      <stop offset="0" stop-color="#d8ffcf"/>
+      <stop offset="0.45" stop-color="#7cff6b"/>
+      <stop offset="1" stop-color="#1c7a2a"/>
+    </radialGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="teeth"><path d="M102,182 C120,193 160,193 178,182 L174,205 C158,213 122,213 106,205 Z"/></clipPath>
+  </defs>
+
+  <rect width="1000" height="340" rx="18" fill="url(#bg)"/>
+  <g stroke="#ffffff" stroke-opacity="0.045" stroke-width="1">
+    <path d="M0 60H1000M0 120H1000M0 180H1000M0 240H1000M0 300H1000"/>
+    <path d="M60 0V340M120 0V340M180 0V340M240 0V340M300 0V340"/>
+  </g>
+
+  <g transform="translate(56,22)">
+    <!-- staff -->
+    <g transform="translate(6,0)">
+      <rect x="246" y="66" width="11" height="252" rx="5" fill="#8a6a3f"/>
+      <rect x="246" y="66" width="4" height="252" fill="#a98650"/>
+      <circle cx="251" cy="52" r="21" fill="url(#orb)" filter="url(#glow)"/>
+      <path d="M243 46h16v4h-16zm0 6h16v4h-16zm0 6h11v4h-11z" fill="#0d2a12" opacity="0.75"/>
+    </g>
+
+    <!-- robe -->
+    <path d="M140,236 C104,242 66,258 54,288 C46,306 44,314 44,318 L236,318 C236,314 234,306 226,288 C214,258 176,242 140,236 Z" fill="url(#robe)"/>
+    <path d="M140,236 L128,318 L152,318 Z" fill="#2a1a4a" opacity="0.6"/>
+
+    <!-- sleeve reaching for the staff -->
+    <path d="M186,250 C210,246 236,252 250,266 C256,272 254,282 246,286 C230,294 206,288 192,276 C182,268 178,254 186,250 Z" fill="url(#robe)"/>
+    <path d="M186,250 C210,246 234,252 248,264 C232,262 208,262 190,268 Z" fill="#ffffff" opacity="0.08"/>
+    <!-- bony hand gripping it -->
+    <path d="M240,258 c12,-2 22,4 24,14 c2,10 -4,18 -14,18 c-6,0 -10,-3 -12,-7 l-2,-6 c-1,-4 -4,-6 -8,-7 c-6,-1 -8,-8 -3,-11 z" fill="url(#bone)" stroke="#b3a488" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M243,268 h20 M243,277 h18" stroke="#b3a488" stroke-width="2" fill="none" stroke-linecap="round"/>
+
+    <!-- hood -->
+    <path d="M140,4 C56,4 18,72 22,148 C25,208 50,250 80,272 L98,250 C62,214 52,170 56,132 C62,70 92,38 140,38 C188,38 218,70 224,132 C228,170 218,214 182,250 L200,272 C230,250 255,208 258,148 C262,72 224,4 140,4 Z" fill="url(#hood)"/>
+    <path d="M140,4 C56,4 18,72 22,148 C24,186 34,218 50,242 C42,206 40,166 46,130 C56,66 92,30 140,30 Z" fill="#ffffff" opacity="0.09"/>
+
+    <!-- skull -->
+    <path d="M64,122 C64,60 96,30 140,30 C184,30 216,60 216,122 C216,154 208,178 196,194 C188,206 180,215 178,229 C176,243 164,251 140,251 C116,251 104,243 102,229 C100,215 92,206 84,194 C72,178 64,154 64,122 Z" fill="url(#bone)"/>
+    <path d="M92,44 C74,58 66,84 66,116 C66,96 74,64 92,44 Z" fill="#ffffff" opacity="0.7"/>
+
+    <!-- eye sockets -->
+    <path d="M90,114 C90,95 112,86 126,98 C135,106 130,131 112,137 C99,141 90,130 90,114 Z" fill="#170d26"/>
+    <path d="M190,112 C190,93 168,84 154,96 C145,104 150,129 168,135 C181,139 190,128 190,112 Z" fill="#170d26"/>
+    <g filter="url(#glow)">
+      <circle cx="110" cy="116" r="10" fill="#8cff7a"/>
+      <circle cx="170" cy="112" r="6.5" fill="#8cff7a"/>
+    </g>
+    <circle cx="107" cy="113" r="3" fill="#eafff0"/>
+    <circle cx="168" cy="110" r="2" fill="#eafff0"/>
+    <!-- raised brow -->
+    <path d="M148,74 C160,64 180,66 190,78" fill="none" stroke="#c3b391" stroke-width="6" stroke-linecap="round"/>
+
+    <!-- nose -->
+    <path d="M140,140 C133,152 127,161 130,167 C134,172 146,172 150,167 C153,161 147,152 140,140 Z" fill="#170d26"/>
+
+    <!-- grin -->
+    <path d="M102,182 C120,193 160,193 178,182 L174,205 C158,213 122,213 106,205 Z" fill="#fbf6ea" stroke="#b3a488" stroke-width="3"/>
+    <g clip-path="url(#teeth)" stroke="#b3a488" stroke-width="3">
+      <path d="M118,180V212M134,184V214M150,184V214M166,180V212"/>
+    </g>
+  </g>
+
+  <g transform="translate(360,0)">
+    <text x="0" y="152" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="76" font-weight="700" fill="#f1e9ff" letter-spacing="-2">skeletor</text>
+    <text x="4" y="204" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="25" fill="#8cff7a">a governance skeleton for new projects</text>
+    <text x="4" y="238" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="19" fill="#b6a6d8">everything but the code</text>
+  </g>
+</svg>
