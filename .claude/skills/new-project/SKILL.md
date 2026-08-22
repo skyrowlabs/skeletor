@@ -56,14 +56,18 @@ Full flags: `$SKELETOR/bin/skeletor-new --help`.
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
-./<cli> --help && ./<cli> check docs && ./<cli> test unit
+npm install                                   # node/both trees only
+./<cli> --help && ./<cli> check pre-push
 pre-commit install --install-hooks
 python scripts/git/install_merge_drivers.py
 ```
 
-`check docs` must be 5/5 and the unit suite must be green. If not, **stop and
-report** — that is a bug in skeletor, not something to patch around. A scaffold
-whose first check is red teaches the user that red is normal.
+`check pre-push` — the whole bundle, not `check docs` and `test unit`
+separately. Those two skip the lint gate, which is how a scaffold once shipped
+with `black`, `pyright` and `eslint` red without the verification step ever
+touching them. It must be green. If not, **stop and report** — that is a bug in
+skeletor, not something to patch around. A scaffold whose first check is red
+teaches the user that red is normal.
 
 ## Step 4 — SCAFFOLD markers
 

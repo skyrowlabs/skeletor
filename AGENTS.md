@@ -65,14 +65,19 @@ tier. Full flags: `skeletor-new --help`.
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
+npm install             # node/both trees only — eslint is a blocking gate
 ./<cli> --help          # every command group registers
-./<cli> check docs      # must be 5/5 green
-./<cli> test unit       # must be green
+./<cli> check pre-push  # lint + docs + unit tests, all of it
 ```
 
-If any of these is red, **stop and report it** — do not proceed and do not
-"fix it up". A scaffold whose first check is red is a bug in skeletor, and it
-teaches the user that red is normal.
+`check pre-push`, not `check docs` and `test unit` separately: those two skip
+the lint gate, which is how a scaffold once shipped with `black`, `pyright` and
+`eslint` red and nobody noticed for as long as the verification step never ran
+them.
+
+If any of it is red, **stop and report it** — do not proceed and do not "fix it
+up". A scaffold whose first check is red is a bug in skeletor, and it teaches
+the user that red is normal.
 
 Then install the hooks:
 

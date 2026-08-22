@@ -135,8 +135,8 @@ def make_venv(workdir: Path, quiet: bool) -> Path:
     return python
 
 
-def scaffold(tier: str, language: str, workdir: Path) -> Tuple[Result, Path]:
-    target = workdir / f"{tier}-{language}"
+def scaffold(tier: str, language: str, workdir: Path, name: Optional[str] = None) -> Tuple[Result, Path]:
+    target = workdir / (name or f"{tier}-{language}")
     started = time.time()
     code, output = run(
         [
@@ -265,8 +265,122 @@ def gates(tree: Path, venv_python: Path) -> List[Result]:
         results.append(Result(f"{CLI_NAME} {' '.join(command)}", code == 0, time.time() - started, output))
 
     results.append(check_groups_register(tree))
+    results.append(check_script_targets(tree))
+    results.append(check_no_baked_paths(tree))
     results += lint_gates(tree, venv_python)
     return results
+
+
+def check_script_targets(tree: Path) -> Result:
+    """Every `script(...)` call in the tree's CLI must name a file that exists.
+
+    `script()` joins its first argument onto `PROJECT_ROOT`, so a *flag* passed
+    to it — `script("-m", "pytest", ...)` — becomes the path `<root>/-m` and the
+    command fails on a file that was never going to exist. That shipped: it made
+    `check pre-push`, the first command the scaffolder tells a user to run,
+    impossible to pass at every tier.
+
+    Discovered by parsing, not listed here: any new `script()` call is checked by
+    existing. `module()` is the door for flags, so its argument is only required
+    not to look like one.
+    """
+    started = time.time()
+    problems = []
+    for source in sorted((tree / "cli").glob("*.py")):
+        tree_ast = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree_ast):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            if not node.args or not isinstance(node.args[0], ast.Constant):
+                continue
+            first = node.args[0].value
+            if not isinstance(first, str):
+                continue
+            if node.func.id == "script" and not (tree / first).exists():
+                problems.append(f"{source.name}:{node.lineno}: script({first!r}) → no such file in the tree")
+            elif node.func.id == "module" and first.startswith("-"):
+                problems.append(f"{source.name}:{node.lineno}: module({first!r}) is a flag, not a module")
+
+    return Result(
+        "cli script()/module() targets resolve",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
+
+
+def check_no_baked_paths(tree: Path) -> Result:
+    """No generated source may contain the tree's own absolute path.
+
+    A substitution that bakes the scaffold-time location into a file is wrong
+    the moment the repo is cloned or moved, and it fails silently — `CRON_CWD`
+    shipped that way and would have written crontab lines pointing at a
+    directory the user had renamed. Derive from `__file__` instead.
+
+    This is the length-independent half of the guard. The formatter alone was
+    not enough: `black` rewrites an over-long string assignment only when
+    wrapping it in parentheses would actually fit, so the same bug is visible
+    for one narrow band of path lengths and invisible on either side of it.
+    """
+    started = time.time()
+    needle = str(tree)
+    hits = []
+    for path in sorted(tree.rglob("*")):
+        if not path.is_file() or ".git" in path.parts or "node_modules" in path.parts:
+            continue
+        if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".ico", ".woff", ".woff2"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if needle in text:
+            line = next((i for i, ln in enumerate(text.splitlines(), 1) if needle in ln), 0)
+            hits.append(f"{path.relative_to(tree)}:{line}: contains the scaffold-time absolute path")
+
+    return Result("no scaffold-time paths baked into the tree", not hits, time.time() - started, "\n".join(hits))
+
+
+def long_path_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """Scaffold once into a long path and re-run the formatter on the result.
+
+    Every other tree here is generated into a short temp path, which hides any
+    line whose length depends on where the tree lives.
+
+    The length is derived, not picked: `black` only rewrites an over-long string
+    assignment when the parenthesised form would fit, so the bug is visible only
+    while the path is longer than the limit minus the assignment and shorter
+    than the limit minus an indent. A path of `line_length - 8` sits inside that
+    band. A round number like 120 `d`s sits past it, and this gate was green
+    against a reintroduced `CRON_CWD` until the length was worked out.
+    """
+    line_length = 120
+    for arg in hook_args_for_tree(workdir, tier):
+        if arg.startswith("--line-length="):
+            line_length = int(arg.split("=", 1)[1])
+
+    tail = "/tree"
+    padding = line_length - 8 - len(str(workdir)) - len(tail) - 1
+    deep = workdir / ("d" * max(padding, 1)) / "tree"
+    result, target = scaffold(tier, "python", deep.parent, name=deep.name)
+    label = f"long path ({len(str(deep))} chars)"
+    results = [Result(f"{label}: {result.label}", result.ok, result.seconds, result.output)]
+    if not result.ok:
+        return results
+
+    args = hook_args(target, "black")
+    started = time.time()
+    code, output = run([str(venv_python), "-m", "black", *args, "--check", "."], cwd=target)
+    results.append(Result(f"{label}: black {' '.join(args)}", code == 0, time.time() - started, output))
+    return results
+
+
+def hook_args_for_tree(workdir: Path, tier: str) -> List[str]:
+    """black's args from any already-generated tree of this tier."""
+    for candidate in (workdir / f"{tier}-python", workdir / f"{tier}-both"):
+        if (candidate / ".pre-commit-config.yaml").exists():
+            return hook_args(candidate, "black")
+    return []
 
 
 def main() -> int:
@@ -313,9 +427,13 @@ def main() -> int:
         # puts `governed` after `agentic`, which would have quietly gated the
         # wrong tree.
         fullest = max(tiers, key=lambda t: len(scaffolder.TIERS[t]))
+        for gate in long_path_gate(fullest, workdir, venv_python):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
         node_tree = workdir / f"{fullest}-both"
         if node_tree.exists():
-            for gate in node_gates(node_tree):
+            for gate in [*node_gates(node_tree), check_no_baked_paths(node_tree)]:
                 gate.label = f"{fullest}/both: {gate.label}"
                 results.append(gate)
     finally:

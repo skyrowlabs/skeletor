@@ -63,8 +63,20 @@ so "a fresh tree passes its own gates" is the definition of done here.
 against every language — a placeholder that only appears in the `node` overlay
 is a `render()` failure a user would otherwise find first — and against each
 Python tree runs the unit suite, `check docs`, `check merge-drivers`, a
-`--help` group-registration check, and the lint hooks. eslint and prettier run
-once, on the fullest tier's `both` tree.
+`--help` group-registration check, a static check that every `script()` call in
+the tree's CLI names a file that exists, and the lint hooks. eslint and prettier
+run once, on the fullest tier's `both` tree, and the fullest tier is scaffolded
+a second time into a deliberately long path.
+
+Those last two are each a bug that shipped. `script()` joins its argument onto
+`PROJECT_ROOT`, so `script("-m", "pytest", ...)` became the path `<root>/-m` and
+made `check pre-push` — the first command the scaffolder tells a user to run —
+impossible to pass at any tier; `module()` now exists so a flag has its own
+door. And the long path exists because `black` rewrites an over-long string
+assignment only when the parenthesised form would fit, so an absolute path baked
+into a source line is red for one band of checkout depths and green either side
+of it: the length there is derived from the tree's own line limit rather than
+picked, and a round 120 sat past the band and caught nothing.
 
 Three things it reads rather than repeats: the tier and language lists come from
 `bin/skeletor-new`, the lint arguments from the generated tree's own
@@ -81,6 +93,12 @@ gives a new user — was red on a tree nobody had touched.
 `pyright` is the one hook not gated here: it is a node package wearing a Python
 name, and installing a JS toolchain to check types on a tree that has none is
 not worth the minute. `{{CLI}} check lint` runs it in a real project.
+
+Know what that costs. Two `reportAssignmentType` errors in `governed`'s
+`cli/commit.py` shipped and stayed shipped, red in every scaffold at that tier
+and above, while this file stayed green — the gap is real, and the compensating
+control is that `AGENTS.md` and the skill both run `check pre-push` (which does
+run pyright) before anything else, and stop if it is red.
 
 Always run all tiers when a change touches `template/core/`, since `governed`
 and `agentic` compose on top of it. That is the default; `--tier` is for
