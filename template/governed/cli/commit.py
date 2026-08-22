@@ -61,9 +61,9 @@ def _staged_check(paths: list, message: str) -> int:
 @click.argument("paths", nargs=-1, required=True)
 def commit(message: str, dry_run: bool, paths: tuple) -> None:
     """Run the hook checks on PATHS only, then commit them without a stash."""
-    paths = list(paths)
+    path_list = list(paths)
 
-    for path in paths:
+    for path in path_list:
         if path in {".", "-A", "--all", "-a"}:
             fail(f"'{path}' stages the whole tree — in a shared tree that commits somebody else's work.")
             print("   Name the paths you touched.")
@@ -73,9 +73,9 @@ def commit(message: str, dry_run: bool, paths: tuple) -> None:
             sys.exit(1)
 
     branch_before = current_branch()
-    print(f"→ checking {len(paths)} path(s) on '{branch_before}'")
+    print(f"→ checking {len(path_list)} path(s) on '{branch_before}'")
 
-    if _staged_check(paths, message) != 0:
+    if _staged_check(path_list, message) != 0:
         fail("checks failed — nothing staged, nothing committed")
         sys.exit(1)
 
@@ -92,7 +92,7 @@ def commit(message: str, dry_run: bool, paths: tuple) -> None:
         print("   or take your own tree with `{{CLI}} worktree new <branch>`.")
         sys.exit(1)
 
-    if run(["git", "add", "--", *paths]).returncode != 0:
+    if run(["git", "add", "--", *path_list]).returncode != 0:
         fail("git add failed")
         sys.exit(1)
 

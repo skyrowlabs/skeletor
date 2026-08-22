@@ -42,8 +42,19 @@ def run(cmd: Sequence[str], *, cwd: Optional[Path] = None, check: bool = False, 
 
 
 def script(name: str, *args: str) -> int:
-    """Run a repo script with the interpreter running this CLI."""
+    """Run a repo script *by path* with the interpreter running this CLI."""
     return run([sys.executable, str(PROJECT_ROOT / name), *args]).returncode
+
+
+def module(name: str, *args: str) -> int:
+    """Run an installed module (``python -m name``) with this CLI's interpreter.
+
+    Separate from `script` because `script` joins its first argument onto
+    `PROJECT_ROOT`: `script("-m", "pytest", ...)` silently becomes the path
+    `<root>/-m` and every run fails on a file that was never going to exist.
+    A flag is not a path, so it needs its own door.
+    """
+    return run([sys.executable, "-m", name, *args]).returncode
 
 
 def git(*args: str) -> str:

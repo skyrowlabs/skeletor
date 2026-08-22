@@ -12,7 +12,7 @@ import sys
 
 import click
 
-from cli.helpers import PROJECT_ROOT, fail, ok, run, script, summarize
+from cli.helpers import PROJECT_ROOT, fail, module, ok, run, script, summarize
 
 DOCS_DIR = PROJECT_ROOT / "docs"
 
@@ -106,7 +106,7 @@ def pre_push(quick: bool) -> None:
     """
     results = [("lint", _lint()), ("docs", _docs())]
     if not quick:
-        results.append(("unit tests", script("-m", "pytest", "tests/", "-m", "unit", "-q")))
+        results.append(("unit tests", module("pytest", "tests/", "-m", "unit", "-q")))
     sys.exit(summarize(results))
 
 

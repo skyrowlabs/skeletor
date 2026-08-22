@@ -35,6 +35,12 @@ repos:
       - id: check-merge-conflict
       - id: check-yaml
       - id: check-json
+        # pyrightconfig.json is JSONC, not JSON: pyright's own parser accepts
+        # `//` comments, and the reason for each suppression has to live next to
+        # the suppression or it gets deleted by whoever trips over it. The
+        # alternative — a `"//"` key — is valid JSON that makes pyright print
+        # `Config contains unrecognized setting` on every run.
+        exclude: '^pyrightconfig\.json$'
       - id: check-added-large-files
         args: ['--maxkb=512']
 

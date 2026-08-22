@@ -54,7 +54,13 @@ CRON_LOG = "tmp/reporting/cron.log"
 SCHEDULE_ALLOWLIST = REPO_ROOT / "scripts" / "reporting_schedule_allowlist.yaml"
 
 #: The repo path used in generated crontab lines.
-CRON_CWD = "{{CRON_CWD}}"
+#:
+#: Derived, never baked in at scaffold time. A literal absolute path is wrong
+#: the moment the repo is cloned or moved somewhere else — and cron fails
+#: silently, so nobody finds out until a report stops arriving. It also made
+#: `black` red on arrival for anyone whose checkout path was long enough to
+#: push the assignment past the line limit.
+CRON_CWD = str(REPO_ROOT)
 
 #: The timezone every schedule here is expressed in.
 #:
