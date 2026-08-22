@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/skeletor.svg" alt="skeletor — a governance skeleton for new projects; everything but the code" width="100%">
+  <img src="docs/assets/skeletor.svg" alt="skeletor — a management skeleton for new projects" width="100%">
 </p>
 
 # skeletor

@@ -26,7 +26,7 @@
       <feGaussianBlur stdDeviation="6" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
-    <clipPath id="teeth"><path d="M102,182 C120,193 160,193 178,182 L174,205 C158,213 122,213 106,205 Z"/></clipPath>
+    <clipPath id="teeth"><path d="M100,180 C120,192 160,192 180,180 L176,210 C158,220 122,220 104,210 Z"/></clipPath>
   </defs>
 
   <rect width="1000" height="340" rx="18" fill="url(#bg)"/>
@@ -36,7 +36,65 @@
   </g>
 
   <g transform="translate(56,22)">
-    <!-- staff -->
+    <!-- robe -->
+    <path d="M140,236 C104,242 66,258 54,288 C46,306 44,314 44,318 L236,318 C236,314 234,306 226,288 C214,258 176,242 140,236 Z" fill="url(#robe)"/>
+    <path d="M140,236 L128,318 L152,318 Z" fill="#2a1a4a" opacity="0.6"/>
+
+    <!-- sleeve reaching for the staff -->
+    <path d="M186,250 C208,244 230,248 242,258 C248,264 246,278 238,282 C224,290 204,286 192,276 C182,268 178,254 186,250 Z" fill="url(#robe)"/>
+    <path d="M186,250 C208,244 228,248 240,257 C226,255 206,256 190,262 Z" fill="#ffffff" opacity="0.08"/>
+
+    <!-- hood -->
+    <path d="M140,4 C56,4 18,72 22,148 C25,208 50,250 80,272 L98,250 C62,214 52,170 56,132 C62,70 92,38 140,38 C188,38 218,70 224,132 C228,170 218,214 182,250 L200,272 C230,250 255,208 258,148 C262,72 224,4 140,4 Z" fill="url(#hood)"/>
+    <path d="M140,4 C56,4 18,72 22,148 C24,186 34,218 50,242 C42,206 40,166 46,130 C56,66 92,30 140,30 Z" fill="#ffffff" opacity="0.09"/>
+
+    <!-- cranium -->
+    <path d="M64,122 C64,60 96,30 140,30 C184,30 216,60 216,122 C216,154 208,178 196,194 C188,206 180,215 178,229 C176,243 164,251 140,251 C116,251 104,243 102,229 C100,215 92,206 84,194 C72,178 64,154 64,122 Z" fill="url(#bone)"/>
+    <path d="M92,44 C74,58 66,84 66,116 C66,96 74,64 92,44 Z" fill="#ffffff" opacity="0.7"/>
+    <!-- cranial suture -->
+    <path d="M108,44 C118,52 126,42 136,48 C146,54 152,44 164,50" fill="none" stroke="#c3b391" stroke-width="2.5" stroke-opacity="0.55" stroke-linecap="round"/>
+
+    <!-- temporal and cheek hollows -->
+    <path d="M72,120 C74,152 84,176 100,192 C82,190 68,166 66,132 Z" fill="#c9b795" opacity="0.35"/>
+    <path d="M208,118 C206,150 196,176 180,192 C198,190 212,164 214,130 Z" fill="#c9b795" opacity="0.35"/>
+    <!-- zygomatic arches -->
+    <path d="M78,146 C90,158 96,166 98,176" fill="none" stroke="#c3b391" stroke-width="4" stroke-opacity="0.5" stroke-linecap="round"/>
+    <path d="M202,144 C190,156 184,164 182,174" fill="none" stroke="#c3b391" stroke-width="4" stroke-opacity="0.5" stroke-linecap="round"/>
+
+    <!-- eye sockets, deep-set -->
+    <path d="M84,112 C84,88 112,77 128,93 C139,103 134,135 111,142 C96,147 84,133 84,112 Z" fill="#170d26" stroke="#c3b391" stroke-width="6" stroke-opacity="0.55" paint-order="stroke"/>
+    <path d="M196,110 C196,86 168,75 152,91 C141,101 146,133 169,140 C184,145 196,131 196,110 Z" fill="#170d26" stroke="#c3b391" stroke-width="6" stroke-opacity="0.55" paint-order="stroke"/>
+    <g filter="url(#glow)">
+      <circle cx="109" cy="115" r="10" fill="#8cff7a"/>
+      <circle cx="171" cy="111" r="6.5" fill="#8cff7a"/>
+    </g>
+    <circle cx="106" cy="112" r="3" fill="#eafff0"/>
+    <circle cx="169" cy="109" r="2" fill="#eafff0"/>
+    <!-- raised brow ridge -->
+    <path d="M150,70 C162,60 182,62 192,74" fill="none" stroke="#c3b391" stroke-width="6" stroke-linecap="round"/>
+
+    <!-- nasal aperture -->
+    <path d="M140,130 C136,146 127,158 125,167 C124,174 133,176 140,171 C147,176 156,174 155,167 C153,158 144,146 140,130 Z" fill="#170d26"/>
+    <path d="M132,120 C136,126 144,126 148,120" fill="none" stroke="#c3b391" stroke-width="3" stroke-opacity="0.6" stroke-linecap="round"/>
+
+    <!-- mandible -->
+    <path d="M92,212 C100,238 116,250 140,250 C164,250 180,238 188,212" fill="none" stroke="#c3b391" stroke-width="3" stroke-opacity="0.65"/>
+
+    <!-- teeth: two rows, offset -->
+    <path d="M100,180 C120,192 160,192 180,180 L176,210 C158,220 122,220 104,210 Z" fill="#fbf6ea" stroke="#b3a488" stroke-width="3"/>
+    <g clip-path="url(#teeth)" stroke="#b3a488" fill="none" stroke-width="3">
+      <path d="M101,197 C120,207 160,207 179,197"/>
+      <path d="M116,178V200M132,182V202M148,182V202M164,178V200"/>
+      <path d="M124,200V224M140,202V226M156,200V224"/>
+    </g>
+  </g>
+
+  <!-- staff and grip, in front of the hood -->
+  <g transform="translate(56,22)">
+    <!-- palm, behind the staff -->
+    <path d="M224,258 c0,-11 8,-16 18,-16 c11,0 17,7 17,17 v20 c0,11 -7,17 -17,17 c-12,0 -18,-8 -18,-19 z" fill="#e6dbc2" stroke="#b3a488" stroke-width="2"/>
+    <path d="M231,288 L237,262M240,290 L245,262M249,290 L252,264" stroke="#b3a488" stroke-width="2" stroke-opacity="0.7" fill="none" stroke-linecap="round"/>
+
     <g transform="translate(6,0)">
       <rect x="246" y="66" width="11" height="252" rx="5" fill="#8a6a3f"/>
       <rect x="246" y="66" width="4" height="252" fill="#a98650"/>
@@ -44,50 +102,27 @@
       <path d="M243 46h16v4h-16zm0 6h16v4h-16zm0 6h11v4h-11z" fill="#0d2a12" opacity="0.75"/>
     </g>
 
-    <!-- robe -->
-    <path d="M140,236 C104,242 66,258 54,288 C46,306 44,314 44,318 L236,318 C236,314 234,306 226,288 C214,258 176,242 140,236 Z" fill="url(#robe)"/>
-    <path d="M140,236 L128,318 L152,318 Z" fill="#2a1a4a" opacity="0.6"/>
+    <!-- phalanges curled over the shaft -->
+    <g fill="url(#bone)" stroke="#b3a488" stroke-width="2">
+      <rect x="230" y="245" width="28" height="11" rx="5.5"/>
+      <circle cx="262" cy="250" r="6.5"/>
+      <rect x="264" y="246" width="12" height="9" rx="4.5"/>
 
-    <!-- sleeve reaching for the staff -->
-    <path d="M186,250 C210,246 236,252 250,266 C256,272 254,282 246,286 C230,294 206,288 192,276 C182,268 178,254 186,250 Z" fill="url(#robe)"/>
-    <path d="M186,250 C210,246 234,252 248,264 C232,262 208,262 190,268 Z" fill="#ffffff" opacity="0.08"/>
-    <!-- bony hand gripping it -->
-    <path d="M240,258 c12,-2 22,4 24,14 c2,10 -4,18 -14,18 c-6,0 -10,-3 -12,-7 l-2,-6 c-1,-4 -4,-6 -8,-7 c-6,-1 -8,-8 -3,-11 z" fill="url(#bone)" stroke="#b3a488" stroke-width="2" stroke-linejoin="round"/>
-    <path d="M243,268 h20 M243,277 h18" stroke="#b3a488" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <rect x="231" y="260" width="27" height="11" rx="5.5"/>
+      <circle cx="262" cy="265" r="6.5"/>
+      <rect x="264" y="261" width="12" height="9" rx="4.5"/>
 
-    <!-- hood -->
-    <path d="M140,4 C56,4 18,72 22,148 C25,208 50,250 80,272 L98,250 C62,214 52,170 56,132 C62,70 92,38 140,38 C188,38 218,70 224,132 C228,170 218,214 182,250 L200,272 C230,250 255,208 258,148 C262,72 224,4 140,4 Z" fill="url(#hood)"/>
-    <path d="M140,4 C56,4 18,72 22,148 C24,186 34,218 50,242 C42,206 40,166 46,130 C56,66 92,30 140,30 Z" fill="#ffffff" opacity="0.09"/>
+      <rect x="232" y="275" width="26" height="11" rx="5.5"/>
+      <circle cx="262" cy="280" r="6.5"/>
+      <rect x="264" y="276" width="11" height="9" rx="4.5"/>
 
-    <!-- skull -->
-    <path d="M64,122 C64,60 96,30 140,30 C184,30 216,60 216,122 C216,154 208,178 196,194 C188,206 180,215 178,229 C176,243 164,251 140,251 C116,251 104,243 102,229 C100,215 92,206 84,194 C72,178 64,154 64,122 Z" fill="url(#bone)"/>
-    <path d="M92,44 C74,58 66,84 66,116 C66,96 74,64 92,44 Z" fill="#ffffff" opacity="0.7"/>
-
-    <!-- eye sockets -->
-    <path d="M90,114 C90,95 112,86 126,98 C135,106 130,131 112,137 C99,141 90,130 90,114 Z" fill="#170d26"/>
-    <path d="M190,112 C190,93 168,84 154,96 C145,104 150,129 168,135 C181,139 190,128 190,112 Z" fill="#170d26"/>
-    <g filter="url(#glow)">
-      <circle cx="110" cy="116" r="10" fill="#8cff7a"/>
-      <circle cx="170" cy="112" r="6.5" fill="#8cff7a"/>
-    </g>
-    <circle cx="107" cy="113" r="3" fill="#eafff0"/>
-    <circle cx="168" cy="110" r="2" fill="#eafff0"/>
-    <!-- raised brow -->
-    <path d="M148,74 C160,64 180,66 190,78" fill="none" stroke="#c3b391" stroke-width="6" stroke-linecap="round"/>
-
-    <!-- nose -->
-    <path d="M140,140 C133,152 127,161 130,167 C134,172 146,172 150,167 C153,161 147,152 140,140 Z" fill="#170d26"/>
-
-    <!-- grin -->
-    <path d="M102,182 C120,193 160,193 178,182 L174,205 C158,213 122,213 106,205 Z" fill="#fbf6ea" stroke="#b3a488" stroke-width="3"/>
-    <g clip-path="url(#teeth)" stroke="#b3a488" stroke-width="3">
-      <path d="M118,180V212M134,184V214M150,184V214M166,180V212"/>
+      <rect x="224" y="284" width="30" height="11" rx="5.5" transform="rotate(-10 239 289)"/>
     </g>
   </g>
 
   <g transform="translate(360,0)">
     <text x="0" y="152" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="76" font-weight="700" fill="#f1e9ff" letter-spacing="-2">skeletor</text>
-    <text x="4" y="204" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="25" fill="#8cff7a">a governance skeleton for new projects</text>
-    <text x="4" y="238" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="19" fill="#b6a6d8">everything but the code</text>
+    <text x="4" y="202" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="25" fill="#8cff7a">a management skeleton for new projects</text>
   </g>
+
 </svg>
