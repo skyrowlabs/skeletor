@@ -40,6 +40,22 @@ LANGUAGE_OVERLAYS = {"python": "python", "node": "node", "both": "python,node"}
 BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".ico", ".woff", ".woff2"}
 
 
+def setup_commands(language: str) -> List[str]:
+    """The install steps a fresh clone needs, by language.
+
+    One source for both the closing instructions this prints and the README it
+    writes. They were two separate copies once, and the one people actually read
+    — the README — was the stale one: it omitted `npm install`, so `check lint`
+    failed on `eslint: command not found` and read as a broken scaffold.
+    """
+    steps = []
+    if language in ("python", "both"):
+        steps.append("pip install -r scripts/requirements.txt && pre-commit install --install-hooks")
+    if language in ("node", "both"):
+        steps.append("npm install")
+    return steps
+
+
 def substitutions(args) -> Dict[str, str]:
     slug = args.slug or Path(args.target).resolve().name
     cli = args.cli or re.sub(r"[^a-z0-9]", "", slug.lower())[:8] or "run"
@@ -59,8 +75,9 @@ def substitutions(args) -> Dict[str, str]:
         "LINE_LENGTH": str(args.line_length),
         "ORG": args.org,
         "TZ": args.timezone,
-        "CRON_CWD": str(Path(args.target).resolve()),
         "LANG_RULES": "python" if args.language in ("python", "both") else "javascript",
+        "SETUP_COMMANDS": "\n".join(setup_commands(args.language))
+        or "# no language toolchain in this tier — nothing to install",
     }
 
 
@@ -186,8 +203,26 @@ def main() -> int:
     register_shipped_docs(target, values)
     subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(target), capture_output=True)
 
+    committed = False
     if not args.no_git and not (target / ".git").exists():
         subprocess.run(["git", "init", "-q", "-b", args.base_branch], cwd=str(target), check=False)
+        # Actually make the first commit. "Governs itself from its first commit"
+        # is not true of a tree that has no commits: `git diff`, `check reports`
+        # and every worktree command need a HEAD to compare against, and the
+        # user's real first commit would otherwise bury the scaffold in it.
+        # --no-verify because the hooks are not installed yet — the very next
+        # step in the printed instructions is what installs them.
+        subprocess.run(["git", "add", "-A"], cwd=str(target), check=False)
+        first = subprocess.run(
+            ["git", "commit", "-q", "--no-verify", "-m",
+             f"chore: scaffold {values['PROJECT_SLUG']} from skeletor ({args.tier} tier)"],
+            cwd=str(target), capture_output=True, text=True,
+        )
+        committed = first.returncode == 0
+        if not committed:
+            print("⚠️  git init succeeded but the first commit did not:")
+            print("   " + (first.stderr or first.stdout).strip().replace("\n", "\n   "))
+            print("   (usually an unset user.name/user.email — commit by hand once it is set)")
 
     # Install the merge driver whenever there IS a repo, including the in-place
     # `--force --no-git` case. Its definition lives in .git/config, which is not
@@ -199,10 +234,13 @@ def main() -> int:
     print(f"✅ scaffolded {target}")
     print(f"   tier: {args.tier} ({' + '.join(overlays)})   files: {len(written)}")
     print(f"   CLI:  ./{cli_name}")
+    if committed:
+        print(f"   git:  first commit on '{args.base_branch}'")
     print()
     print("Next:")
     print(f"   cd {target}")
-    print("   pip install -r scripts/requirements.txt && pre-commit install --install-hooks")
+    for step in setup_commands(args.language):
+        print(f"   {step}")
     print(f"   ./{cli_name} check pre-push")
     print()
     print("Then fill in the SCAFFOLD markers — they are the parts only you can write:")
