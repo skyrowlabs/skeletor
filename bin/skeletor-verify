@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""Generate every tier and run the resulting tree's own gates against it.
+
+    bin/skeletor-verify                 # every tier, every language
+    bin/skeletor-verify --tier core     # one tier
+    bin/skeletor-verify --keep          # leave the trees behind to poke at
+
+There is no test suite for skeletor. **The scaffold is the test**: a template
+change is verified by generating a tree and running that tree's own checks, and
+the definition of done is that a fresh tree passes them. A scaffold whose first
+check is red teaches the user that red is normal, and a gate people have learned
+to expect red from has stopped working.
+
+That procedure used to live only as a recipe in CLAUDE.md — which made it a
+second copy of itself, running only when somebody remembered to type it and
+drifting the moment the tiers changed. This file is the copy that runs.
+
+Nothing here holds a list of tiers or languages: both are read from
+``bin/skeletor-new``, so a tier added there is verified by existing.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import importlib.machinery
+import importlib.util
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+SKELETOR = Path(__file__).resolve().parents[1]
+SCAFFOLDER = SKELETOR / "bin" / "skeletor-new"
+
+#: Everything the generated tree needs to run its unit tests and docs checks.
+#: Deliberately not `scripts/requirements.txt`: that pulls pyright (a node
+#: toolchain) and pre-commit, neither of which any gate below exercises, and a
+#: verify step slow enough to skip is a verify step that gets skipped.
+#:
+#: `pytest-timeout` is here not because a gate calls it but because the tree's
+#: pytest config *sets* `timeout`. Without the plugin pytest warns and ignores
+#: it, so the suite would be verified under a config the tree does not have.
+VENV_PACKAGES = ["pytest", "pytest-timeout", "click"]
+
+CLI_NAME = "probe"
+
+
+@dataclass
+class Result:
+    label: str
+    ok: bool
+    seconds: float
+    output: str = ""
+
+    @property
+    def mark(self) -> str:
+        return "✅" if self.ok else "❌"
+
+
+def load_scaffolder():
+    """Import ``bin/skeletor-new`` for its TIERS and LANGUAGE_OVERLAYS maps.
+
+    It has no ``.py`` suffix, so the import is by path. Everything at its module
+    level is a definition; ``main()`` is guarded.
+    """
+    loader = importlib.machinery.SourceFileLoader("skeletor_new", str(SCAFFOLDER))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def run(cmd: List[str], cwd: Path, env_extra: Optional[dict] = None) -> Tuple[int, str]:
+    import os
+
+    env = dict(os.environ)
+    if env_extra:
+        env.update(env_extra)
+    proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, env=env)
+    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+def make_venv(workdir: Path, quiet: bool) -> Path:
+    """One venv, shared by every tree.
+
+    The packages are tree-independent, and a venv per tier is three pip installs
+    to learn the same thing once.
+    """
+    venv = workdir / ".venv-shared"
+    if not quiet:
+        print(f"   creating shared venv ({', '.join(VENV_PACKAGES)}) …")
+    subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True, capture_output=True)
+    python = venv / "bin" / "python"
+    proc = subprocess.run(
+        [str(python), "-m", "pip", "install", "-q", "--disable-pip-version-check", *VENV_PACKAGES],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        print(proc.stdout + proc.stderr)
+        raise SystemExit("❌ could not install the verify toolchain")
+    return python
+
+
+def scaffold(tier: str, language: str, workdir: Path) -> Tuple[Result, Path]:
+    target = workdir / f"{tier}-{language}"
+    started = time.time()
+    code, output = run(
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            language,
+            "--tagline",
+            "a scaffold under test",
+            "--force",
+        ],
+        cwd=SKELETOR,
+    )
+    return Result(f"scaffold {tier}/{language}", code == 0, time.time() - started, output), target
+
+
+def expected_command_names(tree: Path) -> List[str]:
+    """The command names ``./probe --help`` must list, derived the way the tree
+    derives them: one per ``cli/*.py`` that is neither private nor ``helpers``.
+
+    The alias map is read out of the generated ``cli/__init__.py`` rather than
+    copied here — a second copy of it would be the registry this whole shell
+    exists to avoid.
+    """
+    init = (tree / "cli" / "__init__.py").read_text(encoding="utf-8")
+    match = re.search(r"^_ALIASES = (\{[^}]*\})", init, re.MULTILINE)
+    aliases = ast.literal_eval(match.group(1)) if match else {}
+
+    names = []
+    for module in sorted((tree / "cli").glob("*.py")):
+        stem = module.stem
+        if stem.startswith("_") or stem == "helpers":
+            continue
+        names.append(aliases.get(stem, stem))
+    return names
+
+
+def check_groups_register(tree: Path) -> Result:
+    started = time.time()
+    code, output = run([f"./{CLI_NAME}", "--help"], cwd=tree)
+    if code != 0:
+        return Result("cli --help", False, time.time() - started, output)
+
+    expected = expected_command_names(tree)
+    missing = [name for name in expected if not re.search(rf"^\s+{re.escape(name)}\b", output, re.MULTILINE)]
+    ok = not missing
+    detail = output if ok else f"{output}\n\nmodules present in cli/ but absent from --help: {missing}"
+    return Result(f"cli --help registers {len(expected)} groups", ok, time.time() - started, detail)
+
+
+def gates(tree: Path, venv_python: Path) -> List[Result]:
+    """The tree's own checks, run the way its user would run them."""
+    results = []
+
+    started = time.time()
+    code, output = run(
+        [str(venv_python), "-m", "pytest", "tests/", "-m", "unit", "-q"],
+        cwd=tree,
+        env_extra={"PYTHONPATH": str(tree)},
+    )
+    results.append(Result("pytest -m unit", code == 0, time.time() - started, output))
+
+    for command in (["check", "docs"], ["check", "merge-drivers"]):
+        started = time.time()
+        code, output = run([f"./{CLI_NAME}", *command], cwd=tree)
+        results.append(Result(f"{CLI_NAME} {' '.join(command)}", code == 0, time.time() - started, output))
+
+    results.append(check_groups_register(tree))
+    return results
+
+
+def main() -> int:
+    scaffolder = load_scaffolder()
+    all_tiers = sorted(scaffolder.TIERS)
+    all_languages = sorted(scaffolder.LANGUAGE_OVERLAYS) + ["none"]
+
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--tier", action="append", choices=all_tiers, help="limit to a tier (repeatable)")
+    parser.add_argument("--language", action="append", choices=all_languages, help="limit to a language (repeatable)")
+    parser.add_argument("--keep", action="store_true", help="do not delete the generated trees")
+    parser.add_argument("--workdir", help="where to generate (default: a temp dir)")
+    parser.add_argument("-q", "--quiet", action="store_true", help="summary only")
+    args = parser.parse_args()
+
+    tiers = args.tier or all_tiers
+    languages = args.language or all_languages
+    #: Gates run against the language the template's own tests are written in.
+    #: The others are scaffolded anyway, because an unrendered placeholder in an
+    #: overlay nobody generates is a `render()` failure a user finds first.
+    gated_language = "python"
+
+    workdir = Path(args.workdir).resolve() if args.workdir else Path(tempfile.mkdtemp(prefix="skeletor-verify-"))
+    workdir.mkdir(parents=True, exist_ok=True)
+    print(f"🔎 verifying {len(tiers)} tier(s) × {len(languages)} language(s) in {workdir}")
+
+    results: List[Result] = []
+    try:
+        venv_python = make_venv(workdir, args.quiet)
+        for tier in tiers:
+            for language in languages:
+                result, tree = scaffold(tier, language, workdir)
+                results.append(result)
+                if not result.ok or language != gated_language:
+                    continue
+                (tree / ".venv").symlink_to(venv_python.parents[1])
+                for gate in gates(tree, venv_python):
+                    gate.label = f"{tier}: {gate.label}"
+                    results.append(gate)
+                if not args.quiet:
+                    print(f"   {tier}/{language} … {sum(1 for r in results if r.ok)} checks green so far")
+    finally:
+        if not args.keep:
+            shutil.rmtree(workdir, ignore_errors=True)
+        else:
+            print(f"   trees kept in {workdir}")
+
+    failed = [r for r in results if not r.ok]
+    print()
+    for result in results:
+        print(f"  {result.mark} {result.label}  ({result.seconds:.1f}s)")
+    print()
+
+    if failed:
+        for result in failed:
+            print(f"── {result.label} ──")
+            print(result.output.strip()[-4000:])
+            print()
+        print(f"❌ {len(failed)} of {len(results)} checks failed")
+        return 1
+
+    print(f"✅ {len(results)} checks green — every tier scaffolds and passes its own gates")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

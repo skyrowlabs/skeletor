@@ -1,0 +1,46 @@
+# The scaffold is the test suite.
+#
+# skeletor has no unit tests of its own — a template change is verified by
+# generating a tree and running that tree's own gates, which is what
+# `bin/skeletor-verify` does across every tier and language.
+#
+# The weekly run is not redundant with the push run. Several of the template's
+# dependencies are floors rather than pins (`click>=8.1`, `pytest>=8.0`), so a
+# tree that is green today can go red tomorrow with no commit here at all. The
+# schedule is how we find that out before a user does.
+#
+# The action versions below deliberately match the ones under `template/` —
+# `bin/skeletor-check-pins` reports a pin held at two different versions as a
+# finding, so skeletor runs the CI it ships.
+
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  scaffold:
+    name: every tier passes its own gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Verify on the Python a scaffold actually defaults to, read from the
+      # scaffolder rather than repeated here: a hard-coded version would be a
+      # second copy that goes stale the day the default moves, and it would go
+      # stale silently — green CI on an interpreter no user gets.
+      - id: python
+        run: |
+          version=$(sed -n 's/.*"--python", default="\([0-9.]*\)".*/\1/p' bin/skeletor-new)
+          echo "version=${version:?could not read the scaffold default from bin/skeletor-new}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.python.outputs.version }}
+
+      - run: bin/skeletor-verify

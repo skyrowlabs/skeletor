@@ -44,17 +44,14 @@ does not.
 ```bash
 # Scaffold a project (the only "build" this repo has)
 bin/skeletor-new ../target --name "Name" --cli xx --tagline "..." --tier core
-
-# Full option set
 bin/skeletor-new --help
 
-# Verify a template change end-to-end — do this after ANY edit under template/
-bin/skeletor-new /tmp/probe --name Probe --cli probe --tier agentic --tagline x --force
-cd /tmp/probe
-python -m venv .venv && .venv/bin/pip install -q pytest click
-.venv/bin/python -m pytest tests/ -m unit -q     # must be green
-./probe check docs                                # must be 5/5 green
-./probe --help                                    # every group must register
+# Verify a template change end-to-end — run this after ANY edit under template/
+bin/skeletor-verify                    # every tier x every language
+bin/skeletor-verify --tier core --keep # one tier, trees left behind to inspect
+
+# How far behind are the versions we start other people's repos on?
+bin/skeletor-check-pins
 ```
 
 There is no test suite for skeletor itself. **The scaffold IS the test**: a
@@ -62,14 +59,26 @@ template change is verified by generating a tree and running that tree's own
 gates. A scaffold whose first check is red teaches the user that red is normal,
 so "a fresh tree passes its own gates" is the definition of done here.
 
-Verify all three tiers when a change touches `template/core/`, since `governed`
-and `agentic` compose on top of it:
+`bin/skeletor-verify` is that procedure, executable. It generates every tier
+against every language — a placeholder that only appears in the `node` overlay
+is a `render()` failure a user would otherwise find first — and runs the unit
+suite, `check docs`, `check merge-drivers` and a `--help` group-registration
+check against each Python tree. It reads its tier and language lists out of
+`bin/skeletor-new`, so a tier added there is verified by existing.
 
-```bash
-for t in core governed agentic; do
-  bin/skeletor-new /tmp/probe-$t --name P --cli p --tier $t --tagline x --force
-done
-```
+Always run all tiers when a change touches `template/core/`, since `governed`
+and `agentic` compose on top of it. That is the default; `--tier` is for
+narrowing a debug loop, not for a final check.
+
+**Pins are reported, never bumped automatically.** `bin/skeletor-check-pins`
+discovers every pinned version by pattern and asks the registries what is
+current; `.github/workflows/pins.yml` puts the result in one issue, weekly.
+Bumping is a hand edit followed by `bin/skeletor-verify`, because a bump changes
+what `black` does to a generated tree, and because `pyright` is pinned in three
+places — a bot that bumps one of them produces a tree whose own
+`test_lint_tool_parity.py` is red on arrival, which this repo treats as the one
+unacceptable outcome. Deliberate exceptions go in `.github/pin-allowlist.yaml`
+with a reason.
 
 ---
 

@@ -1,0 +1,353 @@
+#!/usr/bin/env python3
+"""Report how far behind every version this repository pins its users to.
+
+    bin/skeletor-check-pins                  # table
+    bin/skeletor-check-pins --markdown       # issue body
+    bin/skeletor-check-pins --fail-on-stale  # exit 1 if anything non-allowlisted is behind
+
+Every pin under `template/` is a version *somebody else's* new repository starts
+life on. A pin nobody looks at ages silently, and it ages for every project
+scaffolded after it goes stale — which is why this reports on the template's
+pins rather than on skeletor's own dependencies (it has none).
+
+**This reports; it does not bump.** A bump here changes what `black` does to a
+generated tree, or what CI installs, and the only thing that can tell you it was
+safe is `bin/skeletor-verify` — three tiers generated and run against their own
+gates. An auto-bumping bot would open a PR that skeletor's own tests cannot
+judge: `template/core/tests/test_lint_tool_parity.py` fails when the three
+places pyright is written disagree, and that test runs *inside a generated
+tree*, not here. So: read the report, bump by hand, verify, commit.
+
+Nothing below holds a list of what to check. Pins are discovered by pattern —
+a `rev:` under a pre-commit repo, a `==` in requirements, a `uses: …@`, a
+devDependency — so a pin added to a new template file is checked by existing.
+Deliberate exceptions live in `.github/pin-allowlist.yaml` with a reason.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+SKELETOR = Path(__file__).resolve().parents[1]
+ALLOWLIST = SKELETOR / ".github" / "pin-allowlist.yaml"
+
+#: Where pins live. `.github/` is included so skeletor's own workflows are held
+#: to the rule they are here to enforce.
+SEARCH_ROOTS = ["template", ".github", "bin"]
+
+TIMEOUT_S = 15
+
+
+@dataclass
+class Pin:
+    ecosystem: str          # pypi | npm | github | python
+    name: str
+    version: str
+    where: List[str] = field(default_factory=list)
+    #: How many components of the version this pin actually fixes. A `^9.0.0`
+    #: range floats every minor and patch under 10, so only its major is a pin;
+    #: reporting `^3.0.0` as behind `3.9.6` is reporting a version the range
+    #: already allows, and a report full of those stops being read.
+    precision: int = 0
+
+    @property
+    def key(self) -> str:
+        return f"{self.ecosystem}:{self.name}"
+
+
+@dataclass
+class Finding:
+    pin: Pin
+    latest: Optional[str]
+    status: str             # current | behind | disagrees | unknown | allowlisted
+    note: str = ""
+
+
+# ── discovery ────────────────────────────────────────────────────────────────
+
+def _files() -> List[Path]:
+    out = []
+    for root in SEARCH_ROOTS:
+        base = SKELETOR / root
+        if base.is_dir():
+            out += [p for p in base.rglob("*") if p.is_file() and "__pycache__" not in p.parts]
+        elif base.is_file():
+            out.append(base)
+    return out
+
+
+def discover() -> Dict[str, Pin]:
+    """Every pinned version in the repo, keyed by ecosystem:name.
+
+    A pin recorded in several files keeps every location: two files that pin the
+    same tool to *different* versions is a finding in its own right, and the one
+    that is wrong is the one nobody is reading.
+    """
+    pins: Dict[str, List[Pin]] = defaultdict(list)
+
+    def add(ecosystem: str, name: str, version: str, path: Path, line: int, precision: int = 0) -> None:
+        where = f"{path.relative_to(SKELETOR)}:{line}"
+        clean = version.lstrip("v")
+        pins[f"{ecosystem}:{name}"].append(
+            Pin(ecosystem, name, clean, [where], precision or len(re.findall(r"\d+", clean)))
+        )
+
+    for path in _files():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        lines = text.splitlines()
+
+        # pre-commit: `- repo: https://github.com/OWNER/REPO` … `rev: X`
+        for match in re.finditer(
+            r"-\s+repo:\s+https://github\.com/([\w.-]+/[\w.-]+)\s*\n\s*rev:\s*(\S+)", text
+        ):
+            line = text[: match.start()].count("\n") + 1
+            add("github", match.group(1).removesuffix(".git"), match.group(2), path, line)
+
+        # node hooks and package.json: `'pyright@1.1.409'`, `"eslint": "^9.0.0"`
+        for index, line in enumerate(lines, start=1):
+            for match in re.finditer(r"['\"]([@\w./-]+)@(\d[\w.]*)['\"]", line):
+                add("npm", match.group(1), match.group(2), path, index)
+            if path.name == "package.json":
+                for match in re.finditer(r'"([@\w./-]+)":\s*"([\^~]?)(\d[\w.]*)"', line):
+                    ranged = {"^": 1, "~": 2}.get(match.group(2), 0)
+                    add("npm", match.group(1), match.group(3), path, index, ranged)
+            # requirements: exact pins only — a `>=` floor does not go stale the
+            # same way, and reporting floors buries the pins that do.
+            if match := re.match(r"^([A-Za-z0-9_.-]+)==([\d.]+)", line.strip()):
+                if path.name.endswith(".txt"):
+                    add("pypi", match.group(1), match.group(2), path, index)
+            # CI installs the same tools by hand: `pip install pyright==1.1.409`
+            for match in re.finditer(r"pip install\s+([A-Za-z0-9_.-]+)==([\d.]+)", line):
+                add("pypi", match.group(1), match.group(2), path, index)
+            # workflow steps. Restricted to YAML because the same string in
+            # prose or in a comment is documentation, not a pin — this script
+            # found its own comment on the first run.
+            if path.suffix not in (".yml", ".yaml"):
+                pass
+            elif match := re.search(r"uses:\s+([\w.-]+/[\w.-]+)@(\S+)", line):
+                add("github", match.group(1), match.group(2), path, index)
+            # the Python a scaffold defaults to
+            if match := re.search(r'"--python",\s*default="([\d.]+)"', line):
+                add("python", "scaffold default", match.group(1), path, index)
+
+    merged: Dict[str, Pin] = {}
+    for key, found in pins.items():
+        head = found[0]
+        merged[key] = Pin(
+            head.ecosystem,
+            head.name,
+            head.version,
+            sorted({w for p in found for w in p.where}),
+            min(p.precision for p in found),
+        )
+        merged[key].versions = sorted({p.version for p in found})  # type: ignore[attr-defined]
+    return merged
+
+
+# ── registries ───────────────────────────────────────────────────────────────
+
+def _get(url: str) -> Optional[dict]:
+    request = urllib.request.Request(url, headers={"User-Agent": "skeletor-check-pins"})
+    if url.startswith("https://api.github.com/") and (token := os.environ.get("GITHUB_TOKEN")):
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        return None
+
+
+def latest_version(pin: Pin) -> Tuple[Optional[str], str]:
+    """(latest version, note). None means the lookup failed — never 'up to date'."""
+    if pin.ecosystem == "pypi":
+        data = _get(f"https://pypi.org/pypi/{pin.name}/json")
+        return (data["info"]["version"], "") if data else (None, "pypi lookup failed")
+
+    if pin.ecosystem == "npm":
+        data = _get(f"https://registry.npmjs.org/{pin.name}/latest")
+        return (data["version"], "") if data else (None, "npm lookup failed")
+
+    if pin.ecosystem == "github":
+        data = _get(f"https://api.github.com/repos/{pin.name}/releases/latest")
+        if data and data.get("tag_name") and _prerelease(data["tag_name"]):
+            # `releases/latest` skips releases *flagged* prerelease; it cannot
+            # know about a `9.0.0b5` that nobody flagged. Walk back to the
+            # newest stable rather than telling people to pin a beta.
+            data = next(
+                (r for r in (_get(f"https://api.github.com/repos/{pin.name}/releases?per_page=30") or [])
+                 if not r.get("prerelease") and not _prerelease(r.get("tag_name", ""))),
+                None,
+            )
+        if data and data.get("tag_name"):
+            published = (data.get("published_at") or "")[:10]
+            return data["tag_name"].lstrip("v"), f"released {published}" if published else ""
+        tags = _get(f"https://api.github.com/repos/{pin.name}/tags?per_page=1")
+        if tags:
+            return tags[0]["name"].lstrip("v"), "no releases; newest tag"
+        return None, "github lookup failed"
+
+    if pin.ecosystem == "python":
+        # endoflife.date is the only machine-readable source for CPython support
+        # windows. The question here is not "is 3.12 the newest" — a default
+        # should lag the newest — it is "is 3.12 still supported".
+        cycles = _get("https://endoflife.date/api/python.json")
+        if not cycles:
+            return None, "endoflife.date lookup failed"
+        newest = cycles[0]["cycle"]
+        for cycle in cycles:
+            if cycle["cycle"] == pin.version:
+                eol = cycle.get("eol")
+                if isinstance(eol, str) and eol < datetime.now(timezone.utc).date().isoformat():
+                    return newest, f"{pin.version} reached EOL {eol}"
+                return pin.version, f"supported until {eol}; newest is {newest}"
+        return newest, f"{pin.version} is not a listed cycle"
+
+    return None, "unknown ecosystem"
+
+
+def _prerelease(tag: str) -> bool:
+    return bool(re.search(r"(?:^|[.\d])(?:a|b|rc|alpha|beta|dev|pre)\d*$", tag.lower()))
+
+
+def _tuple(version: str) -> Tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", version)) or (0,)
+
+
+def compare(pin: Pin, latest: str) -> bool:
+    """True if the pin is behind, compared at the precision the pin fixes.
+
+    `actions/checkout@v4` pins a major only; against a latest of `4.2.2` that is
+    current, and reporting it as behind trains people to ignore the report.
+    """
+    depth = pin.precision or len(re.findall(r"\d+", pin.version))
+    return _tuple(latest)[:depth] > _tuple(pin.version)[:depth]
+
+
+# ── allowlist ────────────────────────────────────────────────────────────────
+
+def allowlisted() -> Dict[str, str]:
+    """Pins deliberately left behind, with their reasons."""
+    if not ALLOWLIST.exists():
+        return {}
+    out = {}
+    for line in ALLOWLIST.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, _, reason = line.partition(":")
+        if reason.strip():
+            out[key.strip()] = reason.strip().strip("\"'")
+    return out
+
+
+# ── report ───────────────────────────────────────────────────────────────────
+
+def evaluate() -> List[Finding]:
+    exempt = allowlisted()
+    findings = []
+    for key, pin in sorted(discover().items()):
+        versions = getattr(pin, "versions", [pin.version])
+        if len(versions) > 1:
+            findings.append(Finding(pin, None, "disagrees", f"pinned to {', '.join(versions)} in different files"))
+            continue
+        latest, note = latest_version(pin)
+        if latest is None:
+            findings.append(Finding(pin, None, "unknown", note))
+        elif compare(pin, latest):
+            status = "allowlisted" if key in exempt else "behind"
+            findings.append(Finding(pin, latest, status, exempt.get(key, note)))
+        else:
+            findings.append(Finding(pin, latest, "current", note))
+    order = {"disagrees": 0, "behind": 1, "unknown": 2, "allowlisted": 3, "current": 4}
+    return sorted(findings, key=lambda f: (order[f.status], f.pin.key))
+
+
+MARKS = {"current": "✅", "behind": "⬆️", "disagrees": "❌", "unknown": "❔", "allowlisted": "🅰️"}
+
+
+def render(findings: List[Finding], markdown: bool) -> str:
+    lines = []
+    if markdown:
+        lines += [
+            "| | Pin | Pinned | Latest | Note |",
+            "| - | --- | ------ | ------ | ---- |",
+        ]
+        for f in findings:
+            where = "<br>".join(f"`{w}`" for w in f.pin.where)
+            lines.append(
+                f"| {MARKS[f.status]} | **{f.pin.key}**<br>{where} | `{f.pin.version}` | "
+                f"`{f.latest or '?'}` | {f.note} |"
+            )
+        lines += [
+            "",
+            "Bump by hand, then `bin/skeletor-verify` before committing — a pin written in "
+            "more than one place fails the generated tree's own parity test, not this report.",
+            "",
+            "Deliberately staying behind? Add the key to `.github/pin-allowlist.yaml` with a reason.",
+        ]
+    else:
+        width = max((len(f.pin.key) for f in findings), default=10)
+        for f in findings:
+            lines.append(
+                f"{MARKS[f.status]} {f.pin.key:<{width}}  {f.pin.version:>10} → {f.latest or '?':<10}  {f.note}"
+            )
+        lines.append("")
+        counts = defaultdict(int)
+        for f in findings:
+            counts[f.status] += 1
+        lines.append("  ".join(f"{MARKS[s]} {n} {s}" for s, n in sorted(counts.items())))
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--markdown", action="store_true", help="emit a markdown table (issue body)")
+    parser.add_argument("--json", action="store_true", help="emit machine-readable findings")
+    parser.add_argument("--fail-on-stale", action="store_true", help="exit 1 if anything is behind or disagrees")
+    args = parser.parse_args()
+
+    findings = evaluate()
+
+    if args.json:
+        print(json.dumps(
+            [
+                {
+                    "key": f.pin.key,
+                    "pinned": f.pin.version,
+                    "latest": f.latest,
+                    "status": f.status,
+                    "note": f.note,
+                    "where": f.pin.where,
+                }
+                for f in findings
+            ],
+            indent=2,
+        ))
+    else:
+        print(render(findings, args.markdown))
+
+    if args.fail_on_stale:
+        # An unreachable registry is not evidence of staleness. Failing on it
+        # turns a network blip into a red gate, and a gate that goes red for
+        # reasons unrelated to the repo is a gate people start ignoring.
+        blocking = [f for f in findings if f.status in ("behind", "disagrees")]
+        return 1 if blocking else 0
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

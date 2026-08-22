@@ -1,0 +1,11 @@
+# Pins we are deliberately not bumping, and why.
+#
+# `bin/skeletor-check-pins` reports every version this repo pins its users to.
+# A pin listed here still appears in the report, marked as a decision rather
+# than as work — which is the point: the reason has to survive the person who
+# made it, or the next reader bumps it and finds out why the hard way.
+#
+# Format:  <ecosystem>:<name>: reason
+# Example: pypi:black: 26.x reformats decorators; the ratchet baselines assume 25.x
+#
+# Empty on purpose. Add an entry when you decide to stay behind, not before.
