@@ -108,7 +108,10 @@ def discover() -> Dict[str, Pin]:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        lines = text.splitlines()
+        # A commented-out pin is not in effect, and an example version inside a
+        # comment is documentation. This script's own comments were the second
+        # thing it reported as a finding.
+        lines = ["" if line.lstrip().startswith("#") else line for line in text.splitlines()]
 
         # pre-commit: `- repo: https://github.com/OWNER/REPO` … `rev: X`
         for match in re.finditer(
@@ -248,9 +251,10 @@ def allowlisted() -> Dict[str, str]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        key, _, reason = line.partition(":")
-        if reason.strip():
-            out[key.strip()] = reason.strip().strip("\"'")
+        # Split on the first `: ` rather than the first `:` — the key is
+        # `ecosystem:name` and carries a colon of its own.
+        if match := re.match(r"^(\S+):\s+(.+)$", line):
+            out[match.group(1)] = match.group(2).strip().strip("\"'")
     return out
 
 

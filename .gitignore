@@ -3,3 +3,8 @@ __pycache__/
 .venv/
 tmp/
 .DS_Store
+
+# Claude Code local state — per-machine, and this repository is public.
+# settings.local.json is a personal permission set; worktrees are large.
+.claude/settings.local.json
+.claude/worktrees/

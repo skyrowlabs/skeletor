@@ -43,12 +43,12 @@ jobs:
     steps:
       # Tags are needed by the report-anchor check: a report's window is bounded
       # by release tags, and without them it can only run its tag-free half.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '{{PY}}'
 

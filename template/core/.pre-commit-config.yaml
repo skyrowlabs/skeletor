@@ -49,7 +49,7 @@ repos:
         types: [python]
 
   - repo: https://github.com/psf/black
-    rev: 26.1.0
+    rev: 26.5.1
     hooks:
       - id: black
         args: ['--line-length={{LINE_LENGTH}}']
@@ -68,7 +68,7 @@ repos:
         name: Type check with Pyright (whole project)
         language: node
         entry: pyright --project pyrightconfig.json
-        additional_dependencies: ['pyright@1.1.409']
+        additional_dependencies: ['pyright@1.1.411']
         # Whole-project on purpose, and so pass_filenames is false: the check has
         # no per-file scoping, which means ONE stale error anywhere blocks every
         # commit repo-wide. That is the intended pressure — fix errors when you

@@ -18,8 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.pull_request.draft == false && github.event.action == 'opened'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/github-script@v7
+      - uses: actions/checkout@v7
+      - uses: actions/github-script@v9
         with:
           script: |
             const decide = require('./.github/scripts/docs-only.cjs');

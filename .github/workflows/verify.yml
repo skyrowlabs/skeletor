@@ -28,7 +28,7 @@ jobs:
     name: every tier passes its own gates
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Verify on the Python a scaffold actually defaults to, read from the
       # scaffolder rather than repeated here: a hard-coded version would be a
@@ -39,7 +39,7 @@ jobs:
           version=$(sed -n 's/.*"--python", default="\([0-9.]*\)".*/\1/p' bin/skeletor-new)
           echo "version=${version:?could not read the scaffold default from bin/skeletor-new}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.python.outputs.version }}
 

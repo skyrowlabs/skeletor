@@ -9,3 +9,5 @@
 # Example: pypi:black: 26.x reformats decorators; the ratchet baselines assume 25.x
 #
 # Empty on purpose. Add an entry when you decide to stay behind, not before.
+
+npm:pyright: capped by PyPI. The node hook and scripts/requirements.txt must hold the same version — tests/test_lint_tool_parity.py in every generated tree fails when they do not — and PyPI's newest pyright is 1.1.411 while npm is at 1.1.413. Bump when PyPI catches up.
