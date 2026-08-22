@@ -44,10 +44,10 @@ STALE_AFTER_S = 6 * 60 * 60
 
 @dataclass
 class Hold:
-    kind: str          # "suite" | "edit"
+    kind: str  # "suite" | "edit"
     pid: int
     branch: str
-    owner: str         # what took it — a job name, a command, a session id
+    owner: str  # what took it — a job name, a command, a session id
     started: float
 
     @property

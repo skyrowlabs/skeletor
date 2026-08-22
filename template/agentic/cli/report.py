@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib
 import subprocess
 import sys
-from pathlib import Path
 
 import click
 
@@ -51,6 +50,7 @@ def _register() -> None:
     from scripts.reporting.jobs import JOBS
 
     for job in JOBS:
+
         def make(key: str, cadence: str, writes: str):
             @click.command(name=key, help=f"{cadence} — writes {writes}")
             def command() -> None:

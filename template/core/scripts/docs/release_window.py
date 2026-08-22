@@ -104,7 +104,11 @@ def window(release: Optional[str] = None) -> Dict[str, object]:
 
 
 def _prose(win: Dict[str, object]) -> str:
-    label = win["release"] if win["status"] == "released" else f"unreleased (since {win['previous_release'] or 'the first commit'})"
+    label = (
+        win["release"]
+        if win["status"] == "released"
+        else f"unreleased (since {win['previous_release'] or 'the first commit'})"
+    )
     return f"> **Window:** {label} — `{win['commit_range']}` ({win['commits']} commits, at `{win['head_sha']}`)"
 
 

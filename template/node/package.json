@@ -25,7 +25,13 @@
     "proseWrap": "preserve",
     "endOfLine": "lf",
     "overrides": [
-      { "files": "*.md", "options": { "proseWrap": "preserve", "singleQuote": false } }
+      {
+        "files": "*.md",
+        "options": {
+          "proseWrap": "preserve",
+          "singleQuote": false
+        }
+      }
     ]
   }
 }

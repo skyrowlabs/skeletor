@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -56,7 +55,9 @@ def main() -> int:
             return 1
         return 0
 
-    subprocess.run(["git", "config", "--local", f"{DRIVER}.name", "regenerate generated docs"], cwd=str(REPO_ROOT), check=True)
+    subprocess.run(
+        ["git", "config", "--local", f"{DRIVER}.name", "regenerate generated docs"], cwd=str(REPO_ROOT), check=True
+    )
     subprocess.run(["git", "config", "--local", f"{DRIVER}.driver", COMMAND], cwd=str(REPO_ROOT), check=True)
     print("✅ installed the 'regen-docs' merge driver")
     print("   After any merge that touched docs/TODO/ or docs/implementations/: `{{CLI}} docs index`")

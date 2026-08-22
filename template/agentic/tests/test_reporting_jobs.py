@@ -42,11 +42,7 @@ def test_every_subcommand_has_a_registry_entry():
 
 
 def test_every_job_module_exists():
-    missing = [
-        job.key
-        for job in JOBS
-        if not (REPO_ROOT / "scripts" / "reporting" / f"{job.module}.py").exists()
-    ]
+    missing = [job.key for job in JOBS if not (REPO_ROOT / "scripts" / "reporting" / f"{job.module}.py").exists()]
     assert not missing, f"Jobs whose module file is missing: {missing}"
 
 
@@ -54,9 +50,7 @@ def test_every_job_has_a_prompt_named_after_its_module():
     """The prompt's filename is how the fix policy is resolved. A prompt named
     anything else is a job whose blast radius nothing can look up."""
     missing = [
-        job.key
-        for job in JOBS
-        if not (REPO_ROOT / "scripts" / "reporting" / "prompts" / f"{job.module}.md").exists()
+        job.key for job in JOBS if not (REPO_ROOT / "scripts" / "reporting" / "prompts" / f"{job.module}.md").exists()
     ]
     assert not missing, f"Jobs with no prompts/<module>.md: {missing}"
 

@@ -27,7 +27,6 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -88,8 +87,13 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
         print(f"⏸️  {job.key} declined: {reason}")
         run_ledger.record(
             run_ledger.Run(
-                job=job.key, outcome="declined", started=started, finished=run_ledger.now(),
-                branch=branch, agent_ran=False, reason=reason,
+                job=job.key,
+                outcome="declined",
+                started=started,
+                finished=run_ledger.now(),
+                branch=branch,
+                agent_ran=False,
+                reason=reason,
             )
         )
         # Up, not down: it executed correctly and chose not to answer.
@@ -136,15 +140,23 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
     try:
         result = subprocess.run(
             ["claude", "-p", prompt, "--permission-mode", "acceptEdits"],
-            cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=AGENT_TIMEOUT_S,
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=AGENT_TIMEOUT_S,
         )
     except FileNotFoundError:
         return decline("the `claude` CLI is not on PATH (cron does not give you your login PATH)")
     except subprocess.TimeoutExpired:
         run_ledger.record(
             run_ledger.Run(
-                job=job.key, outcome="failed", started=started, finished=run_ledger.now(),
-                branch=branch, agent_ran=True, reason=f"agent exceeded {AGENT_TIMEOUT_S}s and was killed",
+                job=job.key,
+                outcome="failed",
+                started=started,
+                finished=run_ledger.now(),
+                branch=branch,
+                agent_ran=True,
+                reason=f"agent exceeded {AGENT_TIMEOUT_S}s and was killed",
             )
         )
         heartbeat(os.environ.get(job.heartbeat_var or ""), "down")

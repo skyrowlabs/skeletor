@@ -61,9 +61,10 @@ def test_ready_means_an_agent_can_actually_take_it(tank):
         human_tasks = [t for t in plan.open_tasks(include_exempt=True) if "(~operator)" in t]
         if human_tasks:
             offenders[plan.slug] = human_tasks
-    assert not offenders, (
-        "These plans are `ready` but still carry operator-only tasks — mark them `blocked`:\n"
-        + "\n".join(f"  {slug}: {tasks}" for slug, tasks in offenders.items())
+    assert (
+        not offenders
+    ), "These plans are `ready` but still carry operator-only tasks — mark them `blocked`:\n" + "\n".join(
+        f"  {slug}: {tasks}" for slug, tasks in offenders.items()
     )
 
 

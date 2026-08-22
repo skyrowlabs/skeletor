@@ -105,7 +105,13 @@ def _emit(value: Any) -> str:
         return "[" + ", ".join(str(v) for v in value) + "]"
     text = "" if value is None else str(value)
     # Quote anything a reader could mistake for structure or another type.
-    if text == "" or text[0] in "[{#\"'" or ":" in text or text.lower() in _TRUE | _FALSE or re.fullmatch(r"-?\d+", text):
+    if (
+        text == ""
+        or text[0] in "[{#\"'"
+        or ":" in text
+        or text.lower() in _TRUE | _FALSE
+        or re.fullmatch(r"-?\d+", text)
+    ):
         return '"' + text.replace('"', '\\"') + '"'
     return text
 

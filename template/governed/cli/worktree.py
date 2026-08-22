@@ -17,7 +17,7 @@ from pathlib import Path
 
 import click
 
-from cli.helpers import PROJECT_ROOT, fail, git, ok, run, warn
+from cli.helpers import PROJECT_ROOT, fail, git, ok, run
 
 
 @click.group()
@@ -72,7 +72,9 @@ def drop(path: str, force: bool) -> None:
         fail(f"no such worktree: {target}")
         sys.exit(1)
 
-    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=str(target), capture_output=True, text=True).stdout.strip()
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=str(target), capture_output=True, text=True
+    ).stdout.strip()
     if dirty and not force:
         fail(f"{target} has {len(dirty.splitlines())} uncommitted change(s) — refusing")
         print("   That work belongs to somebody. Commit it, or pass --force if you are sure.")

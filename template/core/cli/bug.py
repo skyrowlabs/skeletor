@@ -13,13 +13,11 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
 import click
 
-from cli.helpers import PROJECT_ROOT, current_branch, fail, git, ok, warn
+from cli.helpers import PROJECT_ROOT, current_branch, git, ok, warn
 
 QUEUE = PROJECT_ROOT / "tmp" / "bugs"
 
@@ -64,7 +62,9 @@ def bug(summary: str, finding: str, reproduce: str, scope: str, acceptance: str,
             ok(f"captured: {result.stdout.strip()}")
             print("   Mention this in your response so the user can kill it if they disagree.")
             return
-        warn(f"gh failed ({result.stderr.strip().splitlines()[-1] if result.stderr.strip() else 'unknown'}) — falling back to a local capture")
+        warn(
+            f"gh failed ({result.stderr.strip().splitlines()[-1] if result.stderr.strip() else 'unknown'}) — falling back to a local capture"
+        )
 
     QUEUE.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

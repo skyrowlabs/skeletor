@@ -14,13 +14,11 @@ means your commit would land somewhere nobody expects.
 
 from __future__ import annotations
 
-import subprocess
 import sys
-from pathlib import Path
 
 import click
 
-from cli.helpers import PROJECT_ROOT, current_branch, fail, ok, run, warn
+from cli.helpers import PROJECT_ROOT, current_branch, fail, ok, run
 
 
 def _staged_check(paths: list, message: str) -> int:
@@ -46,7 +44,9 @@ def _staged_check(paths: list, message: str) -> int:
     msg_file = PROJECT_ROOT / "tmp" / ".commit-msg"
     msg_file.parent.mkdir(parents=True, exist_ok=True)
     msg_file.write_text(message, encoding="utf-8")
-    results.append(("commit message", run(["bash", "scripts/hooks/conventional-commit-check.sh", str(msg_file)]).returncode))
+    results.append(
+        ("commit message", run(["bash", "scripts/hooks/conventional-commit-check.sh", str(msg_file)]).returncode)
+    )
 
     print("\n" + "─" * 60)
     for name, code in results:

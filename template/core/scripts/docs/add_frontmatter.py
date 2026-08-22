@@ -47,7 +47,11 @@ def _derive(plan: plans.Plan, archive: bool) -> dict:
     data["priority"] = plan.priority
     # Explicit-only fields: written through when the doc declares one, removed
     # when it does not, so the JSON never keeps a value the doc has dropped.
-    for key, value in (("blocked_on", plan.blocked_on), ("queue_order", plan.queue_order), ("review_pr", plan.review_pr)):
+    for key, value in (
+        ("blocked_on", plan.blocked_on),
+        ("queue_order", plan.queue_order),
+        ("review_pr", plan.review_pr),
+    ):
         if value is None:
             data.pop(key, None)
         else:

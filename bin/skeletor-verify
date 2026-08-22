@@ -38,15 +38,24 @@ from typing import List, Optional, Tuple
 SKELETOR = Path(__file__).resolve().parents[1]
 SCAFFOLDER = SKELETOR / "bin" / "skeletor-new"
 
-#: Everything the generated tree needs to run its unit tests and docs checks.
-#: Deliberately not `scripts/requirements.txt`: that pulls pyright (a node
-#: toolchain) and pre-commit, neither of which any gate below exercises, and a
-#: verify step slow enough to skip is a verify step that gets skipped.
+#: What the toolchain needs beyond the template's own exact pins.
 #:
 #: `pytest-timeout` is here not because a gate calls it but because the tree's
 #: pytest config *sets* `timeout`. Without the plugin pytest warns and ignores
 #: it, so the suite would be verified under a config the tree does not have.
-VENV_PACKAGES = ["pytest", "pytest-timeout", "click"]
+EXTRA_PACKAGES = ["pytest", "pytest-timeout", "click"]
+
+#: Pinned in requirements but not installable here: pyright is a node package
+#: wearing a Python name, and installing it pulls a toolchain for one gate.
+#: `{{CLI}} check lint` in a real tree runs it; this does not.
+UNINSTALLABLE = {"pyright"}
+
+#: Lint hooks whose args are read out of the generated tree's own
+#: `.pre-commit-config.yaml` rather than repeated here. Copying the args would
+#: mean verifying against a config the tree does not have, which is the exact
+#: failure this file exists to catch — and it would go wrong silently, since
+#: both copies would still be green.
+LINT_HOOKS = ["black", "isort", "flake8"]
 
 CLI_NAME = "probe"
 
@@ -86,12 +95,30 @@ def run(cmd: List[str], cwd: Path, env_extra: Optional[dict] = None) -> Tuple[in
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
+def toolchain() -> List[str]:
+    """The template's own exact pins, so the gates run the versions it ships.
+
+    Read from `template/core/scripts/requirements.txt` rather than listed here:
+    a bump has to reach the verifier, and a second list is a second thing to
+    forget.
+    """
+    requirements = SKELETOR / "template" / "core" / "scripts" / "requirements.txt"
+    pinned = [
+        line.strip()
+        for line in requirements.read_text(encoding="utf-8").splitlines()
+        if re.match(r"^[A-Za-z0-9_.-]+==", line.strip())
+        and line.split("==")[0].strip() not in UNINSTALLABLE
+    ]
+    return pinned + EXTRA_PACKAGES
+
+
 def make_venv(workdir: Path, quiet: bool) -> Path:
     """One venv, shared by every tree.
 
     The packages are tree-independent, and a venv per tier is three pip installs
     to learn the same thing once.
     """
+    VENV_PACKAGES = toolchain()
     venv = workdir / ".venv-shared"
     if not quiet:
         print(f"   creating shared venv ({', '.join(VENV_PACKAGES)}) …")
@@ -167,6 +194,59 @@ def check_groups_register(tree: Path) -> Result:
     return Result(f"cli --help registers {len(expected)} groups", ok, time.time() - started, detail)
 
 
+def hook_args(tree: Path, hook: str) -> List[str]:
+    """The args the tree's own pre-commit config passes to a lint hook."""
+    config = (tree / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    match = re.search(rf"- id: {re.escape(hook)}\b[^\n]*\n(?:\s+[^\n]*\n)*?\s+args: \[([^\]]*)\]", config)
+    if not match:
+        return []
+    # Split on the YAML list's quotes, not on commas: `--select=E9,F63,F7` is
+    # one argument that happens to contain commas, and splitting it produces a
+    # flake8 invocation that fails in a way that looks like a broken gate.
+    return [single or double for single, double in re.findall(r"'([^']*)'|\"([^\"]*)\"", match.group(1))]
+
+
+def lint_gates(tree: Path, venv_python: Path) -> List[Result]:
+    """The formatters and the linter, run exactly as the tree's hooks run them.
+
+    This is the gate that was missing when a scaffold shipped 19 files black
+    would rewrite and 20 unused imports flake8 rejects: `pre-commit run
+    --all-files`, the first command the README tells a new user to run, was red
+    on a tree nobody had touched.
+    """
+    results = []
+    for hook in LINT_HOOKS:
+        args = hook_args(tree, hook)
+        checkish = ["--check-only"] if hook == "isort" else ["--check"] if hook == "black" else []
+        started = time.time()
+        code, output = run([str(venv_python), "-m", hook, *args, *checkish, "."], cwd=tree)
+        results.append(Result(f"{hook} {' '.join(args)}", code == 0, time.time() - started, output))
+    return results
+
+
+def node_gates(tree: Path) -> List[Result]:
+    """eslint and prettier, once, on the one tree that has a package.json.
+
+    The node overlay is identical across tiers, so this is one `npm install`
+    rather than one per tier — and it is skipped loudly, never silently, when
+    npm is absent.
+    """
+    if not shutil.which("npm"):
+        return [Result("node gates", True, 0.0, "skipped: npm not on PATH")]
+
+    started = time.time()
+    code, output = run(["npm", "install", "--no-audit", "--no-fund", "--silent"], cwd=tree)
+    if code != 0:
+        return [Result("npm install", False, time.time() - started, output)]
+    results = [Result("npm install", True, time.time() - started)]
+
+    for script in ("lint:check", "format:check"):
+        started = time.time()
+        code, output = run(["npm", "run", "--silent", script], cwd=tree)
+        results.append(Result(f"npm run {script}", code == 0, time.time() - started, output))
+    return results
+
+
 def gates(tree: Path, venv_python: Path) -> List[Result]:
     """The tree's own checks, run the way its user would run them."""
     results = []
@@ -185,6 +265,7 @@ def gates(tree: Path, venv_python: Path) -> List[Result]:
         results.append(Result(f"{CLI_NAME} {' '.join(command)}", code == 0, time.time() - started, output))
 
     results.append(check_groups_register(tree))
+    results += lint_gates(tree, venv_python)
     return results
 
 
@@ -227,6 +308,16 @@ def main() -> int:
                     results.append(gate)
                 if not args.quiet:
                     print(f"   {tier}/{language} … {sum(1 for r in results if r.ok)} checks green so far")
+
+        # The fullest tier, not the alphabetically last one — sorted(TIERS)
+        # puts `governed` after `agentic`, which would have quietly gated the
+        # wrong tree.
+        fullest = max(tiers, key=lambda t: len(scaffolder.TIERS[t]))
+        node_tree = workdir / f"{fullest}-both"
+        if node_tree.exists():
+            for gate in node_gates(node_tree):
+                gate.label = f"{fullest}/both: {gate.label}"
+                results.append(gate)
     finally:
         if not args.keep:
             shutil.rmtree(workdir, ignore_errors=True)

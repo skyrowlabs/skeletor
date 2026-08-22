@@ -26,7 +26,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -133,7 +132,11 @@ def main() -> int:
     args = parser.parse_args()
 
     dead_paths, dead_anchors = scan()
-    baseline = json.loads(BASELINE.read_text(encoding="utf-8")) if BASELINE.exists() else {"max_broken": 0, "max_dead_anchors": 0}
+    baseline = (
+        json.loads(BASELINE.read_text(encoding="utf-8"))
+        if BASELINE.exists()
+        else {"max_broken": 0, "max_dead_anchors": 0}
+    )
 
     if args.update_baseline:
         BASELINE.write_text(
@@ -161,7 +164,7 @@ def main() -> int:
     ):
         if len(found) > ceiling:
             print(f"❌ {len(found)} {label} (ceiling {ceiling}) — repoint them, never delete:")
-            for line in found[: 40]:
+            for line in found[:40]:
                 print(f"   · {line}")
             if len(found) > 40:
                 print(f"   … and {len(found) - 40} more")

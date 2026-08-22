@@ -76,7 +76,9 @@ def coverage(worst: int) -> None:
     The list is the point: it tells you where a new test buys the most, which is
     a better question than "what is the number".
     """
-    code = run([sys.executable, "-m", "pytest", "tests/", "-m", "unit", "-q", "--cov", "--cov-report=term-missing"]).returncode
+    code = run(
+        [sys.executable, "-m", "pytest", "tests/", "-m", "unit", "-q", "--cov", "--cov-report=term-missing"]
+    ).returncode
     if code == 0:
         run([sys.executable, "scripts/check_coverage_budget.py"])
     sys.exit(code)

@@ -9,7 +9,6 @@ the code is.
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 import click
 
@@ -32,7 +31,9 @@ def lint() -> None:
 def _lint() -> int:
     results = []
     if (PROJECT_ROOT / ".flake8").exists():
-        results.append(("flake8 (errors)", run(["flake8", ".", "--select=E9,F63,F7,F82,F401", "--show-source"]).returncode))
+        results.append(
+            ("flake8 (errors)", run(["flake8", ".", "--select=E9,F63,F7,F82,F401", "--show-source"]).returncode)
+        )
         results.append(("isort", run(["isort", "--check-only", "--diff", "."]).returncode))
         results.append(("black", run(["black", "--check", "."]).returncode))
     if (PROJECT_ROOT / "pyrightconfig.json").exists():
@@ -61,7 +62,6 @@ def _docs() -> int:
             ("report anchors", script("scripts/docs/release_window.py", "--check")),
         ]
     )
-
 
 
 @check.command(name="doc-links")

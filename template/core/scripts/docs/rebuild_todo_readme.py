@@ -29,8 +29,16 @@ from scripts.docs.queue_order import UNORDERED, queue_position, run_order  # noq
 README_PATH = plans.TODO_DIR / "README.md"
 
 STATUS_HEADINGS = [
-    ("in-review", "🔎 Awaiting Your Review", "Implemented and out for review — read the PR, then file the plan (or send it back)."),
-    ("ready", "🚀 Ready for Agent", "Every decision made and the spec complete — ready to hand to an agent end to end."),
+    (
+        "in-review",
+        "🔎 Awaiting Your Review",
+        "Implemented and out for review — read the PR, then file the plan (or send it back).",
+    ),
+    (
+        "ready",
+        "🚀 Ready for Agent",
+        "Every decision made and the spec complete — ready to hand to an agent end to end.",
+    ),
     ("in-progress", "🟡 In Progress", "Actively being worked; partially shipped."),
     ("planned", "🔴 Planned", "Not started — intended future work."),
     ("blocked", "⛔ Blocked", "Startable or code-complete, gated on an external prerequisite."),

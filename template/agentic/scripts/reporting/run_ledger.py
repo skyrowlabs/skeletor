@@ -18,11 +18,10 @@ Stdlib only.
 from __future__ import annotations
 
 import json
-import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LEDGER = REPO_ROOT / "tmp" / "reporting" / "ledger.jsonl"
@@ -42,9 +41,9 @@ class Run:
     finished: str
     branch: str
     agent_ran: bool = False
-    committed: Optional[str] = None       # sha, if it wrote anything
+    committed: Optional[str] = None  # sha, if it wrote anything
     findings: int = 0
-    reason: str = ""                      # required for declined/failed
+    reason: str = ""  # required for declined/failed
 
     def validate(self) -> None:
         if self.outcome not in OUTCOMES:

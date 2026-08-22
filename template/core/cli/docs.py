@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import shutil
 import sys
-from pathlib import Path
 
 import click
 
@@ -168,7 +167,9 @@ def queue_order(slug: str, position: int) -> None:
     print("\nResulting run order:")
     from scripts.docs.queue_order import run_order
 
-    ready = sorted((p for p in plans.scan(TODO_DIR) if p.shelf_status == "ready"), key=lambda p: run_order(p.to_entry()))
+    ready = sorted(
+        (p for p in plans.scan(TODO_DIR) if p.shelf_status == "ready"), key=lambda p: run_order(p.to_entry())
+    )
     for i, plan in enumerate(ready, 1):
         pos = plan.queue_order if plan.queue_order is not None else "—"
         print(f"   {i}. [{pos}] {plan.slug} ({plan.priority})")
@@ -191,7 +192,9 @@ def status() -> None:
         if counts.get(status_name):
             print(f"   {status_name:<12} {counts[status_name]}")
 
-    ready = sorted((p for p in tank if p.shelf_status == "ready" and not p.auto_generated), key=lambda p: run_order(p.to_entry()))
+    ready = sorted(
+        (p for p in tank if p.shelf_status == "ready" and not p.auto_generated), key=lambda p: run_order(p.to_entry())
+    )
     if ready:
         print("\nReady queue (run order):")
         for i, plan in enumerate(ready[:10], 1):

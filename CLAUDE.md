@@ -61,10 +61,26 @@ so "a fresh tree passes its own gates" is the definition of done here.
 
 `bin/skeletor-verify` is that procedure, executable. It generates every tier
 against every language — a placeholder that only appears in the `node` overlay
-is a `render()` failure a user would otherwise find first — and runs the unit
-suite, `check docs`, `check merge-drivers` and a `--help` group-registration
-check against each Python tree. It reads its tier and language lists out of
-`bin/skeletor-new`, so a tier added there is verified by existing.
+is a `render()` failure a user would otherwise find first — and against each
+Python tree runs the unit suite, `check docs`, `check merge-drivers`, a
+`--help` group-registration check, and the lint hooks. eslint and prettier run
+once, on the fullest tier's `both` tree.
+
+Three things it reads rather than repeats: the tier and language lists come from
+`bin/skeletor-new`, the lint arguments from the generated tree's own
+`.pre-commit-config.yaml`, and the tool versions from
+`template/core/scripts/requirements.txt`. A copy of any of them would verify the
+template against a config the template does not have — and would stay green
+while doing it.
+
+The lint gates exist because their absence shipped: a scaffold once carried 19
+files `black` would rewrite, 20 imports `flake8` rejects, and markdown
+`prettier` re-pads. `pre-commit run --all-files` — the first command the README
+gives a new user — was red on a tree nobody had touched.
+
+`pyright` is the one hook not gated here: it is a node package wearing a Python
+name, and installing a JS toolchain to check types on a tree that has none is
+not worth the minute. `{{CLI}} check lint` runs it in a real project.
 
 Always run all tiers when a change touches `template/core/`, since `governed`
 and `agentic` compose on top of it. That is the default; `--tier` is for

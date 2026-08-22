@@ -38,7 +38,7 @@ Stdlib only — imported by host-side jobs that must not grow dependencies.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -96,15 +96,15 @@ FIX_POLICIES = {
 class Job:
     """One scheduled job."""
 
-    key: str                      # `{{CLI}} report <key>`
-    module: str                   # scripts/reporting/<module>.py
-    cadence: str                  # human-readable, for the docs table
-    cron: str                     # five cron fields
-    writes: str                   # what artifact it produces, or "—"
+    key: str  # `{{CLI}} report <key>`
+    module: str  # scripts/reporting/<module>.py
+    cadence: str  # human-readable, for the docs table
+    cron: str  # five cron fields
+    writes: str  # what artifact it produces, or "—"
     fix_policy: str = "none"
-    commits: bool = False         # does it touch the git tree?
-    first_week_only: bool = False # monthly jobs ride a weekly lane; see below
-    heartbeat_var: Optional[str] = None   # env var holding its dead-man-switch URL
+    commits: bool = False  # does it touch the git tree?
+    first_week_only: bool = False  # monthly jobs ride a weekly lane; see below
+    heartbeat_var: Optional[str] = None  # env var holding its dead-man-switch URL
 
     def command(self) -> str:
         return f"cd {CRON_CWD} && ./{{CLI}} report {self.key} >> {CRON_LOG} 2>&1"
