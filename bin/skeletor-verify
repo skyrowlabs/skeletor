@@ -267,11 +267,34 @@ def gates(tree: Path, venv_python: Path) -> List[Result]:
         code, output = run([f"./{CLI_NAME}", *command], cwd=tree)
         results.append(Result(f"{CLI_NAME} {' '.join(command)}", code == 0, time.time() - started, output))
 
+    results.append(check_upgrade_is_noop(tree))
     results.append(check_groups_register(tree))
     results.append(check_script_targets(tree))
     results.append(check_no_baked_paths(tree))
     results += lint_gates(tree, venv_python)
     return results
+
+
+def check_upgrade_is_noop(tree: Path) -> Result:
+    """`skeletor-upgrade` against the checkout that just generated the tree must
+    find nothing to do.
+
+    It is the cheapest possible test of `.skeletor.json`, and it fails on the
+    two things that actually break: the recorded arguments must round-trip
+    through `substitutions()` to the same values — `--slug`, `--cli` and
+    `--env-prefix` all default from the *target directory name*, and an upgrade
+    renders into a temporary directory with a different one — and the render
+    must be deterministic. A manifest that cannot reproduce its own tree makes
+    every later upgrade a diff against the wrong base, which is worse than no
+    upgrade at all because it looks like it worked.
+    """
+    started = time.time()
+    code, output = run(
+        [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--dry-run", "--from-dir", str(SKELETOR)],
+        cwd=tree,
+    )
+    passed = code == 0 and "already current" in output
+    return Result("skeletor-upgrade is a no-op on a fresh tree", passed, time.time() - started, output)
 
 
 def check_script_targets(tree: Path) -> Result:

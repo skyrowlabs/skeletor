@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+"""Carry a template change into a tree that was scaffolded from an older one.
+
+The problem this exists for is the multi-repo one: skeletor improves, and the
+twelve repositories generated from it do not. Re-running `skeletor-new --force`
+would overwrite the half of each tree that is the *user's* — the services table
+in `CLAUDE.md`, the real health probes in `cli/check.py` — so nobody runs it,
+and the improvement never lands anywhere.
+
+## How it decides
+
+Three texts per file, which is the classic three-way merge:
+
+* **base** — what skeletor rendered when this tree was scaffolded, reproduced
+  by checking out `skeletor_ref` from `.skeletor.json` and running *that*
+  version of the scaffolder with the arguments it recorded.
+* **theirs** — what is in the tree now.
+* **ours** — what skeletor renders today.
+
+From which:
+
+| base vs theirs | base vs ours | What happens                        |
+| -------------- | ------------ | ----------------------------------- |
+| same           | same         | nothing                             |
+| same           | changed      | applied — the user never touched it |
+| changed        | same         | left alone — only the user's edit   |
+| changed        | changed      | three-way merged, **if it is clean** |
+
+**A conflict is never written.** `git merge-file` can emit markers; this does
+not let it. On conflict the file is left exactly as it was and the template's
+own base→ours diff is written to `tmp/upgrade/`, because a conflict marker
+inside somebody's `CLAUDE.md` is a broken file that looks like a merge, and the
+tree it lands in is one nobody is watching.
+
+Nothing is committed, nothing is deleted, and a file the template dropped is
+reported rather than removed — the same posture as `bin/skeletor-check-pins`,
+which reports a bump and never makes one.
+
+## What it does not do
+
+There are no file hashes in `.skeletor.json`. A hash is a second copy of what a
+render already answers, and a manifest that can disagree with the template is
+worse than none. The cost is that this needs skeletor's git history; the
+benefit is that the manifest cannot go stale.
+
+Usage:
+    bin/skeletor-upgrade ../orders
+    bin/skeletor-upgrade ../orders --dry-run
+    bin/skeletor-upgrade ../orders --from-dir /path/to/another/skeletor
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+SKELETOR = Path(__file__).resolve().parents[1]
+MANIFEST_NAME = ".skeletor.json"
+
+#: Regenerated from their sources by `scripts/docs/regen.py`, and routed
+#: through a merge driver precisely because merging them is never correct. They
+#: are rebuilt at the end instead of being merged here.
+GENERATED = {
+    "docs/todo_index.json",
+    "docs/TODO/README.md",
+    "docs/implementation_index.json",
+    "docs/implementations/README.md",
+}
+
+#: Never rendered by the scaffolder into a comparable state: scratch, history,
+#: and installed dependencies.
+SKIP_PREFIXES = ("tmp/", ".git/", "node_modules/", ".venv/")
+
+
+def say(symbol: str, message: str) -> None:
+    print(f"{symbol} {message}", file=sys.stderr)
+
+
+def item(message: str) -> None:
+    print(f"   · {message}", file=sys.stderr)
+
+
+def detail(message: str = "") -> None:
+    print(f"   {message}" if message else "", file=sys.stderr)
+
+
+def die(message: str) -> "NoReturn":  # type: ignore[valid-type]
+    say("❌", message)
+    raise SystemExit(1)
+
+
+def read_manifest(target: Path) -> dict:
+    path = target / MANIFEST_NAME
+    if not path.exists():
+        die(
+            f"{target} has no {MANIFEST_NAME} — it predates the manifest, so there is no "
+            "base to merge against.\n   Scaffold-time provenance cannot be recovered after "
+            "the fact without guessing, and a guessed base merges the wrong thing silently."
+        )
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        die(f"{path} is not valid JSON: {exc}")
+
+
+def render_with(checkout: Path, args: List[str], into: Path) -> None:
+    """Run a given skeletor checkout's scaffolder into an empty directory.
+
+    The *old* scaffolder, deliberately — the post-copy steps are part of what a
+    tree looks like, and they change too. Reproducing the base with today's
+    scaffolder would attribute this release's behaviour to the previous one.
+    """
+    scaffolder = checkout / "bin" / "skeletor-new"
+    if not scaffolder.exists():
+        die(f"{scaffolder} does not exist — that checkout is not a skeletor")
+    result = subprocess.run(
+        [sys.executable, str(scaffolder), str(into), *args, "--no-git", "--force"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        die(f"rendering with {checkout} failed:\n{result.stdout}\n{result.stderr}")
+
+
+def base_checkout(ref: str, workdir: Path) -> Tuple[Path, Path, str]:
+    """A detached worktree of skeletor at `ref`: the tree, what to clean up, and
+    the ref actually used — which is not `ref` when the scaffold was dirty."""
+    if ref.endswith("-dirty"):
+        ref = ref[: -len("-dirty")]
+        say("⚠️ ", f"the tree was scaffolded from a dirty checkout — using the committed part ({ref})")
+        detail("Uncommitted template edits at that time will read as template changes now.")
+    tree = workdir / "base-checkout"
+    result = subprocess.run(
+        ["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(tree), ref],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        die(
+            f"cannot check out skeletor at '{ref}':\n   {result.stderr.strip()}\n"
+            "   A shallow clone or a rewritten history cannot reproduce the base. "
+            "Pass --from-dir with a checkout that can."
+        )
+    return tree, tree, ref
+
+
+def files_under(root: Path) -> Dict[str, Path]:
+    out: Dict[str, Path] = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        if rel.startswith(SKIP_PREFIXES) or "__pycache__" in path.parts:
+            continue
+        out[rel] = path
+    return out
+
+
+def read(path: Optional[Path]) -> Optional[str]:
+    if path is None or not path.exists():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return None  # binary: compared by bytes below, never merged
+
+
+def merge(base: str, theirs: str, ours: str, workdir: Path) -> Optional[str]:
+    """Three-way merge, or `None` if it conflicts. Markers are never returned."""
+    paths = {}
+    for name, text in (("base", base), ("theirs", theirs), ("ours", ours)):
+        paths[name] = workdir / f"merge-{name}"
+        paths[name].write_text(text, encoding="utf-8")
+    result = subprocess.run(
+        ["git", "merge-file", "-p", "--quiet", str(paths["theirs"]), str(paths["base"]), str(paths["ours"])],
+        capture_output=True,
+        text=True,
+    )
+    # Exit code is the number of conflicts, or negative on error.
+    return result.stdout if result.returncode == 0 else None
+
+
+def unified(base: str, ours: str, rel: str) -> str:
+    import difflib
+
+    return "".join(
+        difflib.unified_diff(
+            base.splitlines(keepends=True),
+            ours.splitlines(keepends=True),
+            fromfile=f"a/{rel} (template, as you scaffolded it)",
+            tofile=f"b/{rel} (template, today)",
+        )
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("target", help="the scaffolded tree to upgrade")
+    parser.add_argument("--dry-run", action="store_true", help="report what would change, write nothing")
+    parser.add_argument("--from-dir", help="use this skeletor checkout as the base instead of the recorded ref")
+    parser.add_argument("--json", action="store_true", help="emit the result on stdout as well")
+    args = parser.parse_args()
+
+    target = Path(args.target).expanduser().resolve()
+    if not target.is_dir():
+        die(f"{target} is not a directory")
+
+    manifest = read_manifest(target)
+    recorded = manifest.get("args") or []
+    ref = manifest.get("skeletor_ref") or ""
+    if not recorded:
+        die(f"{target / MANIFEST_NAME} records no arguments — it cannot be re-rendered")
+
+    workdir = Path(tempfile.mkdtemp(prefix="skeletor-upgrade-"))
+    cleanup_worktree: Optional[Path] = None
+    try:
+        if args.from_dir:
+            base_src = Path(args.from_dir).expanduser().resolve()
+            say("→", f"base: {base_src}")
+        else:
+            if not ref:
+                die(f"{MANIFEST_NAME} records no skeletor_ref — pass --from-dir")
+            base_src, cleanup_worktree, ref = base_checkout(ref, workdir)
+            say("→", f"base: skeletor @ {ref}")
+
+        base_tree = workdir / "base"
+        head_tree = workdir / "head"
+        render_with(base_src, recorded, base_tree)
+        render_with(SKELETOR, recorded, head_tree)
+
+        base_files = files_under(base_tree)
+        head_files = files_under(head_tree)
+
+        added, updated, merged, conflicted, kept, dropped = [], [], [], [], [], []
+        patches = target / "tmp" / "upgrade"
+
+        for rel in sorted(set(base_files) | set(head_files)):
+            if rel in GENERATED or rel == MANIFEST_NAME:
+                continue
+            ours = read(head_files.get(rel))
+            base = read(base_files.get(rel))
+            live_path = target / rel
+            theirs = read(live_path) if live_path.exists() else None
+
+            if ours is None:
+                # The template stopped shipping it. Never delete somebody's file.
+                if live_path.exists():
+                    dropped.append(rel)
+                continue
+
+            if theirs is None:
+                added.append(rel)
+                if not args.dry_run:
+                    live_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(head_files[rel], live_path)
+                continue
+
+            if base is None:
+                # Present in the tree and in today's template, absent from the
+                # base: treat it as the user's until proven otherwise.
+                if theirs != ours:
+                    conflicted.append(rel)
+                continue
+
+            edited = theirs != base
+            changed = ours != base
+            if not changed:
+                continue
+            if not edited:
+                updated.append(rel)
+                if not args.dry_run:
+                    live_path.write_text(ours, encoding="utf-8")
+                continue
+
+            resolved = merge(base, theirs, ours, workdir)
+            if resolved is None:
+                conflicted.append(rel)
+                if not args.dry_run:
+                    patch = patches / f"{rel}.patch"
+                    patch.parent.mkdir(parents=True, exist_ok=True)
+                    patch.write_text(unified(base, ours, rel), encoding="utf-8")
+            else:
+                merged.append(rel)
+                if not args.dry_run:
+                    live_path.write_text(resolved, encoding="utf-8")
+
+        for rel in sorted(set(base_files)):
+            if rel in head_files or rel in GENERATED:
+                continue
+            if (target / rel).exists() and rel not in dropped:
+                dropped.append(rel)
+
+        # The generated docs are rebuilt, never merged.
+        if not args.dry_run and (added or updated or merged):
+            regen = target / "scripts" / "docs" / "regen.py"
+            if regen.exists():
+                subprocess.run([sys.executable, str(regen)], cwd=str(target), capture_output=True)
+            shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
+
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "target": str(target),
+                        "base_ref": ref,
+                        "dry_run": args.dry_run,
+                        "added": added,
+                        "updated": updated,
+                        "merged": merged,
+                        "conflicted": conflicted,
+                        "dropped": dropped,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+
+        verb = "would be" if args.dry_run else ""
+        for label, group, symbol in (
+            (f"new file(s) {verb} added".strip(), added, "✅"),
+            (f"file(s) you never touched {verb} updated".strip(), updated, "✅"),
+            (f"file(s) you edited {verb} merged cleanly".strip(), merged, "✅"),
+        ):
+            if group:
+                say(symbol, f"{len(group)} {label}")
+                for rel in group[:20]:
+                    item(rel)
+                if len(group) > 20:
+                    detail(f"… and {len(group) - 20} more")
+
+        if conflicted:
+            say("❌", f"{len(conflicted)} file(s) you edited — merge conflicts, LEFT ALONE")
+            for rel in conflicted:
+                item(rel)
+            detail()
+            detail("Nothing was written to these. What the template changed in each is in")
+            detail("tmp/upgrade/<path>.patch — port it by hand.")
+
+        if dropped:
+            say("⚠️ ", f"{len(dropped)} file(s) the template no longer ships — NOT deleted")
+            for rel in dropped:
+                item(rel)
+            detail("Delete them yourself if you agree. This never removes your files.")
+
+        if not any((added, updated, merged, conflicted, dropped)):
+            say("✅", "already current — nothing to carry over")
+            return 0
+
+        detail()
+        if args.dry_run:
+            say("⏸️ ", "dry run — nothing was written")
+        else:
+            say("✅", "nothing was committed. Read the diff, then commit as one `chore(skeletor):` change")
+        return 1 if conflicted else 0
+    finally:
+        if cleanup_worktree is not None:
+            subprocess.run(
+                ["git", "-C", str(SKELETOR), "worktree", "remove", "--force", str(cleanup_worktree)],
+                capture_output=True,
+            )
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

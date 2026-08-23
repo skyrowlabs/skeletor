@@ -26,6 +26,7 @@ tier ships it: `C` = core, `G` = governed, `A` = agentic (cumulative).
 | `bin/skeletor-new` | The generator — copies overlays, substitutes placeholders, verifies the result |
 | `bin/skeletor-verify` | Generates every tier and runs each tree's own gates — this repo's test suite |
 | `bin/skeletor-check-pins` | Reports how far behind every version the template pins users to |
+| `bin/skeletor-upgrade` | Carries a template change into an already-scaffolded tree — three-way merge, never a conflict marker |
 | `bin/skeletor-install-skill` | Installs `/new-project` into `~/.claude/skills/`, rewriting the path to this checkout |
 | `/new-project` skill | Lets any agent scaffold a repo from a plain-English ask |
 | `AGENTS.md` | The same procedure as a page an agent can be pointed at directly |

@@ -52,6 +52,10 @@ bin/skeletor-verify --tier core --keep # one tier, trees left behind to inspect
 
 # How far behind are the versions we start other people's repos on?
 bin/skeletor-check-pins
+
+# Carry a template change into an already-scaffolded tree
+bin/skeletor-upgrade ../target --dry-run
+bin/skeletor-upgrade ../target
 ```
 
 There is no test suite for skeletor itself. **The scaffold IS the test**: a
@@ -113,6 +117,29 @@ what tells you the truth.
 Always run all tiers when a change touches `template/core/`, since `governed`
 and `agentic` compose on top of it. That is the default; `--tier` is for
 narrowing a debug loop, not for a final check.
+
+`bin/skeletor-upgrade` is how a template change reaches the repositories
+already generated from one. It renders the tree's **base** — skeletor at the
+`skeletor_ref` in that tree's `.skeletor.json`, run with the arguments it
+recorded — renders **ours** from this checkout, and three-way merges against
+what is actually there. A file the user never touched is replaced; one they
+edited is merged **only if the merge is clean**; a conflict leaves the file
+exactly as it was and writes the template's own diff to `tmp/upgrade/`. A
+conflict marker is never written into somebody's tree, nothing is committed,
+and a file the template stopped shipping is reported rather than deleted.
+
+There are **no file hashes** in the manifest, deliberately: a hash is a second
+copy of what the render already answers, and a manifest that can disagree with
+the template is worse than none. The cost is that an upgrade needs skeletor's
+git history to reach the base ref.
+
+`skeletor-verify` runs `skeletor-upgrade --dry-run --from-dir .` against every
+fresh scaffold and requires "already current". That is the cheap test of the
+manifest, and it fails on the thing that actually breaks: `--slug`, `--cli` and
+`--env-prefix` all default from the *target directory name*, and an upgrade
+renders into a temporary directory with a different one. A manifest that cannot
+reproduce its own tree makes every later upgrade a diff against the wrong base
+— which is worse than no upgrade, because it looks like it worked.
 
 **Pins are reported, never bumped automatically.** `bin/skeletor-check-pins`
 discovers every pinned version by pattern and asks the registries what is

@@ -196,6 +196,38 @@ source and still unusable in practice, which is exactly what had happened.
 
 ---
 
+## Propagating a template change: merge cleanly or say so
+
+A generator's second problem arrives about a year after its first. Twelve repos
+have been scaffolded, skeletor has improved, and none of them have. Re-running
+the scaffolder with `--force` would overwrite the half of each tree that is the
+*user's* — so nobody runs it, and the improvement lands nowhere.
+
+`bin/skeletor-upgrade` is a three-way merge, and the shape of it is the whole
+argument. Eight of the 111 template files carry a `SCAFFOLD` marker and are
+meant to be edited; the other 103 are machinery almost nobody touches, and the
+machinery is where an improvement lives. So the common case is a clean
+overwrite, and the interesting case is small.
+
+Two rules do the work:
+
+* **A conflict is never written.** `git merge-file` will happily emit markers.
+  This does not let it: on conflict the file is left exactly as it was and the
+  template's own base→ours diff goes to `tmp/upgrade/`. A conflict marker in
+  somebody's `CLAUDE.md` is a broken file that *looks* like a merge, in a tree
+  nobody is watching.
+* **Nothing is deleted.** A file the template stopped shipping is reported. The
+  same posture as `skeletor-check-pins`, which reports a bump and never makes
+  one.
+
+The manifest holds no file hashes, which is the part worth stealing. A hash
+would be a second copy of what the render already answers, and the failure mode
+of a stale manifest is silent: it merges against a base that never existed. The
+price is that an upgrade needs the generator's git history to reach the base
+ref, and that is a fair trade for a value that cannot drift.
+
+---
+
 ## Testing
 
 **Registration is marker-based, and this is the strongest single pattern.**
