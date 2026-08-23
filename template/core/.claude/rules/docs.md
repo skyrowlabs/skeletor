@@ -197,9 +197,19 @@ It refuses a plan that still has unchecked tasks, and it commits nothing — rea
 load-bearing prose that records *why* the docs say what they say:
 
 ```bash
-{{CLI}} check doc-refs    # docs/* paths cited from source comments
-{{CLI}} check doc-links   # relative markdown links between docs (+ #fragments)
+{{CLI}} check doc-refs          # docs/* paths cited from source comments
+{{CLI}} check doc-links         # relative markdown links between docs (+ #fragments)
+{{CLI}} check doc-links --fix   # repoint fragments whose successor is unambiguous
 ```
+
+`--fix` is deliberately narrow. It repoints a **fragment** — and only when
+exactly one current heading is the obvious successor, because the old slug
+survives as a contiguous run of tokens inside the new one or vice versa. Two
+candidates, or none, and it leaves the link alone: a fragment pointed at the
+wrong section reads as correct forever, while a dead one announces itself on the
+next run. It never rewrites a broken **path** — where a file went is a judgement
+call, and a wrong path is a lie about which document says something. It commits
+nothing; read the diff.
 
 **Repoint, never delete.** A link whose target is genuinely gone gets its sentence rewritten
 — repointed to the successor, or de-linked to a backticked path plus the commit that removed

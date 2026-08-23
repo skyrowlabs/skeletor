@@ -18,7 +18,7 @@ sentence rewritten to name the successor, or de-linked to a backticked path plus
 the commit that removed it. These links are prose that records why the docs say
 what they say.
 
-Usage:  python scripts/check_doc_links.py [--json] [--update-baseline]
+Usage:  python scripts/check_doc_links.py [--fix] [--json] [--update-baseline]
 
 `--json` is additive: the payload goes to stdout, the explanation to stderr.
 See `scripts/output.py`.
@@ -31,7 +31,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -80,13 +80,29 @@ def markdown_files() -> List[Path]:
     return [p for p in out if "node_modules" not in p.parts]
 
 
-def _strip(text: str) -> str:
-    return _COMMENT.sub("", _CODE_FENCE.sub("", text))
+def _mask(text: str) -> str:
+    """Blank out code fences and HTML comments, **preserving offsets**.
+
+    Blanked rather than deleted because `--fix` rewrites the original text by
+    position: one scan then serves both the check and the repair, and the two
+    cannot disagree about which links are real. Newlines are kept so a match
+    still lands on the line it came from.
+    """
+
+    def blank(match: re.Match) -> str:
+        return "".join("\n" if char == "\n" else " " for char in match.group(0))
+
+    return _COMMENT.sub(blank, _CODE_FENCE.sub(blank, text))
 
 
-def headings(path: Path) -> set:
-    body = _strip(path.read_text(encoding="utf-8"))
-    return {slugify(m.group("text")) for m in _HEADING.finditer(body)}
+def headings(path: Path) -> List[str]:
+    """Every heading slug in a file, in document order.
+
+    A list and not a set: `--fix` reports the successor it chose, and an
+    unordered "one match" is harder to check by eye than an ordered one.
+    """
+    body = _mask(path.read_text(encoding="utf-8"))
+    return [slugify(m.group("text")) for m in _HEADING.finditer(body)]
 
 
 def _suggest(target: Path) -> str:
@@ -95,49 +111,166 @@ def _suggest(target: Path) -> str:
     return f"  → probably {matches[0].relative_to(REPO_ROOT)}" if len(matches) == 1 else ""
 
 
+def _walk() -> Iterator[Tuple[Path, Path, str, "re.Match[str]"]]:
+    """Every link in the tree, once: `(source, rel_source, original, match)`.
+
+    The check and the fix share this generator rather than each writing their
+    own loop. Two definitions of "a link worth checking" would drift, and the
+    fix would then rewrite something the check never looked at — which is the
+    one failure mode a repair tool must not have.
+
+    `original` is the unmasked text; the match offsets index it correctly
+    because `_mask` preserves length.
+    """
+    for source in markdown_files():
+        original = source.read_text(encoding="utf-8")
+        for match in _LINK.finditer(_mask(original)):
+            yield source, source.relative_to(REPO_ROOT), original, match
+
+
+def _contains_run(haystack: Sequence[str], needle: Sequence[str]) -> bool:
+    """Is `needle` a contiguous run of tokens inside `haystack`?"""
+    if not needle or len(needle) > len(haystack):
+        return False
+    return any(list(haystack[i : i + len(needle)]) == list(needle) for i in range(len(haystack) - len(needle) + 1))
+
+
+def _successor(anchor: str, available: Sequence[str]) -> Optional[str]:
+    """The one heading this dead fragment obviously became, or `None`.
+
+    A heading edit breaks an anchor in one of two ways: the heading grew
+    (`#why-this-exists` → `#why-this-exists-as-its-own-checker`) or it shrank.
+    Either way the shorter slug survives as a contiguous run of tokens inside
+    the longer — which is a narrow rule on purpose, because the alternative is
+    guessing.
+
+    **Ambiguity is the entire safety mechanism.** Two candidates means a human
+    chooses: a fragment repointed to the wrong section is worse than a dead one,
+    because a dead link announces itself on the next run and a wrong one never
+    does. Same for zero candidates — that heading did not move, it went, and
+    `--fix` has nothing to say about a sentence that needs rewriting.
+    """
+    want = [token for token in anchor.split("-") if token]
+    if not want:
+        return None
+    hits = set()
+    for slug in available:
+        tokens = slug.split("-")
+        if _contains_run(tokens, want) or _contains_run(want, tokens):
+            hits.add(slug)
+    return sorted(hits)[0] if len(hits) == 1 else None
+
+
 def scan() -> Tuple[List[str], List[str]]:
     ignore = _ignored()
     dead_paths: List[str] = []
     dead_anchors: List[str] = []
-    heading_cache: Dict[Path, set] = {}
+    heading_cache: Dict[Path, List[str]] = {}
 
-    for source in markdown_files():
-        body = _strip(source.read_text(encoding="utf-8"))
-        rel_source = source.relative_to(REPO_ROOT)
-        for match in _LINK.finditer(body):
-            href = match.group("href")
-            if href.startswith(("http://", "https://", "mailto:", "#")):
-                # Same-file fragments are checked against this file's headings.
-                if href.startswith("#"):
-                    anchor = href[1:]
-                    if f"{rel_source}{href}" in ignore:
-                        continue
-                    if anchor and anchor not in heading_cache.setdefault(source, headings(source)):
-                        dead_anchors.append(f"{rel_source}: '{href}' matches no heading here")
-                continue
+    for source, rel_source, _original, match in _walk():
+        href = match.group("href")
+        if href.startswith(("http://", "https://", "mailto:", "#")):
+            # Same-file fragments are checked against this file's headings.
+            if href.startswith("#"):
+                anchor = href[1:]
+                if f"{rel_source}{href}" in ignore:
+                    continue
+                if anchor and anchor not in heading_cache.setdefault(source, headings(source)):
+                    dead_anchors.append(f"{rel_source}: '{href}' matches no heading here")
+            continue
 
-            path_part, _, anchor = href.partition("#")
-            if not path_part:
-                continue
-            target = (source.parent / path_part).resolve()
-            rel_target = path_part
-            if f"{rel_source}#{anchor}" in ignore or path_part in ignore:
-                continue
-            if not target.exists():
-                dead_paths.append(f"{rel_source}: '{rel_target}' does not exist{_suggest(Path(path_part))}")
-                continue
-            if anchor and target.suffix == ".md":
-                if anchor not in heading_cache.setdefault(target, headings(target)):
-                    dead_anchors.append(f"{rel_source}: '{href}' — no such heading in {target.relative_to(REPO_ROOT)}")
+        path_part, _, anchor = href.partition("#")
+        if not path_part:
+            continue
+        target = (source.parent / path_part).resolve()
+        if f"{rel_source}#{anchor}" in ignore or path_part in ignore:
+            continue
+        if not target.exists():
+            dead_paths.append(f"{rel_source}: '{path_part}' does not exist{_suggest(Path(path_part))}")
+            continue
+        if anchor and target.suffix == ".md":
+            if anchor not in heading_cache.setdefault(target, headings(target)):
+                dead_anchors.append(f"{rel_source}: '{href}' — no such heading in {target.relative_to(REPO_ROOT)}")
 
     return dead_paths, dead_anchors
 
 
+def repoint_fragments() -> List[str]:
+    """Rewrite every dead fragment that has exactly one obvious successor.
+
+    Deliberately narrower than the check. It touches **fragments only** — a
+    broken *path* is never rewritten, because where a file went is a judgement
+    call and `_suggest` offers it as a hint for a person rather than an edit.
+    That asymmetry is the point: a wrong `#section` is invisible, and a wrong
+    path is a lie about which document says something.
+
+    Commits nothing. Read the diff.
+    """
+    ignore = _ignored()
+    heading_cache: Dict[Path, List[str]] = {}
+    edits: Dict[Path, List[Tuple[int, int, str]]] = {}
+    repointed: List[str] = []
+
+    for source, rel_source, original, match in _walk():
+        href = match.group("href")
+        if href.startswith(("http://", "https://", "mailto:")):
+            continue
+
+        path_part, sep, anchor = href.partition("#")
+        if not sep or not anchor:
+            continue
+        if f"{rel_source}#{anchor}" in ignore or path_part in ignore:
+            continue
+        if path_part:
+            target = (source.parent / path_part).resolve()
+            # A fragment on a path that does not resolve is not a fragment
+            # problem. Repointing it would paper over the broken path.
+            if not target.exists() or target.suffix != ".md":
+                continue
+        else:
+            target = source
+
+        available = heading_cache.setdefault(target, headings(target))
+        if anchor in available:
+            continue
+        replacement = _successor(anchor, available)
+        if replacement is None:
+            continue
+
+        span = match.span("href")
+        edits.setdefault(source, []).append((span[0], span[1], f"{path_part}#{replacement}"))
+        repointed.append(f"{rel_source}: '#{anchor}' → '#{replacement}' in {target.relative_to(REPO_ROOT)}")
+
+    for source, spans in edits.items():
+        text = source.read_text(encoding="utf-8")
+        # Right to left, so an earlier edit cannot shift a later one's offsets.
+        for start, stop, replacement in sorted(spans, reverse=True):
+            text = text[:start] + replacement + text[stop:]
+        source.write_text(text, encoding="utf-8")
+
+    return sorted(repointed)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--fix", action="store_true", help="repoint fragments with exactly one matching heading")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--update-baseline", action="store_true", help="record the current counts as the new ceiling")
     args = parser.parse_args()
+
+    # Before the scan, so the counts below describe the tree as it now is —
+    # reporting a ceiling breach the same run just repaired would send somebody
+    # to fix a link that is already fixed.
+    repointed: List[str] = []
+    if args.fix:
+        repointed = repoint_fragments()
+        if repointed:
+            ok(f"repointed {len(repointed)} fragment(s) — nothing was committed, read the diff")
+            for entry in repointed:
+                item(entry)
+        else:
+            ok("no dead fragment had exactly one obvious successor — nothing changed")
+            detail("A fragment with two candidates, or none, is a sentence for a human to rewrite.")
 
     dead_paths, dead_anchors = scan()
     baseline = (
@@ -160,12 +293,12 @@ def main() -> int:
             encoding="utf-8",
         )
         if args.json:
-            emit({"broken": dead_paths, "dead_anchors": dead_anchors, "baseline_updated": True})
+            emit({"broken": dead_paths, "dead_anchors": dead_anchors, "repointed": repointed, "baseline_updated": True})
         ok(f"baseline set to {len(dead_paths)} broken / {len(dead_anchors)} dead anchors")
         return 0
 
     if args.json:
-        emit({"broken": dead_paths, "dead_anchors": dead_anchors, "baseline": baseline})
+        emit({"broken": dead_paths, "dead_anchors": dead_anchors, "repointed": repointed, "baseline": baseline})
 
     status = 0
     for label, found, ceiling in (
