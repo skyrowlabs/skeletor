@@ -11,14 +11,17 @@ from __future__ import annotations
 import subprocess
 import sys
 
+# Before the click guard, so the guard can speak in the same voice as everything
+# else. `cli.helpers` reaches `scripts/output.py`, which is stdlib-only —
+# a dependency-missing message that itself needs a dependency is no message.
+from cli.helpers import PROJECT_ROOT, detail, fail
+
 try:
     import click
 except ImportError:  # pragma: no cover - dependency guard
-    print("❌ The {{PROJECT_NAME}} CLI requires 'click'.", file=sys.stderr)
-    print("   Install with: pip install -r scripts/requirements.txt", file=sys.stderr)
+    fail("The {{PROJECT_NAME}} CLI requires 'click'.")
+    detail("Install with: pip install -r scripts/requirements.txt")
     sys.exit(1)
-
-from cli.helpers import PROJECT_ROOT
 
 
 def get_version() -> str:

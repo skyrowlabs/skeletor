@@ -12,7 +12,7 @@ import sys
 
 import click
 
-from cli.helpers import PROJECT_ROOT, run, summarize
+from cli.helpers import PROJECT_ROOT, run, shell, step, summarize
 
 #: marker -> (help text, whether the suite needs the stack running)
 SUITES = {
@@ -24,14 +24,14 @@ SUITES = {
 
 def _pytest(marker: str, extra: tuple, ci: bool) -> int:
     env_note = " (CI semantics: env-gate skips become failures)" if ci else ""
-    print(f"→ {marker} suite{env_note}")
+    step(f"{marker} suite{env_note}")
     env = dict(os.environ)
     if ci:
         # Under CI semantics an env-gate skip is a harness failure, not a pass:
         # CI guarantees the environment, so "skipped everything" must be red.
         env["{{CI_ENV_VAR}}"] = "1"
     cmd = [sys.executable, "-m", "pytest", "tests/", "-m", marker, "-q", "--durations=10", *extra]
-    print(f"$ {' '.join(cmd)}")
+    shell(" ".join(cmd))
     import subprocess
 
     return subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=env).returncode

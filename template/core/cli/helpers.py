@@ -1,4 +1,10 @@
-"""Shared helpers for the CLI package."""
+"""Shared helpers for the CLI package.
+
+Status lines are **not** defined here. They come from `scripts/output.py`, which
+`scripts/` can import too — a vocabulary only half the tree can reach is one the
+other half retypes. This module re-exports them so a command module has one
+import, and so the re-export list is the only thing to change if that ever moves.
+"""
 
 from __future__ import annotations
 
@@ -6,9 +12,58 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from typing import Optional, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# Before importing anything from `scripts/`. The `./{{CLI}}` wrapper exports
+# PYTHONPATH, but `python -m cli` from a different cwd does not, and a helper
+# that only imports under one invocation is a helper nobody trusts.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.output import (  # noqa: E402
+    SYMBOLS,
+    badge,
+    detail,
+    die,
+    emit,
+    fail,
+    item,
+    line,
+    ok,
+    shell,
+    skip,
+    step,
+    summarize,
+    warn,
+)
+
+#: Re-exported on purpose — listed so flake8 does not read them as unused, and
+#: so `from cli.helpers import ok` keeps working from every command module.
+__all__ = [
+    "PROJECT_ROOT",
+    "SYMBOLS",
+    "absolutize_path_env",
+    "badge",
+    "current_branch",
+    "detail",
+    "die",
+    "emit",
+    "fail",
+    "git",
+    "item",
+    "line",
+    "module",
+    "ok",
+    "run",
+    "script",
+    "shell",
+    "skip",
+    "step",
+    "summarize",
+    "warn",
+]
 
 
 def absolutize_path_env() -> None:
@@ -31,7 +86,7 @@ def absolutize_path_env() -> None:
 def run(cmd: Sequence[str], *, cwd: Optional[Path] = None, check: bool = False, capture: bool = False):
     """Run a command from the project root, echoing it unless capturing."""
     if not capture:
-        print(f"$ {' '.join(str(c) for c in cmd)}")
+        shell(" ".join(str(c) for c in cmd))
     return subprocess.run(
         [str(c) for c in cmd],
         cwd=str(cwd or PROJECT_ROOT),
@@ -65,35 +120,3 @@ def git(*args: str) -> str:
 
 def current_branch() -> str:
     return git("rev-parse", "--abbrev-ref", "HEAD")
-
-
-def ok(message: str) -> None:
-    print(f"✅ {message}")
-
-
-def fail(message: str) -> None:
-    print(f"❌ {message}", file=sys.stderr)
-
-
-def warn(message: str) -> None:
-    print(f"⚠️  {message}", file=sys.stderr)
-
-
-def summarize(results: Iterable[tuple]) -> int:
-    """Print a pass/fail table for a set of gates and return the exit code.
-
-    Every gate runs even when an earlier one failed. A pre-push check that stops
-    at the first red gives you one fix per round trip; the whole point is to
-    learn everything that is wrong in a single run.
-    """
-    results = list(results)
-    print("\n" + "─" * 60)
-    for name, code in results:
-        print(f"{'✅' if code == 0 else '❌'}  {name}")
-    failed = [name for name, code in results if code != 0]
-    print("─" * 60)
-    if failed:
-        fail(f"{len(failed)} gate(s) failed: {', '.join(failed)}")
-        return 1
-    ok(f"all {len(results)} gates passed")
-    return 0

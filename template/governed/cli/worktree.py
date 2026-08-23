@@ -17,7 +17,7 @@ from pathlib import Path
 
 import click
 
-from cli.helpers import PROJECT_ROOT, fail, git, ok, run
+from cli.helpers import PROJECT_ROOT, detail, fail, git, item, line, ok, run
 
 
 @click.group()
@@ -48,13 +48,15 @@ def new(path: str, branch: str, base: str) -> None:
     env = PROJECT_ROOT / ".env"
     if env.exists():
         shutil.copy2(env, target / ".env")
-        print(f"  · copied .env")
+        item("copied .env")
     (target / "tmp").mkdir(exist_ok=True)
 
     ok(f"worktree at {target} on branch '{branch}'")
-    print(f"\n  cd {target}")
-    print(f"  ./{{CLI}} check pre-push")
-    print(f"\n  When you are done:  {{CLI}} worktree drop {target}")
+    detail()
+    detail(f"cd {target}")
+    detail("./{{CLI}} check pre-push")
+    detail()
+    detail(f"When you are done:  {{CLI}} worktree drop {target}")
 
 
 @worktree.command()
@@ -77,7 +79,7 @@ def drop(path: str, force: bool) -> None:
     ).stdout.strip()
     if dirty and not force:
         fail(f"{target} has {len(dirty.splitlines())} uncommitted change(s) — refusing")
-        print("   That work belongs to somebody. Commit it, or pass --force if you are sure.")
+        detail("That work belongs to somebody. Commit it, or pass --force if you are sure.")
         sys.exit(1)
 
     unpushed = subprocess.run(
@@ -85,9 +87,9 @@ def drop(path: str, force: bool) -> None:
     ).stdout.strip()
     if unpushed and not force:
         fail(f"{target} holds {len(unpushed.splitlines())} commit(s) on no remote:")
-        for line in unpushed.splitlines()[:5]:
-            print(f"   · {line}")
-        print("   These are reachable from nothing but this tree's HEAD. Push them, or --force.")
+        for commit_line in unpushed.splitlines()[:5]:
+            item(commit_line)
+        detail("These are reachable from nothing but this tree's HEAD. Push them, or --force.")
         sys.exit(1)
 
     run(["git", "worktree", "remove", *(["--force"] if force else []), str(target)])
@@ -97,7 +99,7 @@ def drop(path: str, force: bool) -> None:
 @worktree.command(name="list")
 def list_cmd() -> None:
     """Every worktree, and whether it holds anything."""
-    print(git("worktree", "list"))
+    line(git("worktree", "list"))
 
 
 @worktree.command()

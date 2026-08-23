@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import frontmatter, release_window  # noqa: E402
+from scripts.output import detail, fail, item, ok, step, warn  # noqa: E402
 
 REPO_ROOT = release_window.REPO_ROOT
 REGULAR_DIR = release_window.REGULAR_DIR
@@ -85,28 +86,28 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.tag not in release_window.tags():
-        print(f"❌ unknown release tag: {args.tag}")
-        print("   Freeze runs AFTER the tag exists — it records what shipped, not what will.")
+        fail(f"unknown release tag: {args.tag}")
+        detail("Freeze runs AFTER the tag exists — it records what shipped, not what will.")
         return 1
 
     closing = release_window.window(args.tag)
     destination = RELEASES_DIR / args.tag
 
     if destination.exists() and not args.dry_run:
-        print(f"❌ {destination.relative_to(REPO_ROOT)} already exists — this release is already frozen.")
-        print("   Frozen editions are never rewritten. A correction goes in an ## Errata block")
-        print("   on the current in-flight edition, naming the release it corrects.")
+        fail(f"{destination.relative_to(REPO_ROOT)} already exists — this release is already frozen.")
+        detail("Frozen editions are never rewritten. A correction goes in an ## Errata block")
+        detail("on the current in-flight edition, naming the release it corrects.")
         return 1
 
-    print(f"→ closing {closing['commit_range']} ({closing['commits']} commits) as {args.tag}")
+    step(f"closing {closing['commit_range']} ({closing['commits']} commits) as {args.tag}")
 
     frozen = []
     for name in release_window.ANCHORED_REPORTS:
         source = REGULAR_DIR / name
         if not source.exists():
-            print(f"⚠️  {name} is anchored but missing from regular/ — skipping")
+            warn(f"{name} is anchored but missing from regular/ — skipping")
             continue
-        print(f"  · freeze {name}")
+        item(f"freeze {name}")
         if args.dry_run:
             frozen.append(name)
             continue
@@ -121,19 +122,22 @@ def main() -> int:
         frozen.append(name)
 
     if args.dry_run:
-        print(f"\n(dry run) would freeze {len(frozen)} report(s) into docs/reports/releases/{args.tag}/")
-        print("(dry run) would then re-anchor regular/ to the new in-flight window and rebuild the index")
+        detail()
+        step(f"(dry run) would freeze {len(frozen)} report(s) into docs/reports/releases/{args.tag}/")
+        step("(dry run) would then re-anchor regular/ and rebuild the index")
         return 0
 
     # The in-flight window now opens at the tag just cut.
-    print("\n→ re-anchoring docs/reports/regular/ to the new in-flight window")
+    detail()
+    step("re-anchoring docs/reports/regular/ to the new in-flight window")
     if release_window.apply() != 0:
         return 1
 
     _rebuild_index()
 
-    print(f"\n✅ froze {len(frozen)} report(s) into docs/reports/releases/{args.tag}/")
-    print("   Nothing was committed — read the diff, then commit as one `docs(reports):` change.")
+    detail()
+    ok(f"froze {len(frozen)} report(s) into docs/reports/releases/{args.tag}/")
+    detail("Nothing was committed — read the diff, then commit as one `docs(reports):` change.")
     return 0
 
 

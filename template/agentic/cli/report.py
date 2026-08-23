@@ -14,7 +14,7 @@ import sys
 
 import click
 
-from cli.helpers import PROJECT_ROOT, fail, ok, warn
+from cli.helpers import PROJECT_ROOT, badge, detail, fail, line, ok, skip, warn
 
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -33,7 +33,7 @@ def _run_module(job_key: str) -> None:
     # day-of-week, so "first Sunday" is not expressible in cron fields. The gate
     # is enforced HERE, once, rather than in each monthly job.
     if job.first_week_only and not in_first_week():
-        print(f"⏸️  {job_key}: monthly job, not the first week — skipping")
+        skip(f"{job_key}: monthly job, not the first week — skipping")
         sys.exit(0)
 
     module = importlib.import_module(f"scripts.reporting.{job.module}")
@@ -89,16 +89,18 @@ def cron(print_: bool, check_: bool) -> None:
         if f"report {job.key}" not in live:
             missing.append(job.key)
 
-    for line in off:
-        print(f"⏸️  {line}")
+    for entry in off:
+        skip(entry)
 
     if missing:
         fail(f"{len(missing)} registered job(s) are not in the live crontab: {', '.join(missing)}")
-        print("\n   'Registered' is not 'installed'. Reinstall with:")
-        print("     {{CLI}} report cron --print | crontab -")
-        print("\n   If a job is deliberately off, give it a reason in")
-        print("   scripts/reporting_schedule_allowlist.yaml — an unexplained gap reads")
-        print("   identically to a job that silently stopped running.")
+        detail()
+        detail("'Registered' is not 'installed'. Reinstall with:")
+        detail("  {{CLI}} report cron --print | crontab -")
+        detail()
+        detail("If a job is deliberately off, give it a reason in")
+        detail("scripts/reporting_schedule_allowlist.yaml — an unexplained gap reads")
+        detail("identically to a job that silently stopped running.")
         sys.exit(1)
 
     ok(f"the live crontab matches the registry ({len(JOBS) - len(off)} scheduled, {len(off)} intentionally off)")
@@ -116,16 +118,17 @@ def watch(limit: int) -> None:
         warn("no runs recorded yet")
         return
 
-    badge = {"ok": "✅", "failed": "❌", "declined": "⏸️ ", "skipped": "⏭️ "}
+    # The symbols come from `scripts/output.py`. A viewer that spells its own
+    # is a second vocabulary, and this one already disagreed with the runner's.
     for entry in entries:
-        line = f"{badge.get(entry['outcome'], '?')} {entry['started']}  {entry['job']:<16}"
+        row = f"{badge(entry['outcome'])} {entry['started']}  {entry['job']:<16}"
         if entry.get("committed"):
-            line += f"  → {entry['committed']}"
+            row += f"  → {entry['committed']}"
         if entry.get("reason"):
-            line += f"  ({entry['reason'][:80]})"
-        print(line)
+            row += f"  ({entry['reason'][:80]})"
+        line(row)
 
-    print()
+    line()
     for job in JOBS:
         last = run_ledger.last_run(job.key)
         if last is None:

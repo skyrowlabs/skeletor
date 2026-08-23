@@ -35,6 +35,7 @@ PROMPTS = Path(__file__).resolve().parent / "prompts"
 
 sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.output import line, skip, step  # noqa: E402
 from scripts.reporting import run_ledger  # noqa: E402
 from scripts.reporting.jobs import FIX_POLICIES, JOBS_BY_KEY  # noqa: E402
 
@@ -84,7 +85,7 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
     branch = current_branch() or ""
 
     def decline(reason: str) -> int:
-        print(f"⏸️  {job.key} declined: {reason}")
+        skip(f"{job.key} declined: {reason}")
         run_ledger.record(
             run_ledger.Run(
                 job=job.key,
@@ -136,7 +137,7 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
         ]
     )
 
-    print(f"→ {job.key}: running triage agent (policy: {policy})")
+    step(f"{job.key}: running triage agent (policy: {policy})")
     try:
         result = subprocess.run(
             ["claude", "-p", prompt, "--permission-mode", "acceptEdits"],
@@ -181,5 +182,5 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
         )
     )
     heartbeat(os.environ.get(job.heartbeat_var or ""), "up" if agent_ran else "down")
-    print(result.stdout[-4000:])
+    line(result.stdout[-4000:])
     return 0 if agent_ran else 1

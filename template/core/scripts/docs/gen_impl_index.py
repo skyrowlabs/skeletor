@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import plans  # noqa: E402
+from scripts.output import fail, ok  # noqa: E402
 
 INDEX_PATH = plans.REPO_ROOT / "docs" / "implementation_index.json"
 
@@ -68,14 +69,14 @@ def main() -> int:
     if args.check:
         current = INDEX_PATH.read_text(encoding="utf-8") if INDEX_PATH.exists() else ""
         if current != rendered:
-            print("❌ docs/implementation_index.json is stale — run `{{CLI}} docs index`")
+            fail("docs/implementation_index.json is stale — run `{{CLI}} docs index`")
             return 1
-        print("✅ docs/implementation_index.json is current")
+        ok("docs/implementation_index.json is current")
         return 0
 
     INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
     INDEX_PATH.write_text(rendered, encoding="utf-8")
-    print(f"✅ wrote docs/implementation_index.json ({json.loads(rendered)['count']} docs)")
+    ok(f"wrote docs/implementation_index.json ({json.loads(rendered)['count']} docs)")
     return 0
 
 

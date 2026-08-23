@@ -259,7 +259,10 @@ def gates(tree: Path, venv_python: Path) -> List[Result]:
     )
     results.append(Result("pytest -m unit", code == 0, time.time() - started, output))
 
-    for command in (["check", "docs"], ["check", "merge-drivers"]):
+    # `check output` is here and not only in `pre-push` because it is the gate
+    # that keeps every OTHER gate's `--json` readable, and pre-push is not one of
+    # the commands this script runs.
+    for command in (["check", "docs"], ["check", "merge-drivers"], ["check", "output"]):
         started = time.time()
         code, output = run([f"./{CLI_NAME}", *command], cwd=tree)
         results.append(Result(f"{CLI_NAME} {' '.join(command)}", code == 0, time.time() - started, output))

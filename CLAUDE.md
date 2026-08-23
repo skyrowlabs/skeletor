@@ -62,11 +62,11 @@ so "a fresh tree passes its own gates" is the definition of done here.
 `bin/skeletor-verify` is that procedure, executable. It generates every tier
 against every language — a placeholder that only appears in the `node` overlay
 is a `render()` failure a user would otherwise find first — and against each
-Python tree runs the unit suite, `check docs`, `check merge-drivers`, a
-`--help` group-registration check, a static check that every `script()` call in
-the tree's CLI names a file that exists, and the lint hooks. eslint and prettier
-run once, on the fullest tier's `both` tree, and the fullest tier is scaffolded
-a second time into a deliberately long path.
+Python tree runs the unit suite, `check docs`, `check merge-drivers`,
+`check output`, a `--help` group-registration check, a static check that every
+`script()` call in the tree's CLI names a file that exists, and the lint hooks.
+eslint and prettier run once, on the fullest tier's `both` tree, and the fullest
+tier is scaffolded a second time into a deliberately long path.
 
 Those last two are each a bug that shipped. `script()` joins its argument onto
 `PROJECT_ROOT`, so `script("-m", "pytest", ...)` became the path `<root>/-m` and

@@ -28,12 +28,17 @@ import contextlib
 import json
 import os
 import subprocess
+import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterator, List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.output import fail, item, ok  # noqa: E402
+
 LOCK_DIR = REPO_ROOT / "tmp" / "tree-locks"
 
 #: A hold older than this with a live pid is still honoured — long jobs exist.
@@ -162,16 +167,17 @@ def would_strand(branch: str) -> Optional[str]:
 
 
 if __name__ == "__main__":
-    import sys
-
     if len(sys.argv) > 1 and sys.argv[1] == "--check":
         target = sys.argv[2] if len(sys.argv) > 2 else "{{BASE_BRANCH}}"
         reason = would_strand(target)
-        print(f"❌ cannot move to '{target}': {reason}" if reason else f"✅ safe to move to '{target}'")
+        if reason:
+            fail(f"cannot move to '{target}': {reason}")
+        else:
+            ok(f"safe to move to '{target}'")
         raise SystemExit(1 if reason else 0)
 
     live = holders()
     if not live:
-        print("✅ no holds on this tree")
+        ok("no holds on this tree")
     for hold in live:
-        print(f"   · {hold.kind:<6} pid {hold.pid:<7} {int(hold.age_s // 60):>4}m  {hold.owner}  [{hold.branch}]")
+        item(f"{hold.kind:<6} pid {hold.pid:<7} {int(hold.age_s // 60):>4}m  {hold.owner}  [{hold.branch}]")

@@ -10,17 +10,25 @@ The reverse direction matters as much. A table row pointing at a deleted file
 sends a reader to a dead path and, worse, implies the subject is still covered.
 
 Usage:  python scripts/check_doc_tables.py [--json]
+
+`--json` is additive, never a second code path: the payload goes to stdout and
+the explanation to stderr, so `... --json | jq` and a human run are the same run.
+See `scripts/output.py`.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import re
+import sys
 from pathlib import Path
 from typing import Set
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.output import detail, emit, fail, item, ok  # noqa: E402
+
 DOCS_DIR = REPO_ROOT / "docs"
 TABLES = [REPO_ROOT / "CLAUDE.md", REPO_ROOT / ".github" / "DOCS_INDEX.md"]
 
@@ -51,22 +59,22 @@ def main() -> int:
     dangling = sorted(ref for ref in listed - on_disk if not (REPO_ROOT / ref).exists())
 
     if args.json:
-        print(json.dumps({"unregistered": unregistered, "dangling": dangling}, indent=2))
+        emit({"registered": len(on_disk), "unregistered": unregistered, "dangling": dangling})
 
     status = 0
     if unregistered:
-        print("❌ docs not registered in CLAUDE.md or .github/DOCS_INDEX.md:")
+        fail("docs not registered in CLAUDE.md or .github/DOCS_INDEX.md:")
         for ref in unregistered:
-            print(f"   · {ref}")
-        print("   An unregistered doc is one no agent will load. Add it to both tables.")
+            item(ref)
+        detail("An unregistered doc is one no agent will load. Add it to both tables.")
         status = 1
     if dangling:
-        print("❌ index rows pointing at files that no longer exist:")
+        fail("index rows pointing at files that no longer exist:")
         for ref in dangling:
-            print(f"   · {ref}")
+            item(ref)
         status = 1
     if not status:
-        print(f"✅ {len(on_disk)} doc(s), all registered in both index tables")
+        ok(f"{len(on_disk)} doc(s), all registered in both index tables")
     return status
 
 

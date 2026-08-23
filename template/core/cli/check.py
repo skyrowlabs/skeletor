@@ -83,6 +83,17 @@ def reports() -> None:
     sys.exit(script("scripts/docs/release_window.py", "--check"))
 
 
+@check.command(name="output")
+def output_cmd() -> None:
+    """Does every emission go through `scripts/output.py`?
+
+    Status lines and streams are picked in one module so a `--json` payload and
+    the ❌ lines explaining it never share a stream. Full rules in
+    `.claude/rules/output.md`.
+    """
+    sys.exit(script("scripts/check_output_discipline.py"))
+
+
 @check.command(name="merge-drivers")
 def merge_drivers() -> None:
     """Are the generated-docs merge drivers installed in this checkout?
@@ -104,7 +115,11 @@ def pre_push(quick: bool) -> None:
     tests last because they are the expensive half. Every gate still runs even
     after one fails — one fix per round trip is the thing this exists to avoid.
     """
-    results = [("lint", _lint()), ("docs", _docs())]
+    results = [
+        ("lint", _lint()),
+        ("output discipline", script("scripts/check_output_discipline.py")),
+        ("docs", _docs()),
+    ]
     if not quick:
         results.append(("unit tests", module("pytest", "tests/", "-m", "unit", "-q")))
     sys.exit(summarize(results))

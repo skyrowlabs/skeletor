@@ -21,9 +21,14 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.output import detail, fail, ok, warn  # noqa: E402
+
 DRIVER = "merge.regen-docs"
 MARKER = REPO_ROOT / "tmp" / ".regen-owed"
 
@@ -46,12 +51,12 @@ def main() -> int:
 
     if args.check:
         if not installed:
-            print("❌ the 'regen-docs' merge driver is NOT installed in this checkout")
-            print("   python scripts/git/install_merge_drivers.py")
+            fail("the 'regen-docs' merge driver is NOT installed in this checkout")
+            detail("python scripts/git/install_merge_drivers.py")
             return 1
-        print("✅ merge driver 'regen-docs' installed")
+        ok("merge driver 'regen-docs' installed")
         if MARKER.exists():
-            print("⚠️  a regeneration is owed from a previous merge — run `{{CLI}} docs index`")
+            warn("a regeneration is owed from a previous merge — run `{{CLI}} docs index`")
             return 1
         return 0
 
@@ -59,8 +64,8 @@ def main() -> int:
         ["git", "config", "--local", f"{DRIVER}.name", "regenerate generated docs"], cwd=str(REPO_ROOT), check=True
     )
     subprocess.run(["git", "config", "--local", f"{DRIVER}.driver", COMMAND], cwd=str(REPO_ROOT), check=True)
-    print("✅ installed the 'regen-docs' merge driver")
-    print("   After any merge that touched docs/TODO/ or docs/implementations/: `{{CLI}} docs index`")
+    ok("installed the 'regen-docs' merge driver")
+    detail("After any merge that touched docs/TODO/ or docs/implementations/: `{{CLI}} docs index`")
     return 0
 
 

@@ -18,7 +18,7 @@ import sys
 
 import click
 
-from cli.helpers import PROJECT_ROOT, current_branch, fail, ok, run
+from cli.helpers import PROJECT_ROOT, current_branch, detail, fail, ok, run, step, summarize
 
 
 def _staged_check(paths: list, message: str) -> int:
@@ -48,11 +48,10 @@ def _staged_check(paths: list, message: str) -> int:
         ("commit message", run(["bash", "scripts/hooks/conventional-commit-check.sh", str(msg_file)]).returncode)
     )
 
-    print("\n" + "─" * 60)
-    for name, code in results:
-        print(f"{'✅' if code == 0 else '❌'}  {name}")
-    print("─" * 60)
-    return 1 if any(code for _, code in results) else 0
+    # `summarize`, not a second copy of its table: the gate table had been
+    # reimplemented here, and two renderings of one result drift — which is the
+    # rule the rest of this tier exists to enforce.
+    return summarize(results)
 
 
 @click.command()
@@ -66,14 +65,14 @@ def commit(message: str, dry_run: bool, paths: tuple) -> None:
     for path in path_list:
         if path in {".", "-A", "--all", "-a"}:
             fail(f"'{path}' stages the whole tree — in a shared tree that commits somebody else's work.")
-            print("   Name the paths you touched.")
+            detail("Name the paths you touched.")
             sys.exit(1)
         if not (PROJECT_ROOT / path).exists():
             fail(f"no such path: {path}")
             sys.exit(1)
 
     branch_before = current_branch()
-    print(f"→ checking {len(path_list)} path(s) on '{branch_before}'")
+    step(f"checking {len(path_list)} path(s) on '{branch_before}'")
 
     if _staged_check(path_list, message) != 0:
         fail("checks failed — nothing staged, nothing committed")
@@ -88,8 +87,8 @@ def commit(message: str, dry_run: bool, paths: tuple) -> None:
     branch_after = current_branch()
     if branch_after != branch_before:
         fail(f"the branch moved while the checks ran: '{branch_before}' → '{branch_after}'")
-        print("   Somebody else is using this tree. Refusing to commit — re-run when it settles,")
-        print("   or take your own tree with `{{CLI}} worktree new <branch>`.")
+        detail("Somebody else is using this tree. Refusing to commit — re-run when it settles,")
+        detail("or take your own tree with `{{CLI}} worktree new <branch>`.")
         sys.exit(1)
 
     if run(["git", "add", "--", *path_list]).returncode != 0:

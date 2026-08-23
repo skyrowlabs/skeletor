@@ -92,6 +92,29 @@ A release closes the report window: in-flight reports under
 `docs/reports/regular/` freeze into `docs/reports/releases/<tag>/`. See
 [`.claude/rules/docs.md`](../.claude/rules/docs.md).
 
+## Command Output
+
+Every command splits its output the same way: **stdout is what a caller
+consumes** (a `--json` payload, a generated block, a listing you may pipe) and
+**stderr is what only a human reads** (status lines, progress, and the "what to
+do next" under an error).
+
+Both land on your terminal, so an interactive run looks the same either way. The
+difference appears the moment you pipe one:
+
+```bash
+python scripts/check_doc_tables.py --json | jq        # payload only
+./{{CLI}} check docs 2>/dev/null                        # silent: it is all narration
+```
+
+Every `scripts/check_*.py` supports `--json` and answers on **every** path,
+including the ones that pass — a ratchet you can only read when it is red says
+nothing about which way it has been moving.
+
+Nothing spells a status symbol or picks a stream by hand; it all comes from
+`scripts/output.py`, and `{{CLI}} check output` enforces that by pattern.
+Full rules: [`.claude/rules/output.md`](../.claude/rules/output.md).
+
 ## Reproducing a CI Failure Locally
 
 ```bash

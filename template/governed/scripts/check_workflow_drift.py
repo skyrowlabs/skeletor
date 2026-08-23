@@ -23,12 +23,16 @@ Usage:  python scripts/check_workflow_drift.py [--json]
 from __future__ import annotations
 
 import argparse
-import json
 import re
+import sys
 from pathlib import Path
 from typing import Dict, List
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.output import detail, emit, fail, item, ok  # noqa: E402
+
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 ALLOWLIST = REPO_ROOT / "scripts" / "workflow_drift_allowlist.yaml"
 
@@ -110,17 +114,18 @@ def main() -> int:
                     findings.append(f"{key}: missing '{step}' — {why}")
 
     if args.json:
-        print(json.dumps({"enrolled": enrolled, "findings": findings, "exempt": list(allowlist)}, indent=2))
+        emit({"enrolled": enrolled, "findings": findings, "exempt": sorted(allowlist)})
 
     if findings:
-        print(f"❌ {len(findings)} drift finding(s) across {len(enrolled)} enrolled job(s):")
-        for line in findings:
-            print(f"   · {line}")
-        print("\n   Fix the job, or record the divergence in scripts/workflow_drift_allowlist.yaml")
-        print("   WITH A REASON. An intended divergence is fine; one nobody decided is the bug.")
+        fail(f"{len(findings)} drift finding(s) across {len(enrolled)} enrolled job(s):")
+        for finding in findings:
+            item(finding)
+        detail()
+        detail("Fix the job, or record the divergence in scripts/workflow_drift_allowlist.yaml")
+        detail("WITH A REASON. An intended divergence is fine; one nobody decided is the bug.")
         return 1
 
-    print(f"✅ {len(enrolled)} enrolled job(s) consistent ({len(allowlist)} exempt by allowlist)")
+    ok(f"{len(enrolled)} enrolled job(s) consistent ({len(allowlist)} exempt by allowlist)")
     return 0
 
 

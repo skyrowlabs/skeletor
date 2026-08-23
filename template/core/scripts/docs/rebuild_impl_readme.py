@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import plans  # noqa: E402
+from scripts.output import die, fail, ok  # noqa: E402
 
 INDEX_PATH = plans.REPO_ROOT / "docs" / "implementation_index.json"
 README_PATH = plans.IMPL_DIR / "README.md"
@@ -32,7 +33,7 @@ def _cell(text: str) -> str:
 
 def build() -> str:
     if not INDEX_PATH.exists():
-        raise SystemExit("❌ implementation_index.json missing — run gen_impl_index.py first")
+        die("implementation_index.json missing — run gen_impl_index.py first")
     index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
     entries = index["implementations"]
 
@@ -100,14 +101,14 @@ def main() -> int:
     if args.check:
         current = README_PATH.read_text(encoding="utf-8") if README_PATH.exists() else ""
         if current != rendered:
-            print("❌ docs/implementations/README.md is stale — run `{{CLI}} docs index`")
+            fail("docs/implementations/README.md is stale — run `{{CLI}} docs index`")
             return 1
-        print("✅ docs/implementations/README.md is current")
+        ok("docs/implementations/README.md is current")
         return 0
 
     README_PATH.parent.mkdir(parents=True, exist_ok=True)
     README_PATH.write_text(rendered, encoding="utf-8")
-    print("✅ wrote docs/implementations/README.md")
+    ok("wrote docs/implementations/README.md")
     return 0
 
 

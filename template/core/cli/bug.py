@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 import click
 
-from cli.helpers import PROJECT_ROOT, current_branch, git, ok, warn
+from cli.helpers import PROJECT_ROOT, current_branch, detail, git, ok, warn
 
 QUEUE = PROJECT_ROOT / "tmp" / "bugs"
 
@@ -60,7 +60,7 @@ def bug(summary: str, finding: str, reproduce: str, scope: str, acceptance: str,
         )
         if result.returncode == 0:
             ok(f"captured: {result.stdout.strip()}")
-            print("   Mention this in your response so the user can kill it if they disagree.")
+            detail("Mention this in your response so the user can kill it if they disagree.")
             return
         warn(
             f"gh failed ({result.stderr.strip().splitlines()[-1] if result.stderr.strip() else 'unknown'}) — falling back to a local capture"

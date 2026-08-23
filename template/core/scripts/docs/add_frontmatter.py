@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import frontmatter, plans  # noqa: E402
+from scripts.output import item, ok  # noqa: E402
 
 
 def _derive(plan: plans.Plan, archive: bool) -> dict:
@@ -81,9 +82,9 @@ def main() -> int:
             continue
         frontmatter.write(plan.path, derived, plan.body)
         written += 1
-        print(f"  · {plan.path.relative_to(plans.REPO_ROOT)}")
+        item(f"{plan.path.relative_to(plans.REPO_ROOT)}")
 
-    print(f"✅ frontmatter: {written} doc(s) updated, {len(targets) - written} already current")
+    ok(f"frontmatter: {written} doc(s) updated, {len(targets) - written} already current")
     return 0
 
 

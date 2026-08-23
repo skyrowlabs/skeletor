@@ -148,6 +148,53 @@ run — a Python-only commit matches nothing and pays nothing.
 
 ---
 
+## Output: two streams, one vocabulary
+
+This is the one mechanism here that was **not** extracted from the source
+repository. Its incident happened in this shell, which is the only reason it is
+worth reading: it is what the failure looks like when the discipline is missing
+from a codebase that is otherwise entirely about that discipline.
+
+`cli/helpers.py` shipped `ok()` / `fail()` / `warn()` from the first commit.
+Roughly twenty call sites across `scripts/` printed `f"✅ ..."` by hand anyway —
+not out of carelessness, but because **`scripts/` could not import `cli/`**. The
+dependency runs one way only, so half the tree could not reach the vocabulary,
+and a vocabulary half the tree cannot reach is one the other half reinvents.
+
+What that cost, measured in the template as it stood:
+
+| Symptom                                             | What it actually was                        |
+| --------------------------------------------------- | -------------------------------------------- |
+| `⏸️` defined in no file, spelled in three            | two spellings already differed by a space    |
+| The gate table reimplemented in `cli/commit.py`      | a second renderer of one result             |
+| `--json` on four scripts, parseable on one           | JSON and `❌` lines sharing one stdout       |
+| No `--json` on either ratchet                        | the two numbers a dashboard most wants       |
+
+None of it is visible to a linter or to review, because every individual file is
+internally consistent. That is the same shape as the compose-drift bug, and it
+gets the same treatment.
+
+**The fix is a stream split, not a style guide.** `scripts/output.py` owns the
+symbols and the streams: status and narration to **stderr**, payload and
+listings to **stdout**. Both still land on a terminal, so an interactive run
+looks unchanged. What changes is that `--json` stops needing a second code path —
+build the result object, `emit` it, render the human half exactly as before. The
+early `return` that three scripts were missing is no longer a thing to remember.
+
+That is the transferable half: **the reason to separate the streams is not
+tidiness, it is that it makes the machine-readable flag free.** A `--json` that
+costs a branch per exit path gets added to the scripts somebody happened to need
+it on, and those are never the ones a dashboard asks for later.
+
+Enrolment in `check_output_discipline.py` is by pattern — every `.py` under
+`cli/` and `scripts/` — with exemptions in an allowlist with a written reason.
+It flags a state symbol typed into a `print`, a stream picked by hand, and a
+`check_*.py` with no `--json`. `tests/test_output_contract.py` then *runs* each
+checker and parses the result, because a payload can be well-shaped in the
+source and still unusable in practice, which is exactly what had happened.
+
+---
+
 ## Testing
 
 **Registration is marker-based, and this is the strongest single pattern.**
@@ -373,6 +420,7 @@ Not everything here is worth copying, and the shell reflects that.
 | Release-anchored reports               | **Take when something writes reports on a cron.**   |
 | Shared-tree locks + scoped commit      | **Take when a second agent runs concurrently.**      |
 | Compose/workflow drift checks          | **Take at the second copy**, not before.            |
+| One output module + stream split       | **Take on day one.** It is an hour, and it is what makes `--json` free later. |
 | 25 scheduled jobs                      | **Do not copy.** Start with one and earn the rest. |
 | A 430KB API doc                        | **Not a target.** A consequence.                    |
 | A 165-command CLI                      | **Not a target.** The *rule* is what transfers.     |

@@ -15,17 +15,24 @@ Paths that name nothing real by design — help text, output destinations, test
 fixtures — go in `.github/scripts/.validate-ignore`.
 
 Usage:  python scripts/check_source_doc_refs.py [--json]
+
+`--json` is additive: the payload goes to stdout, the explanation to stderr, and
+both halves describe the same run. See `scripts/output.py`.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import re
+import sys
 from pathlib import Path
 from typing import List
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.output import detail, emit, fail, item, ok  # noqa: E402
+
 IGNORE_FILE = REPO_ROOT / ".github" / "scripts" / ".validate-ignore"
 
 SOURCE_SUFFIXES = {".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".sh", ".yml", ".yaml", ".toml"}
@@ -85,16 +92,16 @@ def main() -> int:
                     dead.append(f"{source.relative_to(REPO_ROOT)}:{lineno}: {ref}{_successor(ref)}")
 
     if args.json:
-        print(json.dumps({"checked": checked, "dead": dead}, indent=2))
-        return 1 if dead else 0
+        emit({"checked": checked, "dead": dead})
 
     if dead:
-        print(f"❌ {len(dead)} dead doc reference(s) in source — repoint them, never delete:")
-        for line in dead:
-            print(f"   · {line}")
-        print("\n   A reference that names nothing by design goes in .github/scripts/.validate-ignore")
+        fail(f"{len(dead)} dead doc reference(s) in source — repoint them, never delete:")
+        for entry in dead:
+            item(entry)
+        detail()
+        detail("A reference that names nothing by design goes in .github/scripts/.validate-ignore")
         return 1
-    print(f"✅ {checked} doc reference(s) in source, all resolve")
+    ok(f"{checked} doc reference(s) in source, all resolve")
     return 0
 
 

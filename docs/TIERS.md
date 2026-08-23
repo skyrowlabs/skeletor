@@ -35,6 +35,7 @@ and every piece pays for itself inside a week.
 | `require_or_skip`                | A skip in CI becomes a failure, so "green" means "ran"        |
 | Doc link / ref / table checkers  | Filing a plan stops silently rotting links in two directions  |
 | `ci.yml` with a gate job         | Draft PRs cost ~1 minute; ready PRs cost what they earn       |
+| One output module + a stream split | Status on stderr, payload on stdout — so `--json` is one line, not a code path |
 | `bug` capture command            | An out-of-scope bug leaves the session without widening it    |
 
 **Cost**: about a day to internalise. The docs lifecycle is the only part with a

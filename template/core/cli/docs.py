@@ -12,7 +12,7 @@ import sys
 
 import click
 
-from cli.helpers import PROJECT_ROOT, fail, git, ok, run, script, warn
+from cli.helpers import PROJECT_ROOT, detail, fail, git, item, line, ok, run, script, step, warn
 
 TODO_DIR = PROJECT_ROOT / "docs" / "TODO"
 IMPL_DIR = PROJECT_ROOT / "docs" / "implementations"
@@ -83,21 +83,21 @@ def file(slug: str, category: str, dry_run: bool, force: bool) -> None:
         fail(f"no such plan: docs/TODO/{slug}.md")
         candidates = sorted(p.stem for p in TODO_DIR.glob("*.md") if slug in p.stem)
         if candidates:
-            print(f"   did you mean: {', '.join(candidates)}")
+            detail(f"did you mean: {', '.join(candidates)}")
         sys.exit(1)
 
     plan = plans.load(source)
     if plan.auto_generated:
         fail(f"{slug} is agent-managed (auto_generated: true) — its producing job recreates it.")
-        print("   Filing it would leave a zombie behind. Nothing to do here.")
+        detail("Filing it would leave a zombie behind. Nothing to do here.")
         sys.exit(1)
 
     open_tasks = plan.open_tasks()
     if open_tasks and not force:
         fail(f"{slug} still has {len(open_tasks)} unchecked task(s):")
         for task in open_tasks[:5]:
-            print(f"   · {task}")
-        print("   Tick them, mark them (~operator)/(~deferred), or pass --force.")
+            item(task)
+        detail("Tick them, mark them (~operator)/(~deferred), or pass --force.")
         sys.exit(1)
 
     target = IMPL_DIR / category / f"{slug}.md"
@@ -105,7 +105,7 @@ def file(slug: str, category: str, dry_run: bool, force: bool) -> None:
         fail(f"already archived: {target.relative_to(PROJECT_ROOT)}")
         sys.exit(1)
 
-    print(f"→ git mv docs/TODO/{slug}.md docs/implementations/{category}/{slug}.md")
+    step(f"git mv docs/TODO/{slug}.md docs/implementations/{category}/{slug}.md")
     if dry_run:
         warn("dry run — nothing changed")
         return
@@ -119,9 +119,10 @@ def file(slug: str, category: str, dry_run: bool, force: bool) -> None:
 
     script("scripts/docs/regen.py")
     ok(f"filed {slug} → docs/implementations/{category}/")
-    print("\nNext, repoint what cited the old path (repoint, never delete):")
-    print("   {{CLI}} check doc-refs")
-    print("   {{CLI}} check doc-links")
+    detail()
+    detail("Next, repoint what cited the old path (repoint, never delete):")
+    detail("  {{CLI}} check doc-refs")
+    detail("  {{CLI}} check doc-links")
 
 
 @docs.command(name="queue-order")
@@ -151,20 +152,23 @@ def queue_order(slug: str, position: int) -> None:
     text = source.read_text(encoding="utf-8")
     lines = text.splitlines()
     new_line = f"> **Queue-Order**: {position}"
-    for i, line in enumerate(lines):
-        if line.startswith("> **Queue-Order**:"):
+    # Named `existing`, not `line`: `line` is the stdout writer imported above,
+    # and a loop variable that shadows it turns the next call into a TypeError.
+    for i, existing in enumerate(lines):
+        if existing.startswith("> **Queue-Order**:"):
             lines[i] = new_line
             break
     else:
-        anchor = next((i for i, line in enumerate(lines) if line.startswith("> **Priority**:")), None)
+        anchor = next((i for i, existing in enumerate(lines) if existing.startswith("> **Priority**:")), None)
         if anchor is None:
-            anchor = next((i for i, line in enumerate(lines) if line.startswith("> **Shelf-Status**:")), 0)
+            anchor = next((i for i, existing in enumerate(lines) if existing.startswith("> **Shelf-Status**:")), 0)
         lines.insert(anchor + 1, new_line)
     source.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     script("scripts/docs/regen.py")
     ok(f"{slug} is now at queue position {position}")
-    print("\nResulting run order:")
+    line()
+    line("Resulting run order:")
     from scripts.docs.queue_order import run_order
 
     ready = sorted(
@@ -172,7 +176,7 @@ def queue_order(slug: str, position: int) -> None:
     )
     for i, plan in enumerate(ready, 1):
         pos = plan.queue_order if plan.queue_order is not None else "—"
-        print(f"   {i}. [{pos}] {plan.slug} ({plan.priority})")
+        line(f"   {i}. [{pos}] {plan.slug} ({plan.priority})")
 
 
 @docs.command()
@@ -187,22 +191,24 @@ def status() -> None:
     for plan in tank:
         counts[plan.shelf_status] = counts.get(plan.shelf_status, 0) + 1
 
-    print(f"Holding tank: {len(tank)} plans on {git('rev-parse', '--abbrev-ref', 'HEAD')}")
+    line(f"Holding tank: {len(tank)} plans on {git('rev-parse', '--abbrev-ref', 'HEAD')}")
     for status_name in plans.SHELF_STATUSES:
         if counts.get(status_name):
-            print(f"   {status_name:<12} {counts[status_name]}")
+            line(f"   {status_name:<12} {counts[status_name]}")
 
     ready = sorted(
         (p for p in tank if p.shelf_status == "ready" and not p.auto_generated), key=lambda p: run_order(p.to_entry())
     )
     if ready:
-        print("\nReady queue (run order):")
+        line()
+        line("Ready queue (run order):")
         for i, plan in enumerate(ready[:10], 1):
             pos = plan.queue_order if plan.queue_order is not None else "—"
-            print(f"   {i}. [{pos}] {plan.slug} ({plan.priority})")
+            line(f"   {i}. [{pos}] {plan.slug} ({plan.priority})")
 
     review = [p for p in tank if p.shelf_status == "in-review"]
     if review:
-        print("\nAwaiting your review:")
+        line()
+        line("Awaiting your review:")
         for plan in review:
-            print(f"   · {plan.slug} → {plan.review_pr or 'no PR recorded'}")
+            line(f"   · {plan.slug} → {plan.review_pr or 'no PR recorded'}")

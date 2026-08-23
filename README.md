@@ -84,6 +84,7 @@ Every one is runnable locally with the same invocation CI uses.
 | `check_skip_budget.py` | A suite that quietly stopped testing (ratchet) | C |
 | `check_coverage_budget.py` | Coverage sliding while nobody looks (ratchet) | C |
 | `install_merge_drivers.py --check` | A checkout missing the driver, plus regenerations owed | C |
+| `check_output_discipline.py` | A status symbol or a stream picked outside `scripts/output.py` — auto-enrolled | C |
 | `check_workflow_drift.py` | Two CI jobs that boot the stack diverging — auto-enrolled, not a registry | G |
 | `tree_lock.py` | Whether a branch change would strand somebody's work | G |
 

@@ -37,6 +37,7 @@ from typing import Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import frontmatter  # noqa: E402
+from scripts.output import die, emit, fail, item, ok  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGULAR_DIR = REPO_ROOT / "docs" / "reports" / "regular"
@@ -72,7 +73,7 @@ def window(release: Optional[str] = None) -> Dict[str, object]:
     all_tags = tags()
     if release:
         if release not in all_tags:
-            raise SystemExit(f"❌ unknown release tag: {release}")
+            die(f"unknown release tag: {release}")
         idx = all_tags.index(release)
         previous = all_tags[idx + 1] if idx + 1 < len(all_tags) else None
         head = release
@@ -125,13 +126,13 @@ def apply(only: Optional[str] = None) -> int:
     win = window()
     targets = [only] if only else ANCHORED_REPORTS
     if only and only not in ANCHORED_REPORTS:
-        print(f"❌ {only} is not in ANCHORED_REPORTS — add it there first")
+        fail(f"{only} is not in ANCHORED_REPORTS — add it there first")
         return 1
 
     for name in targets:
         path = REGULAR_DIR / name
         if not path.exists():
-            print(f"❌ missing report: {path.relative_to(REPO_ROOT)} — seed it before scheduling its job")
+            fail(f"missing report: {path.relative_to(REPO_ROOT)} — seed it before scheduling its job")
             return 1
         data, body = frontmatter.read(path)
         data.update({k: win[k] for k in ("release", "previous_release", "commit_range", "status", "generated")})
@@ -144,7 +145,7 @@ def apply(only: Optional[str] = None) -> int:
         else:
             body = _prose(win) + "\n\n" + body
         frontmatter.write(path, data, body + "\n")
-        print(f"  · anchored {name}")
+        item(f"anchored {name}")
     return 0
 
 
@@ -171,11 +172,11 @@ def check() -> int:
             failures.append(f"{edition.relative_to(REPO_ROOT)}: frozen edition must carry status: released")
 
     if failures:
-        print("❌ report anchors:")
-        for line in failures:
-            print(f"   · {line}")
+        fail("report anchors:")
+        for failure in failures:
+            item(failure)
         return 1
-    print(f"✅ report anchors: {len(ANCHORED_REPORTS)} in-flight, {len(list(RELEASES_DIR.glob('*/*.md')))} frozen")
+    ok(f"report anchors: {len(ANCHORED_REPORTS)} in-flight, {len(list(RELEASES_DIR.glob('*/*.md')))} frozen")
     return 0
 
 
@@ -191,7 +192,7 @@ def main() -> int:
         return check()
     if args.apply:
         return apply(args.only)
-    print(json.dumps(window(args.release), indent=2))
+    emit(window(args.release))
     return 0
 
 

@@ -128,6 +128,19 @@ All four sections are required — a capture missing any of them is refused, bec
 nobody can act on is a note, not a task. Mention what you captured in your response so the
 user can kill it if they disagree.
 
+### 13. One Voice, Two Streams
+
+Nothing prints a status symbol or picks a stream by hand. Every emission goes
+through `scripts/output.py`: `ok` / `fail` / `warn` / `skip` / `step` to **stderr**,
+`line` / `emit` to **stdout**.
+
+The split is what makes `--json` free — the payload has the stream to itself, so
+a machine-readable flag is one extra emit rather than a second code path. Every
+`scripts/check_*.py` supports `--json` and answers on every path, including the
+ones that pass. `{{CLI}} check output` enrols every file under `cli/` and
+`scripts/` by pattern; exceptions go in `scripts/output_allowlist.yaml` with a
+reason. Full rules in `.claude/rules/output.md`.
+
 ---
 
 ## Documentation Reference

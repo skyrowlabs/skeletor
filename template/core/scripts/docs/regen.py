@@ -18,6 +18,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.output import fail, step  # noqa: E402
 
 #: (script, human label). Frontmatter first — both indexes read it.
 PIPELINE = [
@@ -41,12 +44,12 @@ def main() -> int:
         if args.check and script == "add_frontmatter.py":
             continue
         cmd = [sys.executable, str(HERE / script)] + (["--check"] if args.check else [])
-        print(f"→ {label}")
+        step(label)
         if subprocess.run(cmd, cwd=REPO_ROOT).returncode != 0:
             status = 1
 
     if args.check and status:
-        print("\n❌ generated docs are stale — run `{{CLI}} docs index`")
+        fail("generated docs are stale — run `{{CLI}} docs index`")
     return status
 
 

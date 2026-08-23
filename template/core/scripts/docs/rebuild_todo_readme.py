@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import plans  # noqa: E402
 from scripts.docs.queue_order import UNORDERED, queue_position, run_order  # noqa: E402
+from scripts.output import fail, ok  # noqa: E402
 
 README_PATH = plans.TODO_DIR / "README.md"
 
@@ -187,14 +188,14 @@ def main() -> int:
     if args.check:
         current = README_PATH.read_text(encoding="utf-8") if README_PATH.exists() else ""
         if current != rendered:
-            print("❌ docs/TODO/README.md is stale — run `{{CLI}} docs index`")
+            fail("docs/TODO/README.md is stale — run `{{CLI}} docs index`")
             return 1
-        print("✅ docs/TODO/README.md is current")
+        ok("docs/TODO/README.md is current")
         return 0
 
     README_PATH.parent.mkdir(parents=True, exist_ok=True)
     README_PATH.write_text(rendered, encoding="utf-8")
-    print("✅ wrote docs/TODO/README.md")
+    ok("wrote docs/TODO/README.md")
     return 0
 
 

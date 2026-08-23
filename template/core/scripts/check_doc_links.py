@@ -18,7 +18,10 @@ sentence rewritten to name the successor, or de-linked to a backticked path plus
 the commit that removed it. These links are prose that records why the docs say
 what they say.
 
-Usage:  python scripts/check_doc_links.py [--fix] [--json]
+Usage:  python scripts/check_doc_links.py [--json] [--update-baseline]
+
+`--json` is additive: the payload goes to stdout, the explanation to stderr.
+See `scripts/output.py`.
 """
 
 from __future__ import annotations
@@ -26,10 +29,15 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.output import detail, emit, fail, item, ok  # noqa: E402
+
 BASELINE = REPO_ROOT / "scripts" / "doc_links_baseline.json"
 IGNORE_FILE = REPO_ROOT / ".github" / "scripts" / ".validate-ignore"
 
@@ -151,11 +159,13 @@ def main() -> int:
             + "\n",
             encoding="utf-8",
         )
-        print(f"✅ baseline set to {len(dead_paths)} broken / {len(dead_anchors)} dead anchors")
+        if args.json:
+            emit({"broken": dead_paths, "dead_anchors": dead_anchors, "baseline_updated": True})
+        ok(f"baseline set to {len(dead_paths)} broken / {len(dead_anchors)} dead anchors")
         return 0
 
     if args.json:
-        print(json.dumps({"broken": dead_paths, "dead_anchors": dead_anchors, "baseline": baseline}, indent=2))
+        emit({"broken": dead_paths, "dead_anchors": dead_anchors, "baseline": baseline})
 
     status = 0
     for label, found, ceiling in (
@@ -163,17 +173,17 @@ def main() -> int:
         ("dead anchors", dead_anchors, baseline.get("max_dead_anchors", 0)),
     ):
         if len(found) > ceiling:
-            print(f"❌ {len(found)} {label} (ceiling {ceiling}) — repoint them, never delete:")
-            for line in found[:40]:
-                print(f"   · {line}")
+            fail(f"{len(found)} {label} (ceiling {ceiling}) — repoint them, never delete:")
+            for entry in found[:40]:
+                item(entry)
             if len(found) > 40:
-                print(f"   … and {len(found) - 40} more")
+                detail(f"… and {len(found) - 40} more")
             status = 1
         elif len(found) < ceiling:
-            print(f"✅ {len(found)} {label} — below the {ceiling} ceiling. Lower it in this commit:")
-            print("     python scripts/check_doc_links.py --update-baseline")
+            ok(f"{len(found)} {label} — below the {ceiling} ceiling. Lower it in this commit:")
+            detail("  python scripts/check_doc_links.py --update-baseline")
         else:
-            print(f"✅ {label}: {len(found)} (at the ceiling)")
+            ok(f"{label}: {len(found)} (at the ceiling)")
     return status
 
 
