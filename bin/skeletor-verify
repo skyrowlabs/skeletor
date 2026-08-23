@@ -294,7 +294,24 @@ def check_upgrade_is_noop(tree: Path) -> Result:
         cwd=tree,
     )
     passed = code == 0 and "already current" in output
-    return Result("skeletor-upgrade is a no-op on a fresh tree", passed, time.time() - started, output)
+
+    # And again from the recorded hashes alone, which is the path taken when
+    # skeletor's history is out of reach. It exercises a different comparison
+    # entirely, and it is the one nobody runs by hand — so it is the one that
+    # would rot. A mismatch here means the manifest cannot describe the tree it
+    # was written from, which is exactly when the fallback would misclassify an
+    # edited file as untouched and overwrite it.
+    offline_code, offline_output = run(
+        [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--dry-run", "--no-base"],
+        cwd=tree,
+    )
+    passed = passed and offline_code == 0 and "already current" in offline_output
+    return Result(
+        "skeletor-upgrade is a no-op on a fresh tree (rendered and offline)",
+        passed,
+        time.time() - started,
+        output + "\n" + offline_output,
+    )
 
 
 def check_script_targets(tree: Path) -> Result:

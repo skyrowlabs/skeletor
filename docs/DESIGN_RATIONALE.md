@@ -220,11 +220,27 @@ Two rules do the work:
   same posture as `skeletor-check-pins`, which reports a bump and never makes
   one.
 
-The manifest holds no file hashes, which is the part worth stealing. A hash
-would be a second copy of what the render already answers, and the failure mode
-of a stale manifest is silent: it merges against a base that never existed. The
-price is that an upgrade needs the generator's git history to reach the base
-ref, and that is a fair trade for a value that cannot drift.
+The part worth stealing is how the manifest handles its one derived value. The
+base is reproduced by re-rendering, which needs the generator's git history —
+and there are ordinary reasons that is absent: a `--depth 1` clone, a tarball, a
+collected ref. So the manifest also carries a hash per file, purely as a
+fallback, and that is a cache of something the render already answers. Normally
+this project would refuse it: the failure mode of a stale cache is silent.
+
+It is allowed on two conditions, and they generalise:
+
+* **It is checked against its source on every run that does not need it.** When
+  the base *is* rendered, it is re-hashed and a disagreement is a hard failure.
+  The one run that depends on the cache is never the first to test it.
+* **What it proves is exact, not probable.** An equal hash means the file *is*
+  byte-for-byte what the generator produced, so replacing it cannot lose an edit
+  that was never made. The fallback is allowed to write files because of that,
+  and it is allowed to merge nothing, because merging needs the base text.
+
+The subtle half is which bytes get hashed. The recorded hash is of **what the
+generator produces**, never of what is on disk — a merged file is neither the
+old render nor the new one, so hashing the tree would record it as pristine and
+the next upgrade would overwrite the merge.
 
 ---
 

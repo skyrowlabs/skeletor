@@ -36,22 +36,37 @@ Nothing is committed, nothing is deleted, and a file the template dropped is
 reported rather than removed — the same posture as `bin/skeletor-check-pins`,
 which reports a bump and never makes one.
 
-## What it does not do
+## When the base is out of reach
 
-There are no file hashes in `.skeletor.json`. A hash is a second copy of what a
-render already answers, and a manifest that can disagree with the template is
-worse than none. The cost is that this needs skeletor's git history; the
-benefit is that the manifest cannot go stale.
+Rendering the base needs skeletor's git history, and there are ordinary reasons
+it is not there: a `--depth 1` clone, a tarball, a collected ref, a rewritten
+branch. Rather than refuse, this falls back to the `files` hashes in the
+manifest, which answer the one question that still matters — *has anybody
+touched this file?*
+
+The fallback applies a file only when its hash matches, and that is a proof
+rather than a guess: an equal hash means the file **is** byte-for-byte what
+skeletor generated, so replacing it with a newer render cannot lose an edit
+that was never made. What the fallback cannot do is merge — merging needs the
+base *text* — so an edited file is reported and left alone.
+
+The hashes are a derived value with a second home, which is normally the thing
+this project refuses. They earn it by being checked against their source on
+every ordinary run: when the base *is* rendered, it is re-hashed and a manifest
+that disagrees is a hard failure. A cache validated against its source every
+time it is bypassed cannot rot unnoticed.
 
 Usage:
     bin/skeletor-upgrade ../orders
     bin/skeletor-upgrade ../orders --dry-run
+    bin/skeletor-upgrade ../orders --no-base      # what have I edited?
     bin/skeletor-upgrade ../orders --from-dir /path/to/another/skeletor
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
@@ -128,7 +143,7 @@ def render_with(checkout: Path, args: List[str], into: Path) -> None:
         die(f"rendering with {checkout} failed:\n{result.stdout}\n{result.stderr}")
 
 
-def base_checkout(ref: str, workdir: Path) -> Tuple[Path, Path, str]:
+def base_checkout(ref: str, workdir: Path, *, fatal: bool = True) -> Tuple[Optional[Path], Optional[Path], str]:
     """A detached worktree of skeletor at `ref`: the tree, what to clean up, and
     the ref actually used — which is not `ref` when the scaffold was dirty."""
     if ref.endswith("-dirty"):
@@ -142,11 +157,13 @@ def base_checkout(ref: str, workdir: Path) -> Tuple[Path, Path, str]:
         text=True,
     )
     if result.returncode != 0:
-        die(
-            f"cannot check out skeletor at '{ref}':\n   {result.stderr.strip()}\n"
-            "   A shallow clone or a rewritten history cannot reproduce the base. "
-            "Pass --from-dir with a checkout that can."
-        )
+        if fatal:
+            die(
+                f"cannot check out skeletor at '{ref}':\n   {result.stderr.strip()}\n"
+                "   A shallow clone or a rewritten history cannot reproduce the base. "
+                "Pass --from-dir with a checkout that can."
+            )
+        return None, None, ref
     return tree, tree, ref
 
 
@@ -156,10 +173,35 @@ def files_under(root: Path) -> Dict[str, Path]:
         if not path.is_file():
             continue
         rel = path.relative_to(root).as_posix()
-        if rel.startswith(SKIP_PREFIXES) or "__pycache__" in path.parts:
+        if rel == MANIFEST_NAME or rel.startswith(SKIP_PREFIXES) or "__pycache__" in path.parts:
             continue
         out[rel] = path
     return out
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def cross_check(base_files: Dict[str, Path], recorded: Dict[str, str]) -> List[str]:
+    """Every recorded hash must match the base render it claims to describe.
+
+    This is what lets the fallback exist. The hashes are only consulted when the
+    render is unreachable, so if they were never checked they could drift for
+    months and then, on the one run that needed them, quietly classify an edited
+    file as untouched. Checking them on every run that does NOT need them is the
+    cheapest possible guard, and it fails on the run where it is safe to fail.
+    """
+    disagreements = []
+    for rel, expected in sorted(recorded.items()):
+        rendered = base_files.get(rel)
+        if rendered is None:
+            disagreements.append(f"{rel}: recorded, but the base render does not produce it")
+        elif sha256(rendered) != expected:
+            disagreements.append(f"{rel}: recorded hash does not match the base render")
+    for rel in sorted(set(base_files) - set(recorded)):
+        disagreements.append(f"{rel}: the base render produces it, but it is not recorded")
+    return disagreements
 
 
 def read(path: Optional[Path]) -> Optional[str]:
@@ -204,6 +246,12 @@ def main() -> int:
     parser.add_argument("target", help="the scaffolded tree to upgrade")
     parser.add_argument("--dry-run", action="store_true", help="report what would change, write nothing")
     parser.add_argument("--from-dir", help="use this skeletor checkout as the base instead of the recorded ref")
+    parser.add_argument(
+        "--no-base",
+        action="store_true",
+        help="skip the base render: classify from the recorded hashes alone. Answers "
+        "'what have I edited?' without git, but cannot merge.",
+    )
     parser.add_argument("--json", action="store_true", help="emit the result on stdout as well")
     args = parser.parse_args()
 
@@ -217,25 +265,56 @@ def main() -> int:
     if not recorded:
         die(f"{target / MANIFEST_NAME} records no arguments — it cannot be re-rendered")
 
+    hashes: Dict[str, str] = manifest.get("files") or {}
+
     workdir = Path(tempfile.mkdtemp(prefix="skeletor-upgrade-"))
     cleanup_worktree: Optional[Path] = None
     try:
-        if args.from_dir:
+        base_src: Optional[Path] = None
+        if args.no_base:
+            if not hashes:
+                die("--no-base needs the `files` hashes, and this manifest has none")
+            say("⏸️ ", "no base render — classifying from the recorded hashes, and not merging")
+        elif args.from_dir:
             base_src = Path(args.from_dir).expanduser().resolve()
             say("→", f"base: {base_src}")
+        elif not ref:
+            die(f"{MANIFEST_NAME} records no skeletor_ref — pass --from-dir or --no-base")
         else:
-            if not ref:
-                die(f"{MANIFEST_NAME} records no skeletor_ref — pass --from-dir")
-            base_src, cleanup_worktree, ref = base_checkout(ref, workdir)
-            say("→", f"base: skeletor @ {ref}")
+            reachable, cleanup_worktree, ref = base_checkout(ref, workdir, fatal=not hashes)
+            if reachable is None:
+                # The history is gone, but the hashes can still say what is
+                # untouched. Degraded on purpose, and it says so.
+                say("⚠️ ", f"skeletor has no reachable '{ref}' — falling back to the recorded hashes")
+                detail("Files you never touched are still updated. Files you edited cannot be")
+                detail("merged without the base text, so they are reported and left alone.")
+                args.no_base = True
+            else:
+                base_src = reachable
+                say("→", f"base: skeletor @ {ref}")
 
-        base_tree = workdir / "base"
         head_tree = workdir / "head"
-        render_with(base_src, recorded, base_tree)
         render_with(SKELETOR, recorded, head_tree)
-
-        base_files = files_under(base_tree)
         head_files = files_under(head_tree)
+
+        base_files: Dict[str, Path] = {}
+        if base_src is not None:
+            base_tree = workdir / "base"
+            render_with(base_src, recorded, base_tree)
+            base_files = files_under(base_tree)
+            if hashes:
+                drift = cross_check(base_files, hashes)
+                if drift:
+                    say("❌", f"{MANIFEST_NAME} disagrees with the base it names ({len(drift)} file(s)):")
+                    for entry in drift[:20]:
+                        item(entry)
+                    if len(drift) > 20:
+                        detail(f"… and {len(drift) - 20} more")
+                    detail()
+                    detail("The recorded hashes are the fallback used when history is unreachable,")
+                    detail("so a manifest that cannot describe its own base would silently classify")
+                    detail("an edited file as untouched. Refusing rather than guessing.")
+                    return 1
 
         added, updated, merged, conflicted, kept, dropped = [], [], [], [], [], []
         patches = target / "tmp" / "upgrade"
@@ -262,10 +341,37 @@ def main() -> int:
                 continue
 
             if base is None:
-                # Present in the tree and in today's template, absent from the
-                # base: treat it as the user's until proven otherwise.
-                if theirs != ours:
-                    conflicted.append(rel)
+                # No base text for this file — either it is absent from the base
+                # render, or there is no base render at all. Fall back to the
+                # recorded hash, which answers "untouched?" and nothing else.
+                recorded_hash = hashes.get(rel)
+                if recorded_hash is None:
+                    if theirs != ours:
+                        conflicted.append(rel)
+                    continue
+
+                # The recorded hash is the hash of the OLD RENDER, so it answers
+                # both halves of the matrix — not just "did the user touch it".
+                edited = sha256(live_path) != recorded_hash
+                changed = sha256(head_files[rel]) != recorded_hash
+
+                if not changed:
+                    # The template did not move. Whatever the user did here is
+                    # theirs, and there is nothing to carry over — reporting it
+                    # would be noise on every single run.
+                    continue
+                if not edited:
+                    # Proof, not a guess: an equal hash means the file IS the old
+                    # render, so there is no edit here to lose.
+                    updated.append(rel)
+                    if not args.dry_run:
+                        live_path.write_text(ours, encoding="utf-8")
+                    continue
+                conflicted.append(rel)
+                if not args.dry_run:
+                    sidecar = patches / f"{rel}.new"
+                    sidecar.parent.mkdir(parents=True, exist_ok=True)
+                    sidecar.write_text(ours, encoding="utf-8")
                 continue
 
             edited = theirs != base
@@ -301,6 +407,12 @@ def main() -> int:
             regen = target / "scripts" / "docs" / "regen.py"
             if regen.exists():
                 subprocess.run([sys.executable, str(regen)], cwd=str(target), capture_output=True)
+            # The head render's manifest, verbatim — the hashes recorded are of
+            # what skeletor PRODUCES, never of what is on disk. The difference
+            # decides whether the next upgrade destroys work: a merged file is
+            # neither the old render nor the new one, so hashing the tree would
+            # record it as pristine and the next run would overwrite the merge.
+            # Recording the render's hash makes it read as edited, which it is.
             shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
 
         if args.json:
@@ -340,7 +452,11 @@ def main() -> int:
                 item(rel)
             detail()
             detail("Nothing was written to these. What the template changed in each is in")
-            detail("tmp/upgrade/<path>.patch — port it by hand.")
+            if args.no_base:
+                detail("tmp/upgrade/<path>.new — today's template file, to diff against yours.")
+                detail("A real base→ours patch needs the base text, which this run had no way to get.")
+            else:
+                detail("tmp/upgrade/<path>.patch — port it by hand.")
 
         if dropped:
             say("⚠️ ", f"{len(dropped)} file(s) the template no longer ships — NOT deleted")

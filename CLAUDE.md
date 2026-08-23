@@ -104,15 +104,17 @@ and above, while this file stayed green — the gap is real, and the compensatin
 control is that `AGENTS.md` and the skill both run `check pre-push` (which does
 run pyright) before anything else, and stop if it is red.
 
-**Never run `black` or `isort` directly on `template/`.** Both give a different
-answer there than on a generated tree, and the answer they give here is wrong.
-isort classifies `cli` and `scripts` as third-party, because neither exists at
-this repo's root — so it deletes the blank line separating them from `click`,
-which `isort --check-only` on a real scaffold then rejects. `black` sees
-`{{PLACEHOLDER}}` rather than the value it renders to, so its line-length
-decisions are made against the wrong widths. Fix lint by scaffolding a tree,
-running the tool there, and porting the change back; `bin/skeletor-verify` is
-what tells you the truth.
+**Never run `black` directly on `template/`.** It sees `{{PLACEHOLDER}}` rather
+than the value it renders to, so its line-length decisions are made against the
+wrong widths — and a line near the limit then formats one way here and the other
+way in a real tree. Fix black findings by scaffolding a tree, running it there,
+and porting the change back. `bin/skeletor-verify` is what tells you the truth.
+
+isort used to have the same problem for a different reason and no longer does:
+`.isort.cfg` at this repo's root names `cli` and `scripts` as first-party, which
+they are not *here* — they exist only under `template/<overlay>/` — so without it
+isort read them as third-party and stripped the blank line before `click` in
+twenty files. Keep that file in step with `template/python/pyproject.toml`.
 
 Always run all tiers when a change touches `template/core/`, since `governed`
 and `agentic` compose on top of it. That is the default; `--tier` is for
@@ -128,13 +130,31 @@ exactly as it was and writes the template's own diff to `tmp/upgrade/`. A
 conflict marker is never written into somebody's tree, nothing is committed,
 and a file the template stopped shipping is reported rather than deleted.
 
-There are **no file hashes** in the manifest, deliberately: a hash is a second
-copy of what the render already answers, and a manifest that can disagree with
-the template is worse than none. The cost is that an upgrade needs skeletor's
-git history to reach the base ref.
+The **arguments** are the primary record; the `files` hashes are a fallback for
+when the base render is out of reach — a `--depth 1` clone, a tarball, a
+collected ref. They answer only "has anybody touched this file?", which is
+enough to update the ~103 of 111 files that are machinery, and not enough to
+merge, which needs the base *text*. `--no-base` takes that path deliberately and
+answers "what have I edited?" without git at all.
 
-`skeletor-verify` runs `skeletor-upgrade --dry-run --from-dir .` against every
-fresh scaffold and requires "already current". That is the cheap test of the
+A hash is a derived value with a second home, which is normally the thing this
+project refuses. It earns its place by being **checked against its source on
+every ordinary run**: when the base is rendered it is re-hashed, and a manifest
+that disagrees is a hard failure. A cache validated every time it is bypassed
+cannot rot unnoticed. Note also what a match proves — an equal hash means the
+file *is* byte-for-byte what skeletor generated, so replacing it cannot lose an
+edit that was never made. That is why the fallback is allowed to write at all.
+
+The hashes recorded are of **what skeletor produces**, never of what is on disk.
+The difference decides whether the next upgrade destroys work: a merged file is
+neither the old render nor the new one, so hashing the tree would record it as
+pristine and the following run would overwrite the merge.
+
+`skeletor-verify` runs `skeletor-upgrade --dry-run` against every fresh scaffold
+twice — once `--from-dir .` and once `--no-base` — and requires "already
+current" from both. The offline pass matters most: it is the path nobody runs by
+hand, so it is the one that would rot, and a mismatch there is precisely when
+the fallback would misclassify an edited file as untouched and overwrite it. That is the cheap test of the
 manifest, and it fails on the thing that actually breaks: `--slug`, `--cli` and
 `--env-prefix` all default from the *target directory name*, and an upgrade
 renders into a temporary directory with a different one. A manifest that cannot

@@ -15,6 +15,7 @@ nobody remembers and therefore ignored.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -170,18 +171,51 @@ def skeletor_ref() -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+#: Never part of the manifest: scratch, history, and bytecode. `__pycache__` is
+#: the only thing a scaffold produces that differs between two identical runs —
+#: `regen.py` runs at scaffold time and leaves it behind — so a hash of it would
+#: make the manifest disagree with its own tree immediately.
+MANIFEST_SKIP = ("tmp/", ".git/", "node_modules/", ".venv/")
+
+
+def tree_hashes(target: Path) -> Dict[str, str]:
+    """sha256 of every file this scaffold produced, keyed by relative path."""
+    out: Dict[str, str] = {}
+    for path in sorted(target.rglob("*")):
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(target).as_posix()
+        if rel == MANIFEST_NAME or rel.startswith(MANIFEST_SKIP):
+            continue
+        out[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return out
+
+
 def write_manifest(target: Path, args, overlays: List[str]) -> Path:
-    """Record how this tree was generated — and nothing that can be derived.
+    """Record how this tree was generated, so an upgrade can reproduce it.
 
-    `bin/skeletor-upgrade` re-renders the base from `skeletor_ref` plus these
-    arguments, and compares. That is why there are no file hashes here: a hash
-    is a second copy of something the render already answers, and a manifest
-    that can disagree with the template is worse than no manifest.
-
+    The **arguments** are the primary record: `bin/skeletor-upgrade` re-renders
+    the base from `skeletor_ref` plus these, and three-way merges against it.
     The resolved `--slug`, `--cli` and `--env-prefix` are written out even when
-    they were defaulted, because their defaults are derived from the *target
+    they were defaulted, because their defaults derive from the *target
     directory name* — and an upgrade renders into a temporary directory with a
     different one.
+
+    The **hashes** are a fallback, and only that. They answer one question the
+    render also answers — "has anybody touched this file?" — for the case where
+    the render is out of reach: a shallow clone, a tarball, a collected ref.
+    They cannot be used to merge, because merging needs the base *text*.
+
+    A hash is a derived value with a second home, which is normally the thing
+    this project refuses. It is allowed here because it is checked against its
+    source on every ordinary run: whenever `skeletor-upgrade` renders the base
+    it re-hashes it and fails loudly if the manifest disagrees. A cache that is
+    validated against its source every time it is bypassed cannot rot unnoticed.
+
+    Note what a match proves. `sha256(on disk) == recorded` means the file *is*
+    byte-for-byte what skeletor generated, so replacing it with a newer render
+    loses nothing — that is a proof, not a heuristic, which is why the fallback
+    is allowed to write files at all.
     """
     values = substitutions(args)
     recorded = [
@@ -210,6 +244,7 @@ def write_manifest(target: Path, args, overlays: List[str]) -> Path:
                 ),
                 "skeletor_ref": skeletor_ref(),
                 "args": recorded,
+                "files": tree_hashes(target),
             },
             indent=2,
         )
@@ -267,10 +302,12 @@ def main() -> int:
     # the indexes, so the tree's own checks pass on the first run. A scaffold
     # whose first `check docs` is red teaches that red is normal, and a gate
     # people have learned to expect red from is a gate that has stopped working.
-    write_manifest(target, args, overlays)
-
     register_shipped_docs(target, values)
     subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(target), capture_output=True)
+
+    # Last, and after the two steps above: both write files, and a manifest
+    # hashed before them would describe a tree that no longer exists.
+    write_manifest(target, args, overlays)
 
     committed = False
     if not args.no_git and not (target / ".git").exists():
