@@ -14,15 +14,21 @@ Two of them look like boilerplate and are not:
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
 pytestmark = [pytest.mark.unit]
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-CI = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-GATE_MODULE = REPO_ROOT / ".github" / "scripts" / "docs-only.cjs"
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.paths import GITHUB_DIR  # noqa: E402
+
+CI = GITHUB_DIR / "workflows" / "ci.yml"
+GATE_MODULE = GITHUB_DIR / "scripts" / "docs-only.cjs"
 
 
 def test_ready_for_review_is_a_trigger():

@@ -25,20 +25,22 @@ import pytest
 
 pytestmark = [pytest.mark.unit]
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.output import STATE_SYMBOLS  # noqa: E402
+from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 
 
 def _checkers():
-    return sorted(p for p in (REPO_ROOT / "scripts").glob("check_*.py"))
+    return sorted(SCRIPTS_DIR.glob("check_*.py"))
 
 
 def _run(script: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(script), *args],
-        cwd=str(REPO_ROOT),
+        cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,
         timeout=90,
@@ -76,6 +78,6 @@ def test_the_human_half_still_happens():
     A check whose narration went to a stream nobody reads is worse than one that
     is noisy: it reports nothing and passes.
     """
-    result = _run(REPO_ROOT / "scripts" / "check_doc_tables.py")
+    result = _run(SCRIPTS_DIR / "check_doc_tables.py")
     assert result.stderr.strip(), "check_doc_tables.py said nothing to a human"
     assert any(symbol.strip() in result.stderr for symbol in STATE_SYMBOLS.values())

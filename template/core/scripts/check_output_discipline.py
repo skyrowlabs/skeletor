@@ -29,12 +29,14 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.output import STATE_SYMBOLS, detail, emit, fail, item, ok  # noqa: E402
+from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 
-ALLOWLIST = REPO_ROOT / "scripts" / "output_allowlist.yaml"
+ALLOWLIST = SCRIPTS_DIR / "output_allowlist.yaml"
 
 #: Where emissions are allowed to originate. `scripts/output.py` owns the
 #: streams; it is the one file that must write to them directly.
@@ -94,7 +96,7 @@ def _prose_lines(text: str) -> set:
 def _sources() -> List[Path]:
     found: List[Path] = []
     for directory in SCAN_DIRS:
-        root = REPO_ROOT / directory
+        root = PROJECT_ROOT / directory
         if root.exists():
             found.extend(sorted(p for p in root.rglob("*.py") if "__pycache__" not in p.parts))
     return found
@@ -108,7 +110,7 @@ def scan() -> Dict[str, List[str]]:
     unflagged: List[str] = []
 
     for path in _sources():
-        rel = path.relative_to(REPO_ROOT).as_posix()
+        rel = path.relative_to(PROJECT_ROOT).as_posix()
         if rel == OWNER or rel in allowlist:
             continue
         text = path.read_text(encoding="utf-8")

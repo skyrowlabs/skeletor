@@ -24,15 +24,17 @@ wrong diff — all three worse than an honest blank.
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from scripts.docs import frontmatter
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-TODO_DIR = REPO_ROOT / "docs" / "TODO"
-IMPL_DIR = REPO_ROOT / "docs" / "implementations"
+from scripts.docs import frontmatter  # noqa: E402
+from scripts.paths import IMPL_DIR, PROJECT_ROOT, TODO_DIR  # noqa: E402
 
 #: Files in the plan trees that are not plans.
 NOT_A_PLAN = {"README.md", "_TEMPLATE.md"}
@@ -188,7 +190,7 @@ class Plan:
         entry: Dict[str, Any] = {
             "slug": self.slug,
             "title": self.title,
-            "path": str(self.path.relative_to(REPO_ROOT)),
+            "path": str(self.path.relative_to(PROJECT_ROOT)),
             "shelf_status": self.shelf_status,
             "priority": self.priority,
             "queue_order": self.queue_order,

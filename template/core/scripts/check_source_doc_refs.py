@@ -28,12 +28,14 @@ import sys
 from pathlib import Path
 from typing import List
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.output import detail, emit, fail, item, ok  # noqa: E402
+from scripts.paths import DOCS_DIR, GITHUB_DIR, PROJECT_ROOT  # noqa: E402
 
-IGNORE_FILE = REPO_ROOT / ".github" / "scripts" / ".validate-ignore"
+IGNORE_FILE = GITHUB_DIR / "scripts" / ".validate-ignore"
 
 SOURCE_SUFFIXES = {".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".sh", ".yml", ".yaml", ".toml"}
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__", "tmp", ".claude/worktrees"}
@@ -53,7 +55,7 @@ def _ignored() -> set:
 
 def _sources() -> List[Path]:
     out = []
-    for path in REPO_ROOT.rglob("*"):
+    for path in PROJECT_ROOT.rglob("*"):
         if not path.is_file() or path.suffix not in SOURCE_SUFFIXES:
             continue
         if any(part in SKIP_DIRS for part in path.parts):
@@ -64,8 +66,8 @@ def _sources() -> List[Path]:
 
 def _successor(name: str) -> str:
     """Filing moves a plan; the successor is the same basename elsewhere."""
-    matches = list((REPO_ROOT / "docs").rglob(Path(name).name))
-    return f"  → now at {matches[0].relative_to(REPO_ROOT)}" if len(matches) == 1 else ""
+    matches = list(DOCS_DIR.rglob(Path(name).name))
+    return f"  → now at {matches[0].relative_to(PROJECT_ROOT)}" if len(matches) == 1 else ""
 
 
 def main() -> int:
@@ -88,8 +90,8 @@ def main() -> int:
                 if ref in ignore:
                     continue
                 checked += 1
-                if not (REPO_ROOT / ref).exists():
-                    dead.append(f"{source.relative_to(REPO_ROOT)}:{lineno}: {ref}{_successor(ref)}")
+                if not (PROJECT_ROOT / ref).exists():
+                    dead.append(f"{source.relative_to(PROJECT_ROOT)}:{lineno}: {ref}{_successor(ref)}")
 
     if args.json:
         emit({"checked": checked, "dead": dead})

@@ -34,12 +34,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterator, List, Optional
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.output import fail, item, ok  # noqa: E402
+from scripts.paths import PROJECT_ROOT, TMP_DIR  # noqa: E402
 
-LOCK_DIR = REPO_ROOT / "tmp" / "tree-locks"
+LOCK_DIR = TMP_DIR / "tree-locks"
 
 #: A hold older than this with a live pid is still honoured — long jobs exist.
 #: This bound is only for records whose process is gone AND which are old enough
@@ -73,7 +75,7 @@ class Hold:
 
 def _branch() -> Optional[str]:
     result = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(REPO_ROOT), capture_output=True, text=True
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
     )
     return result.stdout.strip() or None if result.returncode == 0 else None
 
@@ -156,7 +158,7 @@ def would_strand(branch: str) -> Optional[str]:
         )
 
     dirty = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=str(REPO_ROOT), capture_output=True, text=True
+        ["git", "status", "--porcelain"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
     ).stdout.strip()
     if dirty:
         # Uncommitted work with no recorded hold is still somebody's work — a

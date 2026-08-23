@@ -16,9 +16,11 @@ import pytest
 
 pytestmark = [pytest.mark.unit]
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 from scripts.reporting.jobs import FIX_POLICIES, JOBS, JOBS_BY_KEY, _allowlisted, crontab_block  # noqa: E402
 
 
@@ -42,16 +44,14 @@ def test_every_subcommand_has_a_registry_entry():
 
 
 def test_every_job_module_exists():
-    missing = [job.key for job in JOBS if not (REPO_ROOT / "scripts" / "reporting" / f"{job.module}.py").exists()]
+    missing = [job.key for job in JOBS if not (SCRIPTS_DIR / "reporting" / f"{job.module}.py").exists()]
     assert not missing, f"Jobs whose module file is missing: {missing}"
 
 
 def test_every_job_has_a_prompt_named_after_its_module():
     """The prompt's filename is how the fix policy is resolved. A prompt named
     anything else is a job whose blast radius nothing can look up."""
-    missing = [
-        job.key for job in JOBS if not (REPO_ROOT / "scripts" / "reporting" / "prompts" / f"{job.module}.md").exists()
-    ]
+    missing = [job.key for job in JOBS if not (SCRIPTS_DIR / "reporting" / "prompts" / f"{job.module}.md").exists()]
     assert not missing, f"Jobs with no prompts/<module>.md: {missing}"
 
 
@@ -93,7 +93,7 @@ def test_heartbeat_vars_are_unique():
 
 def test_heartbeat_vars_are_documented_in_env_example():
     """A monitor variable no operator can find is a monitor nobody wires up."""
-    env_example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+    env_example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
     missing = [job.heartbeat_var for job in JOBS if job.heartbeat_var and job.heartbeat_var not in env_example]
     assert not missing, f"Heartbeat vars absent from .env.example: {missing}"
 

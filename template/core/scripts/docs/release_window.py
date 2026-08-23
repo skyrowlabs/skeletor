@@ -34,14 +34,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import frontmatter  # noqa: E402
 from scripts.output import die, emit, fail, item, ok  # noqa: E402
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-REGULAR_DIR = REPO_ROOT / "docs" / "reports" / "regular"
-RELEASES_DIR = REPO_ROOT / "docs" / "reports" / "releases"
+from scripts.paths import PROJECT_ROOT, REGULAR_DIR, RELEASES_DIR  # noqa: E402
 
 #: Reports that carry an anchor. A new scheduled report is added here so
 #: ``--apply`` stamps it and the freeze step archives it; a report absent from
@@ -54,7 +53,7 @@ _WINDOW_LINE = re.compile(r"^> \*\*Window:\*\*.*$", re.MULTILINE)
 
 
 def _git(*args: str) -> str:
-    return subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=False).stdout.strip()
+    return subprocess.run(["git", *args], cwd=PROJECT_ROOT, capture_output=True, text=True, check=False).stdout.strip()
 
 
 def tags() -> List[str]:
@@ -132,7 +131,7 @@ def apply(only: Optional[str] = None) -> int:
     for name in targets:
         path = REGULAR_DIR / name
         if not path.exists():
-            fail(f"missing report: {path.relative_to(REPO_ROOT)} — seed it before scheduling its job")
+            fail(f"missing report: {path.relative_to(PROJECT_ROOT)} — seed it before scheduling its job")
             return 1
         data, body = frontmatter.read(path)
         data.update({k: win[k] for k in ("release", "previous_release", "commit_range", "status", "generated")})
@@ -169,7 +168,7 @@ def check() -> int:
     for edition in sorted(RELEASES_DIR.glob("*/*.md")):
         data, _ = frontmatter.read(edition)
         if data.get("status") != "released":
-            failures.append(f"{edition.relative_to(REPO_ROOT)}: frozen edition must carry status: released")
+            failures.append(f"{edition.relative_to(PROJECT_ROOT)}: frozen edition must carry status: released")
 
     if failures:
         fail("report anchors:")

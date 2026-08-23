@@ -24,13 +24,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.output import detail, fail, ok, warn  # noqa: E402
+from scripts.paths import PROJECT_ROOT, TMP_DIR  # noqa: E402
 
 DRIVER = "merge.regen-docs"
-MARKER = REPO_ROOT / "tmp" / ".regen-owed"
+MARKER = TMP_DIR / ".regen-owed"
 
 # %B is the "other" (incoming) version, %A the destination git reads back.
 COMMAND = f'sh -c \'mkdir -p "{MARKER.parent}" && cp "%B" "%A" && touch "{MARKER}"\''
@@ -38,7 +40,7 @@ COMMAND = f'sh -c \'mkdir -p "{MARKER.parent}" && cp "%B" "%A" && touch "{MARKER
 
 def _config(key: str) -> str:
     return subprocess.run(
-        ["git", "config", "--local", "--get", key], cwd=str(REPO_ROOT), capture_output=True, text=True
+        ["git", "config", "--local", "--get", key], cwd=str(PROJECT_ROOT), capture_output=True, text=True
     ).stdout.strip()
 
 
@@ -61,9 +63,9 @@ def main() -> int:
         return 0
 
     subprocess.run(
-        ["git", "config", "--local", f"{DRIVER}.name", "regenerate generated docs"], cwd=str(REPO_ROOT), check=True
+        ["git", "config", "--local", f"{DRIVER}.name", "regenerate generated docs"], cwd=str(PROJECT_ROOT), check=True
     )
-    subprocess.run(["git", "config", "--local", f"{DRIVER}.driver", COMMAND], cwd=str(REPO_ROOT), check=True)
+    subprocess.run(["git", "config", "--local", f"{DRIVER}.driver", COMMAND], cwd=str(PROJECT_ROOT), check=True)
     ok("installed the 'regen-docs' merge driver")
     detail("After any merge that touched docs/TODO/ or docs/implementations/: `{{CLI}} docs index`")
     return 0

@@ -28,13 +28,15 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.output import detail, emit, fail, item, ok  # noqa: E402
+from scripts.paths import GITHUB_DIR, SCRIPTS_DIR  # noqa: E402
 
-WORKFLOWS = REPO_ROOT / ".github" / "workflows"
-ALLOWLIST = REPO_ROOT / "scripts" / "workflow_drift_allowlist.yaml"
+WORKFLOWS = GITHUB_DIR / "workflows"
+ALLOWLIST = SCRIPTS_DIR / "workflow_drift_allowlist.yaml"
 
 #: A job is enrolled if its text matches ANY of these — i.e. if it stands the
 #: stack up at all, however it does it.

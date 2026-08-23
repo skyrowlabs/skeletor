@@ -26,8 +26,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.docs import plans  # noqa: E402
 from scripts.docs.queue_order import UNORDERED, queue_position, run_order  # noqa: E402
 from scripts.output import fail, ok  # noqa: E402
+from scripts.paths import TODO_DIR  # noqa: E402
 
-README_PATH = plans.TODO_DIR / "README.md"
+README_PATH = TODO_DIR / "README.md"
 
 STATUS_HEADINGS = [
     (
@@ -103,7 +104,7 @@ def _review_table(items: List[plans.Plan]) -> Iterable[str]:
 
 
 def build() -> str:
-    all_plans = plans.scan(plans.TODO_DIR)
+    all_plans = plans.scan(TODO_DIR)
     # Agent-managed docs are derived artifacts that a job rewrites wholesale.
     # They get their own heading whatever status they wear, because one listed
     # beside plans an agent will actually take makes the queue's banner false.

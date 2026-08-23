@@ -20,9 +20,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import plans  # noqa: E402
 from scripts.output import die, fail, ok  # noqa: E402
+from scripts.paths import IMPL_DIR, PROJECT_ROOT  # noqa: E402
 
-INDEX_PATH = plans.REPO_ROOT / "docs" / "implementation_index.json"
-README_PATH = plans.IMPL_DIR / "README.md"
+INDEX_PATH = PROJECT_ROOT / "docs" / "implementation_index.json"
+README_PATH = IMPL_DIR / "README.md"
 
 VALUE_BADGE = {3: "⭐⭐⭐", 2: "⭐⭐", 1: "⭐"}
 

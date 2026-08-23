@@ -14,8 +14,9 @@ import click
 
 from cli.helpers import PROJECT_ROOT, detail, fail, git, item, line, ok, run, script, step, warn
 
-TODO_DIR = PROJECT_ROOT / "docs" / "TODO"
-IMPL_DIR = PROJECT_ROOT / "docs" / "implementations"
+# Imported, not redefined. These were declared here *and* in `scripts/docs/plans.py`
+# — two owners for the two directories the whole docs lifecycle moves files between.
+from scripts.paths import IMPL_DIR, TODO_DIR  # noqa: E402
 
 
 @click.group()

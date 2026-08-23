@@ -30,14 +30,17 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-PROMPTS = Path(__file__).resolve().parent / "prompts"
-
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.output import line, skip, step  # noqa: E402
+from scripts.paths import PROJECT_ROOT  # noqa: E402
 from scripts.reporting import run_ledger  # noqa: E402
 from scripts.reporting.jobs import FIX_POLICIES, JOBS_BY_KEY  # noqa: E402
+
+PROMPTS = Path(__file__).resolve().parent / "prompts"
+
 
 #: How long an agent may run before it is killed. A job that hangs holds the
 #: tree, and the next job in the grid then runs against a tree somebody else is
@@ -67,14 +70,14 @@ def heartbeat(url: Optional[str], status: str = "up") -> None:
 
 def current_branch() -> Optional[str]:
     result = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(REPO_ROOT), capture_output=True, text=True
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
     )
     return result.stdout.strip() or None if result.returncode == 0 else None
 
 
 def tree_is_clean() -> bool:
     return not subprocess.run(
-        ["git", "status", "--porcelain"], cwd=str(REPO_ROOT), capture_output=True, text=True
+        ["git", "status", "--porcelain"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
     ).stdout.strip()
 
 
@@ -115,7 +118,9 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
 
     prompt_file = PROMPTS / f"{job.module}.md"
     if not prompt_file.exists():
-        return decline(f"no prompt at {prompt_file.relative_to(REPO_ROOT)} — the fix policy is resolved from its name")
+        return decline(
+            f"no prompt at {prompt_file.relative_to(PROJECT_ROOT)} — the fix policy is resolved from its name"
+        )
 
     policy = job.fix_policy
     prompt = "\n".join(
@@ -141,7 +146,7 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
     try:
         result = subprocess.run(
             ["claude", "-p", prompt, "--permission-mode", "acceptEdits"],
-            cwd=str(REPO_ROOT),
+            cwd=str(PROJECT_ROOT),
             capture_output=True,
             text=True,
             timeout=AGENT_TIMEOUT_S,
@@ -165,7 +170,7 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
 
     agent_ran = result.returncode == 0
     committed = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], cwd=str(REPO_ROOT), capture_output=True, text=True
+        ["git", "rev-parse", "--short", "HEAD"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
     ).stdout.strip()
 
     run_ledger.record(

@@ -14,16 +14,18 @@ import pytest
 
 pytestmark = [pytest.mark.unit]
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.docs import plans  # noqa: E402
 from scripts.docs.queue_order import UNORDERED, queue_position, run_order  # noqa: E402
+from scripts.paths import IMPL_DIR, PROJECT_ROOT, TODO_DIR  # noqa: E402
 
 
 @pytest.fixture(scope="module")
 def tank():
-    return [p for p in plans.scan(plans.TODO_DIR) if not p.auto_generated]
+    return [p for p in plans.scan(TODO_DIR) if not p.auto_generated]
 
 
 def test_every_gated_plan_names_its_gate(tank):
@@ -101,7 +103,7 @@ def test_generated_docs_are_current():
     import subprocess
 
     result = subprocess.run(
-        [sys.executable, "scripts/docs/regen.py", "--check"], cwd=str(REPO_ROOT), capture_output=True, text=True
+        [sys.executable, "scripts/docs/regen.py", "--check"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
     )
     assert result.returncode == 0, f"Generated docs are stale — run `{{CLI}} docs index`:\n{result.stdout}"
 
@@ -109,7 +111,7 @@ def test_generated_docs_are_current():
 def test_no_plan_exists_in_both_trees():
     """A plan moves; it never copies. Two copies makes 'what is left to do'
     unanswerable, and the archive copy is the one people read."""
-    tank_slugs = {p.slug for p in plans.scan(plans.TODO_DIR)}
-    archive_slugs = {p.slug for p in plans.scan(plans.IMPL_DIR, recursive=True)}
+    tank_slugs = {p.slug for p in plans.scan(TODO_DIR)}
+    archive_slugs = {p.slug for p in plans.scan(IMPL_DIR, recursive=True)}
     both = tank_slugs & archive_slugs
     assert not both, f"Plans present in BOTH docs/TODO/ and docs/implementations/: {sorted(both)}"

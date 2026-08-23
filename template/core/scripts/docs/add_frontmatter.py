@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import frontmatter, plans  # noqa: E402
 from scripts.output import item, ok  # noqa: E402
+from scripts.paths import IMPL_DIR, PROJECT_ROOT, TODO_DIR  # noqa: E402
 
 
 def _derive(plan: plans.Plan, archive: bool) -> dict:
@@ -36,7 +37,7 @@ def _derive(plan: plans.Plan, archive: bool) -> dict:
         data["updated"] = plan.updated
 
     if archive:
-        rel = plan.path.relative_to(plans.IMPL_DIR)
+        rel = plan.path.relative_to(IMPL_DIR)
         data["category"] = data.get("category") or (rel.parts[0] if len(rel.parts) > 1 else "uncategorized")
         data.setdefault("agent_value", 1)
         data.setdefault("completed", plan.updated or "")
@@ -69,9 +70,9 @@ def main() -> int:
 
     targets = []
     if not args.impl:
-        targets += [(p, False) for p in plans.scan(plans.TODO_DIR)]
+        targets += [(p, False) for p in plans.scan(TODO_DIR)]
     if not args.todo:
-        targets += [(p, True) for p in plans.scan(plans.IMPL_DIR, recursive=True)]
+        targets += [(p, True) for p in plans.scan(IMPL_DIR, recursive=True)]
 
     written = 0
     for plan, archive in targets:
@@ -82,7 +83,7 @@ def main() -> int:
             continue
         frontmatter.write(plan.path, derived, plan.body)
         written += 1
-        item(f"{plan.path.relative_to(plans.REPO_ROOT)}")
+        item(f"{plan.path.relative_to(PROJECT_ROOT)}")
 
     ok(f"frontmatter: {written} doc(s) updated, {len(targets) - written} already current")
     return 0

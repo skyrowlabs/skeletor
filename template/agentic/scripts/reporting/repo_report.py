@@ -23,15 +23,17 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import plans, release_window  # noqa: E402
+from scripts.paths import PROJECT_ROOT, TODO_DIR  # noqa: E402
 from scripts.reporting import agent_runner  # noqa: E402
 
 
 def _git(*args: str) -> str:
-    return subprocess.run(["git", *args], cwd=str(REPO_ROOT), capture_output=True, text=True).stdout.strip()
+    return subprocess.run(["git", *args], cwd=str(PROJECT_ROOT), capture_output=True, text=True).stdout.strip()
 
 
 def collect() -> Dict[str, object]:
@@ -48,7 +50,7 @@ def collect() -> Dict[str, object]:
         if line.strip():
             churn[line.strip()] += 1
 
-    tank = [p for p in plans.scan(plans.TODO_DIR) if not p.auto_generated]
+    tank = [p for p in plans.scan(TODO_DIR) if not p.auto_generated]
 
     return {
         "window": window,

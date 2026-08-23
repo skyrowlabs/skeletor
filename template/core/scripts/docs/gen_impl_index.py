@@ -26,14 +26,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import plans  # noqa: E402
 from scripts.output import fail, ok  # noqa: E402
+from scripts.paths import IMPL_DIR, PROJECT_ROOT  # noqa: E402
 
-INDEX_PATH = plans.REPO_ROOT / "docs" / "implementation_index.json"
+INDEX_PATH = PROJECT_ROOT / "docs" / "implementation_index.json"
 
 
 def build() -> dict:
     entries = []
-    for plan in plans.scan(plans.IMPL_DIR, recursive=True):
-        rel = plan.path.relative_to(plans.IMPL_DIR)
+    for plan in plans.scan(IMPL_DIR, recursive=True):
+        rel = plan.path.relative_to(IMPL_DIR)
         category = rel.parts[0] if len(rel.parts) > 1 else "uncategorized"
         entry = plan.to_entry()
         entry["category"] = str(plan.frontmatter.get("category") or category)

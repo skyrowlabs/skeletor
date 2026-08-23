@@ -11,15 +11,21 @@ name is the same, so the version never occurs to anyone.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
 pytestmark = [pytest.mark.unit]
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-PRECOMMIT = REPO_ROOT / ".pre-commit-config.yaml"
-REQUIREMENTS = REPO_ROOT / "scripts" / "requirements.txt"
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
+
+PRECOMMIT = PROJECT_ROOT / ".pre-commit-config.yaml"
+REQUIREMENTS = SCRIPTS_DIR / "requirements.txt"
 
 #: repo slug fragment -> the name it goes by in requirements.txt
 TOOLS = {"flake8": "flake8", "black": "black", "isort": "isort", "pyright": "pyright"}

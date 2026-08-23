@@ -15,8 +15,9 @@ import pytest
 
 pytestmark = [pytest.mark.unit]
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import check_doc_links as links  # noqa: E402
 
@@ -25,7 +26,12 @@ from scripts import check_doc_links as links  # noqa: E402
 def tree(tmp_path, monkeypatch):
     """A miniature docs tree the checker treats as the whole repo."""
     (tmp_path / "docs").mkdir()
-    monkeypatch.setattr(links, "REPO_ROOT", tmp_path)
+    # Every path the checker reads, not just the root. They are bound at import
+    # from `scripts.paths`, so patching the root alone would leave `_suggest`
+    # rglobbing the real repository — see scripts/paths.py on why redirecting a
+    # tree properly is a design decision rather than a variable.
+    monkeypatch.setattr(links, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(links, "DOCS_DIR", tmp_path / "docs")
     monkeypatch.setattr(links, "IGNORE_FILE", tmp_path / ".validate-ignore")
     monkeypatch.setattr(links, "SCAN_ROOTS", ["docs"])
     monkeypatch.setattr(links, "EXTRA_FILES", [])

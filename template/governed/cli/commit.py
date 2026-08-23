@@ -19,6 +19,7 @@ import sys
 import click
 
 from cli.helpers import PROJECT_ROOT, current_branch, detail, fail, ok, run, step, summarize
+from scripts.paths import TMP_DIR
 
 
 def _staged_check(paths: list, message: str) -> int:
@@ -41,7 +42,7 @@ def _staged_check(paths: list, message: str) -> int:
         results.append(("doc tables", run([sys.executable, "scripts/check_doc_tables.py"]).returncode))
 
     # The commit-msg hook, run here because --no-verify will skip it later.
-    msg_file = PROJECT_ROOT / "tmp" / ".commit-msg"
+    msg_file = TMP_DIR / ".commit-msg"
     msg_file.parent.mkdir(parents=True, exist_ok=True)
     msg_file.write_text(message, encoding="utf-8")
     results.append(

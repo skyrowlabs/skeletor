@@ -100,6 +100,16 @@ and above, while this file stayed green — the gap is real, and the compensatin
 control is that `AGENTS.md` and the skill both run `check pre-push` (which does
 run pyright) before anything else, and stop if it is red.
 
+**Never run `black` or `isort` directly on `template/`.** Both give a different
+answer there than on a generated tree, and the answer they give here is wrong.
+isort classifies `cli` and `scripts` as third-party, because neither exists at
+this repo's root — so it deletes the blank line separating them from `click`,
+which `isort --check-only` on a real scaffold then rejects. `black` sees
+`{{PLACEHOLDER}}` rather than the value it renders to, so its line-length
+decisions are made against the wrong widths. Fix lint by scaffolding a tree,
+running the tool there, and porting the change back; `bin/skeletor-verify` is
+what tells you the truth.
+
 Always run all tiers when a change touches `template/core/`, since `governed`
 and `agentic` compose on top of it. That is the default; `--tier` is for
 narrowing a debug loop, not for a final check.

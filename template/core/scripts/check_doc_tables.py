@@ -24,13 +24,14 @@ import sys
 from pathlib import Path
 from typing import Set
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.output import detail, emit, fail, item, ok  # noqa: E402
+from scripts.paths import DOCS_DIR, GITHUB_DIR, PROJECT_ROOT  # noqa: E402
 
-DOCS_DIR = REPO_ROOT / "docs"
-TABLES = [REPO_ROOT / "CLAUDE.md", REPO_ROOT / ".github" / "DOCS_INDEX.md"]
+TABLES = [PROJECT_ROOT / "CLAUDE.md", GITHUB_DIR / "DOCS_INDEX.md"]
 
 #: Docs that are indexes themselves, or generated. Registering an index in an
 #: index is noise, and a generated file's registration would be regenerated away.
@@ -56,7 +57,7 @@ def main() -> int:
     listed = referenced()
 
     unregistered = sorted(on_disk - listed)
-    dangling = sorted(ref for ref in listed - on_disk if not (REPO_ROOT / ref).exists())
+    dangling = sorted(ref for ref in listed - on_disk if not (PROJECT_ROOT / ref).exists())
 
     if args.json:
         emit({"registered": len(on_disk), "unregistered": unregistered, "dangling": dangling})

@@ -14,8 +14,6 @@ import click
 
 from cli.helpers import PROJECT_ROOT, fail, module, ok, run, script, summarize
 
-DOCS_DIR = PROJECT_ROOT / "docs"
-
 
 @click.group()
 def check() -> None:

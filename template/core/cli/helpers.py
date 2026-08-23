@@ -14,13 +14,11 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-# Before importing anything from `scripts/`. The `./{{CLI}}` wrapper exports
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which owns
+# every path in the tree — can be imported. The `./{{CLI}}` wrapper exports
 # PYTHONPATH, but `python -m cli` from a different cwd does not, and a helper
 # that only imports under one invocation is a helper nobody trusts.
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.output import (  # noqa: E402
     SYMBOLS,
@@ -38,6 +36,7 @@ from scripts.output import (  # noqa: E402
     summarize,
     warn,
 )
+from scripts.paths import PROJECT_ROOT  # noqa: E402
 
 #: Re-exported on purpose — listed so flake8 does not read them as unused, and
 #: so `from cli.helpers import ok` keeps working from every command module.

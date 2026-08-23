@@ -33,10 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import frontmatter, release_window  # noqa: E402
 from scripts.output import detail, fail, item, ok, step, warn  # noqa: E402
-
-REPO_ROOT = release_window.REPO_ROOT
-REGULAR_DIR = release_window.REGULAR_DIR
-RELEASES_DIR = release_window.RELEASES_DIR
+from scripts.paths import PROJECT_ROOT, REGULAR_DIR, RELEASES_DIR  # noqa: E402
 
 
 def _rebuild_index() -> None:
@@ -94,7 +91,7 @@ def main() -> int:
     destination = RELEASES_DIR / args.tag
 
     if destination.exists() and not args.dry_run:
-        fail(f"{destination.relative_to(REPO_ROOT)} already exists — this release is already frozen.")
+        fail(f"{destination.relative_to(PROJECT_ROOT)} already exists — this release is already frozen.")
         detail("Frozen editions are never rewritten. A correction goes in an ## Errata block")
         detail("on the current in-flight edition, naming the release it corrects.")
         return 1

@@ -34,6 +34,7 @@ Every significant mechanism in this shell is an application of this:
 | Two workflows booting the stack     | a composite action + auto-enrolled drift check  |
 | Host mirror of a CI action          | `MIRRORS_ACTION_STEPS`, checked against the action |
 | Docs-only pattern in two workflows  | `.github/scripts/docs-only.cjs`, required by both |
+| 25 hand-derived project roots       | `scripts/paths.py` — one derivation, everything imports |
 
 The corollary is stated explicitly in `CLAUDE.md` Rule 11 and is the single most
 transferable sentence in the repository:

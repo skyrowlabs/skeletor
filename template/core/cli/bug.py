@@ -18,8 +18,9 @@ from datetime import datetime, timezone
 import click
 
 from cli.helpers import PROJECT_ROOT, current_branch, detail, git, ok, warn
+from scripts.paths import TMP_DIR
 
-QUEUE = PROJECT_ROOT / "tmp" / "bugs"
+QUEUE = TMP_DIR / "bugs"
 
 
 @click.command()

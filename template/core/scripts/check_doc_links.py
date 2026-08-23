@@ -33,13 +33,15 @@ import sys
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.output import detail, emit, fail, item, ok  # noqa: E402
+from scripts.paths import DOCS_DIR, GITHUB_DIR, PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 
-BASELINE = REPO_ROOT / "scripts" / "doc_links_baseline.json"
-IGNORE_FILE = REPO_ROOT / ".github" / "scripts" / ".validate-ignore"
+BASELINE = SCRIPTS_DIR / "doc_links_baseline.json"
+IGNORE_FILE = GITHUB_DIR / "scripts" / ".validate-ignore"
 
 SCAN_ROOTS = ["docs", ".claude", ".github"]
 EXTRA_FILES = ["CLAUDE.md", "README.md"]
@@ -75,8 +77,8 @@ def _ignored() -> set:
 def markdown_files() -> List[Path]:
     out = []
     for root in SCAN_ROOTS:
-        out.extend(sorted((REPO_ROOT / root).rglob("*.md")))
-    out.extend(REPO_ROOT / name for name in EXTRA_FILES if (REPO_ROOT / name).exists())
+        out.extend(sorted((PROJECT_ROOT / root).rglob("*.md")))
+    out.extend(PROJECT_ROOT / name for name in EXTRA_FILES if (PROJECT_ROOT / name).exists())
     return [p for p in out if "node_modules" not in p.parts]
 
 
@@ -107,8 +109,8 @@ def headings(path: Path) -> List[str]:
 
 def _suggest(target: Path) -> str:
     """Where the target probably moved to — same basename, anywhere in docs/."""
-    matches = [p for p in (REPO_ROOT / "docs").rglob(target.name)] if (REPO_ROOT / "docs").exists() else []
-    return f"  → probably {matches[0].relative_to(REPO_ROOT)}" if len(matches) == 1 else ""
+    matches = [p for p in DOCS_DIR.rglob(target.name)] if DOCS_DIR.exists() else []
+    return f"  → probably {matches[0].relative_to(PROJECT_ROOT)}" if len(matches) == 1 else ""
 
 
 def _walk() -> Iterator[Tuple[Path, Path, str, "re.Match[str]"]]:
@@ -125,7 +127,7 @@ def _walk() -> Iterator[Tuple[Path, Path, str, "re.Match[str]"]]:
     for source in markdown_files():
         original = source.read_text(encoding="utf-8")
         for match in _LINK.finditer(_mask(original)):
-            yield source, source.relative_to(REPO_ROOT), original, match
+            yield source, source.relative_to(PROJECT_ROOT), original, match
 
 
 def _contains_run(haystack: Sequence[str], needle: Sequence[str]) -> bool:
@@ -190,7 +192,7 @@ def scan() -> Tuple[List[str], List[str]]:
             continue
         if anchor and target.suffix == ".md":
             if anchor not in heading_cache.setdefault(target, headings(target)):
-                dead_anchors.append(f"{rel_source}: '{href}' — no such heading in {target.relative_to(REPO_ROOT)}")
+                dead_anchors.append(f"{rel_source}: '{href}' — no such heading in {target.relative_to(PROJECT_ROOT)}")
 
     return dead_paths, dead_anchors
 
@@ -239,7 +241,7 @@ def repoint_fragments() -> List[str]:
 
         span = match.span("href")
         edits.setdefault(source, []).append((span[0], span[1], f"{path_part}#{replacement}"))
-        repointed.append(f"{rel_source}: '#{anchor}' → '#{replacement}' in {target.relative_to(REPO_ROOT)}")
+        repointed.append(f"{rel_source}: '#{anchor}' → '#{replacement}' in {target.relative_to(PROJECT_ROOT)}")
 
     for source, spans in edits.items():
         text = source.read_text(encoding="utf-8")

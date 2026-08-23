@@ -38,20 +38,25 @@ Stdlib only — imported by host-side jobs that must not grow dependencies.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 
 #: Where every cron line appends its raw output. The structured per-run outcome
 #: lives in the ledger; this is the transcript.
 CRON_LOG = "tmp/reporting/cron.log"
 
 #: Deliberate "do not schedule this" decisions, with reasons.
-SCHEDULE_ALLOWLIST = REPO_ROOT / "scripts" / "reporting_schedule_allowlist.yaml"
+SCHEDULE_ALLOWLIST = SCRIPTS_DIR / "reporting_schedule_allowlist.yaml"
 
 #: The repo path used in generated crontab lines.
 #:
@@ -60,7 +65,7 @@ SCHEDULE_ALLOWLIST = REPO_ROOT / "scripts" / "reporting_schedule_allowlist.yaml"
 #: silently, so nobody finds out until a report stops arriving. It also made
 #: `black` red on arrival for anyone whose checkout path was long enough to
 #: push the assignment past the line limit.
-CRON_CWD = str(REPO_ROOT)
+CRON_CWD = str(PROJECT_ROOT)
 
 #: The timezone every schedule here is expressed in.
 #:

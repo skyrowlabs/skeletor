@@ -18,13 +18,19 @@ Stdlib only.
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-LEDGER = REPO_ROOT / "tmp" / "reporting" / "ledger.jsonl"
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.paths import TMP_DIR  # noqa: E402
+
+LEDGER = TMP_DIR / "reporting" / "ledger.jsonl"
 
 #: Terminal states. `declined` is NOT a failure: a job that correctly chose not
 #: to answer (the tree was on the wrong branch, a queue was not quiet) executed

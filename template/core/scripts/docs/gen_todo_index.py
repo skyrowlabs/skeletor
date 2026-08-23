@@ -21,12 +21,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.docs import plans  # noqa: E402
 from scripts.docs.queue_order import run_order  # noqa: E402
 from scripts.output import fail, ok  # noqa: E402
+from scripts.paths import PROJECT_ROOT, TODO_DIR  # noqa: E402
 
-INDEX_PATH = plans.REPO_ROOT / "docs" / "todo_index.json"
+INDEX_PATH = PROJECT_ROOT / "docs" / "todo_index.json"
 
 
 def build() -> dict:
-    entries = [p.to_entry() for p in plans.scan(plans.TODO_DIR)]
+    entries = [p.to_entry() for p in plans.scan(TODO_DIR)]
     by_status: dict = {}
     for entry in entries:
         by_status.setdefault(entry["shelf_status"], []).append(entry["slug"])
@@ -53,14 +54,14 @@ def main() -> int:
     if args.check:
         current = INDEX_PATH.read_text(encoding="utf-8") if INDEX_PATH.exists() else ""
         if current != rendered:
-            fail(f"{INDEX_PATH.relative_to(plans.REPO_ROOT)} is stale — run `{{CLI}} docs index`")
+            fail(f"{INDEX_PATH.relative_to(PROJECT_ROOT)} is stale — run `{{CLI}} docs index`")
             return 1
-        ok(f"{INDEX_PATH.relative_to(plans.REPO_ROOT)} is current")
+        ok(f"{INDEX_PATH.relative_to(PROJECT_ROOT)} is current")
         return 0
 
     INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
     INDEX_PATH.write_text(rendered, encoding="utf-8")
-    ok(f"wrote {INDEX_PATH.relative_to(plans.REPO_ROOT)} ({json.loads(rendered)['count']} plans)")
+    ok(f"wrote {INDEX_PATH.relative_to(PROJECT_ROOT)} ({json.loads(rendered)['count']} plans)")
     return 0
 
 

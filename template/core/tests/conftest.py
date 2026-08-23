@@ -9,9 +9,16 @@ green, which is the single most expensive failure mode a test suite has.
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 from typing import Optional
 
 import pytest
+
+# Bootstrap only, and it runs before any test module is collected: put the
+# package on sys.path so tests can import `scripts.paths`, which owns every
+# path in the tree. A bare `pytest tests/` otherwise gets only `tests/`.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 #: Set by CI and by `{{CLI}} test --ci`. Under it, an env-gate skip becomes a failure.
 CI_FLAG = "{{CI_ENV_VAR}}"
@@ -40,6 +47,12 @@ def require_or_skip(condition: bool, reason: str, *, requires: Optional[str] = N
 
 @pytest.fixture(scope="session")
 def repo_root():
-    from pathlib import Path
+    """The project root, from the module that owns it — never re-derived here.
 
-    return Path(__file__).resolve().parents[1]
+    A fixture that works this out for itself is a second answer to a question
+    with one owner, and it is the answer a test would trust. See
+    `scripts/paths.py`.
+    """
+    from scripts.paths import PROJECT_ROOT
+
+    return PROJECT_ROOT

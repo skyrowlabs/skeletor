@@ -25,13 +25,15 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.output import detail, emit, fail, item, ok, warn  # noqa: E402
+from scripts.paths import TESTS_DIR, TMP_DIR  # noqa: E402
 
-BUDGET = REPO_ROOT / "tests" / "skip_budget.json"
-DEFAULT_JUNIT = REPO_ROOT / "tmp" / "junit.xml"
+BUDGET = TESTS_DIR / "skip_budget.json"
+DEFAULT_JUNIT = TMP_DIR / "junit.xml"
 
 
 def count_skips(junit: Path) -> tuple:

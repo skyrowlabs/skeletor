@@ -17,10 +17,13 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which owns
+# every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(HERE.parents[1]))
 
 from scripts.output import fail, step  # noqa: E402
+from scripts.paths import PROJECT_ROOT  # noqa: E402
 
 #: (script, human label). Frontmatter first — both indexes read it.
 PIPELINE = [
@@ -45,7 +48,7 @@ def main() -> int:
             continue
         cmd = [sys.executable, str(HERE / script)] + (["--check"] if args.check else [])
         step(label)
-        if subprocess.run(cmd, cwd=REPO_ROOT).returncode != 0:
+        if subprocess.run(cmd, cwd=PROJECT_ROOT).returncode != 0:
             status = 1
 
     if args.check and status:
