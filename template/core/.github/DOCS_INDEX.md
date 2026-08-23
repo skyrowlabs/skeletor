@@ -43,7 +43,13 @@ and makes the relevant part harder to find, not easier.
 
 ## Agents, Skills & Shared Assets
 
-Everything an agent needs lives under `.claude/`:
+[`AGENTS.md`](../AGENTS.md) at the repo root is the file every agent reads
+first — the Critical Rules and the documentation routing table. `CLAUDE.md` is a
+pointer to it, never a second copy.
+
+The rest lives under `.claude/`. That directory name is a Claude Code
+convention; the rule files inside it are plain markdown with no tool-specific
+syntax, so another agent can be pointed at them directly.
 
 - **Rules** (`.claude/rules/`) — always-loaded conventions, one file per domain.
 - **Subagents** (`.claude/agents/`) — focused workers, invoked as `@agent-<name>`.

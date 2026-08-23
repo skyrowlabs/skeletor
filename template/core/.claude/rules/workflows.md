@@ -13,7 +13,7 @@ The standard phases for any feature or change. Skip a phase only when it is genu
 
 ## Phase 2 — Implementation
 
-5. Make focused changes that follow the Critical Rules in `CLAUDE.md`.
+5. Make focused changes that follow the Critical Rules in `AGENTS.md`.
 6. If you added a command: update the `cli/` package in the same commit.
 7. If you added a config value: add it to `.env.example` in the same commit.
 
@@ -26,7 +26,7 @@ The standard phases for any feature or change. Skip a phase only when it is genu
 ## Phase 4 — Documentation
 
 11. Update every doc identified in Phase 1.
-12. A new `docs/*.md` gets registered in `CLAUDE.md` **and** `.github/DOCS_INDEX.md`.
+12. A new `docs/*.md` gets registered in `AGENTS.md` **and** `.github/DOCS_INDEX.md`.
 
 ## Phase 5 — Testing
 

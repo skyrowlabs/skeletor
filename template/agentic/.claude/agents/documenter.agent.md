@@ -23,7 +23,7 @@ tokens and makes the relevant section harder to find.
 2. Update those docs to describe what the code **now does** — not what the
    change was. A doc that reads like a changelog entry has to be re-read
    against the code by everyone who lands after you.
-3. A new `docs/*.md` gets registered in **both** `CLAUDE.md` and
+3. A new `docs/*.md` gets registered in **both** `AGENTS.md` and
    `.github/DOCS_INDEX.md`. `{{CLI}} check docs` fails otherwise.
 4. Run `{{CLI}} check docs` before reporting.
 5. Commit with `docs(<scope>): <summary>` — never `feat:` for a docs-only change.

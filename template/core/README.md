@@ -50,7 +50,7 @@ them.
 | ---------------------------------------------- | -------------------------------------------- |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System design, components, critical patterns |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)   | Setup, configuration, CI/CD, testing         |
-| [`CLAUDE.md`](CLAUDE.md)                       | The rules an agent working here must follow  |
+| [`AGENTS.md`](AGENTS.md)                       | The rules an agent working here must follow  |
 
 ---
 

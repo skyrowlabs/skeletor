@@ -98,7 +98,7 @@ repos:
         language: system
         entry: python scripts/check_doc_tables.py
         pass_filenames: false
-        files: ^(docs/[^/]+\.md|CLAUDE\.md|\.github/DOCS_INDEX\.md)$
+        files: ^(docs/[^/]+\.md|AGENTS\.md|CLAUDE\.md|\.github/DOCS_INDEX\.md)$
 
       - id: source-doc-refs
         name: docs/* paths cited from source still resolve

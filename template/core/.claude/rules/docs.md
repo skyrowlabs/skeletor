@@ -241,5 +241,5 @@ python scripts/git/install_merge_drivers.py     # install / repair by hand
 
 ## Adding a New Top-Level Doc
 
-Register it in **both** index tables — `CLAUDE.md`'s Documentation Reference and
+Register it in **both** index tables — `AGENTS.md`'s Documentation Reference and
 `.github/DOCS_INDEX.md`. `{{CLI}} check docs` fails if a `docs/*.md` exists in neither.

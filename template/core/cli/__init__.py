@@ -1,7 +1,7 @@
 """{{PROJECT_NAME}} CLI — one entry point for everything you do in this repo.
 
 Implemented as a package of command-group modules, one per domain. The rule that
-keeps it useful is in ``CLAUDE.md``: **adding or changing a script means updating
+keeps it useful is in ``AGENTS.md``: **adding or changing a script means updating
 this package in the same commit.** A script nobody can discover is a script
 nobody runs, and the second person to need it writes it again.
 """

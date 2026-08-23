@@ -44,7 +44,7 @@ BASELINE = SCRIPTS_DIR / "doc_links_baseline.json"
 IGNORE_FILE = GITHUB_DIR / "scripts" / ".validate-ignore"
 
 SCAN_ROOTS = ["docs", ".claude", ".github"]
-EXTRA_FILES = ["CLAUDE.md", "README.md"]
+EXTRA_FILES = ["AGENTS.md", "CLAUDE.md", "README.md"]
 
 _LINK = re.compile(r"(?<!!)\[(?P<text>[^\]]*)\]\((?P<href>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
 _HEADING = re.compile(r"^(#{1,6})\s+(?P<text>.+?)\s*$", re.MULTILINE)

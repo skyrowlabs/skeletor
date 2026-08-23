@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Every `docs/*.md` is registered in both agent-facing index tables.
 
-`CLAUDE.md` and `.github/DOCS_INDEX.md` are how an agent decides what to read.
+`AGENTS.md` and `.github/DOCS_INDEX.md` are how an agent decides what to read.
 A document in neither is a document that will not be loaded — which is the same,
 from the agent's point of view, as a document that does not exist. The failure
 is silent and permanent: nothing ever surfaces the omission.
@@ -31,7 +31,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.output import detail, emit, fail, item, ok  # noqa: E402
 from scripts.paths import DOCS_DIR, GITHUB_DIR, PROJECT_ROOT  # noqa: E402
 
-TABLES = [PROJECT_ROOT / "CLAUDE.md", GITHUB_DIR / "DOCS_INDEX.md"]
+#: The agent-facing index tables. `AGENTS.md` is where the rules live and
+#: `CLAUDE.md` is a pointer to it, but both are read: a tree adopted from
+#: somewhere else may still keep its table in `CLAUDE.md`, and a doc registered
+#: in a file that exists is registered. A table that is absent contributes
+#: nothing rather than failing.
+TABLES = [
+    PROJECT_ROOT / "AGENTS.md",
+    PROJECT_ROOT / "CLAUDE.md",
+    GITHUB_DIR / "DOCS_INDEX.md",
+]
 
 #: Docs that are indexes themselves, or generated. Registering an index in an
 #: index is noise, and a generated file's registration would be regenerated away.
@@ -64,7 +73,7 @@ def main() -> int:
 
     status = 0
     if unregistered:
-        fail("docs not registered in CLAUDE.md or .github/DOCS_INDEX.md:")
+        fail("docs not registered in AGENTS.md or .github/DOCS_INDEX.md:")
         for ref in unregistered:
             item(ref)
         detail("An unregistered doc is one no agent will load. Add it to both tables.")

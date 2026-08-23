@@ -77,7 +77,7 @@ Every one is runnable locally with the same invocation CI uses.
 
 | Gate | Catches | Tier |
 | ---- | ------- | ---- |
-| `check_doc_tables.py` | A doc registered in neither index table — one no agent will load | C |
+| `check_doc_tables.py` | A doc registered in neither index table (`AGENTS.md`, `.github/DOCS_INDEX.md`) — one no agent will load | C |
 | `check_doc_links.py` | Dead relative links and `#fragments` (ratchet); `--fix` repoints the unambiguous ones | C |
 | `check_source_doc_refs.py` | `docs/*` paths cited from source comments that no longer resolve | C |
 | `regen.py --check` | A generated index that is stale in the commit that changed its source | C |

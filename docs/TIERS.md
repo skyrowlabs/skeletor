@@ -25,8 +25,8 @@ and every piece pays for itself inside a week.
 
 | You get                          | It buys                                                       |
 | -------------------------------- | ------------------------------------------------------------- |
-| `.claude/rules/*.md`             | Conventions an agent loads every session, one file per domain |
-| `CLAUDE.md` + `DOCS_INDEX.md`    | Lazy doc loading — 15–40K tokens per task instead of all of it |
+| `AGENTS.md` + `.claude/rules/*.md` | Conventions an agent loads every session — `AGENTS.md` is the cross-tool convention, `CLAUDE.md` a pointer to it |
+| `AGENTS.md` + `DOCS_INDEX.md`    | Lazy doc loading — 15–40K tokens per task instead of all of it |
 | `docs/TODO/` + `implementations/` | A backlog with a shape, and an archive of *why*               |
 | Generated indexes + READMEs      | "Is this already built but parked?" answerable from one JSON  |
 | Conventional commits + Release Please | Versioning and a changelog nobody hand-writes            |
