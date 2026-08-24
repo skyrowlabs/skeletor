@@ -282,6 +282,36 @@ is to drop the conventions along with the tooling.
 
 ---
 
+## An extension point with no extensions
+
+The scheduled-jobs layer splits every job into deterministic collection and an
+agentic triage stage, so exactly one line of it was ever tied to a vendor: the
+subprocess call that runs the agent.
+
+The tempting fix is a table of adapters — Claude, Codex, Cursor, Aider — and it
+is the wrong one, for a reason worth generalising. **Nothing in this repository
+can test any of them.** Three untested code paths would ship, and the failure
+they produce is the worst-shaped one available: unattended, at 03:15, in a job
+nobody is watching.
+
+Specifically, the run ledger's central rail is *a job whose agent never ran must
+not report `ok`*, and it rests entirely on `returncode == 0`. Agents disagree
+about that contract — some exit 0 having refused the task. An adapter that gets
+it wrong does not fail; it reports success for work that never happened, which
+is precisely the condition the ledger exists to make impossible.
+
+So what shipped is the seam and the contract, not the adapters: one argv
+template, overridable, defaulting to the tested invocation, with the contract
+written where somebody adding an adapter will read it. The template is refused
+if it lacks the prompt token — an agent invoked with no instruction starts, does
+nothing, and exits 0, which is the failure that looks most like success.
+
+The general form: **when you cannot test the alternatives, ship the seam and the
+contract, not the alternatives.** A configuration point with one tested value is
+honest. A registry of untested ones is a promise the code cannot keep.
+
+---
+
 ## Testing
 
 **Registration is marker-based, and this is the strongest single pattern.**

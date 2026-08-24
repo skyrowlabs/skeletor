@@ -25,10 +25,11 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
 # owns every path below — can be imported. See scripts/paths.py.
@@ -46,6 +47,66 @@ PROMPTS = Path(__file__).resolve().parent / "prompts"
 #: tree, and the next job in the grid then runs against a tree somebody else is
 #: mid-write in — so the timeout protects the schedule, not just this job.
 AGENT_TIMEOUT_S = 900
+
+#: The headless agent, as an argv template. `{prompt}` is replaced with the
+#: whole prompt; the argv is executed directly, never through a shell.
+#:
+#: One invocation, and it is the tested one. Other agents run headless too —
+#: `codex exec`, `cursor-agent -p`, `aider --message … --yes` — and this is
+#: deliberately not a table of them, because **nothing here can test one**. An
+#: adapter is only correct if it satisfies the contract below, and one that
+#: quietly does not is worse than no support at all: it fails unattended, at
+#: 03:15, in the one place the failure is invisible.
+#: The token replaced with the prompt. Defined once and never spelled again —
+#: including in the error below, where writing it literally inside an f-string
+#: would double the braces and make skeletor's own renderer read it as a
+#: scaffold placeholder. It refuses unknown ones, which is how this was caught.
+PROMPT_TOKEN = "{prompt}"
+
+DEFAULT_AGENT_CMD = f"claude -p {PROMPT_TOKEN} --permission-mode acceptEdits"
+
+#: Override with a full argv template:
+#:     {{CLI_ENV_PREFIX}}_AGENT_CMD='some-agent run --yes {prompt}'
+#:
+#: ## The contract an adapter must satisfy
+#:
+#: **Exit zero if and only if the agent ran and did the work.** Not "the process
+#: started", not "the model replied". `run_ledger.py` records `ok` on a zero
+#: exit, and its central rail is that a job whose agent never ran must not report
+#: `ok` — a collection stage that succeeded and a triage stage that never started
+#: look identical from outside, and the second is a job that has quietly stopped
+#: working. An agent that exits 0 after refusing the task inverts that rail, and
+#: the ledger then reports health it has no evidence for.
+#:
+#: **It must take the whole prompt as one argument.** The prompt carries the fix
+#: policy and up to 200 KB of collected data. An agent that only reads stdin, or
+#: truncates a long argument, needs a wrapper script rather than an entry here.
+#:
+#: **It must confine itself to the fix policy in the prompt.**
+#: `--permission-mode acceptEdits` is how Claude allows edits without allowing
+#: everything; an adapter with no equivalent must supply one, or the blast radius
+#: the prompt describes is a suggestion rather than a bound.
+AGENT_CMD_VAR = "{{CLI_ENV_PREFIX}}_AGENT_CMD"
+
+
+def agent_argv(prompt: str) -> List[str]:
+    """The command to run, with the prompt substituted in.
+
+    Raises rather than guessing. A template with no `{prompt}` token would run
+    the agent with no instruction at all — the failure that looks most like
+    success, because the process starts, exits 0, and the ledger records `ok`
+    for a job that was never asked to do anything.
+    """
+    template = os.environ.get(AGENT_CMD_VAR) or DEFAULT_AGENT_CMD
+    tokens = shlex.split(template)
+    if not tokens:
+        raise ValueError(f"{AGENT_CMD_VAR} is set but empty")
+    if not any(PROMPT_TOKEN in token for token in tokens):
+        raise ValueError(
+            f"{AGENT_CMD_VAR}={template!r} has no {PROMPT_TOKEN} token — the agent "
+            "would run with no instruction and still exit 0"
+        )
+    return [token.replace(PROMPT_TOKEN, prompt) for token in tokens]
 
 
 def heartbeat(url: Optional[str], status: str = "up") -> None:
@@ -142,17 +203,22 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
         ]
     )
 
-    step(f"{job.key}: running triage agent (policy: {policy})")
+    try:
+        argv = agent_argv(prompt)
+    except ValueError as exc:
+        return decline(str(exc))
+
+    step(f"{job.key}: running {argv[0]} (policy: {policy})")
     try:
         result = subprocess.run(
-            ["claude", "-p", prompt, "--permission-mode", "acceptEdits"],
+            argv,
             cwd=str(PROJECT_ROOT),
             capture_output=True,
             text=True,
             timeout=AGENT_TIMEOUT_S,
         )
     except FileNotFoundError:
-        return decline("the `claude` CLI is not on PATH (cron does not give you your login PATH)")
+        return decline(f"`{argv[0]}` is not on PATH (cron does not give you your login PATH)")
     except subprocess.TimeoutExpired:
         run_ledger.record(
             run_ledger.Run(

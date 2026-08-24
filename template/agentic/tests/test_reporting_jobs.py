@@ -115,3 +115,42 @@ def test_crontab_block_sets_path():
     and not under cron is almost always this — and it fails by not finding the
     interpreter, which reads as a broken job rather than a broken PATH."""
     assert "PATH=" in crontab_block()
+
+
+def test_agent_argv_substitutes_the_prompt():
+    """The default invocation carries the prompt as one argument."""
+    from scripts.reporting.agent_runner import agent_argv
+
+    argv = agent_argv("PROMPT-BODY")
+    assert "PROMPT-BODY" in argv, argv
+    assert "{prompt}" not in " ".join(argv)
+
+
+def test_agent_argv_honours_the_override(monkeypatch):
+    from scripts.reporting.agent_runner import AGENT_CMD_VAR, agent_argv
+
+    monkeypatch.setenv(AGENT_CMD_VAR, "some-agent run --yes {prompt}")
+    assert agent_argv("BODY") == ["some-agent", "run", "--yes", "BODY"]
+
+
+def test_agent_argv_refuses_a_template_with_no_prompt(monkeypatch):
+    """The failure that looks most like success.
+
+    An agent invoked with no instruction starts, does nothing, and exits 0 — and
+    the ledger then records `ok` for a job that was never asked to do anything.
+    Refusing here turns that into a decline with a reason.
+    """
+    from scripts.reporting.agent_runner import AGENT_CMD_VAR, agent_argv
+
+    monkeypatch.setenv(AGENT_CMD_VAR, "some-agent run --yes")
+    with pytest.raises(ValueError, match="no .*prompt.* token"):
+        agent_argv("BODY")
+
+
+def test_agent_command_is_documented_for_operators():
+    """A knob no operator can find is a knob nobody turns — the same rule the
+    heartbeat variables follow."""
+    from scripts.reporting.agent_runner import AGENT_CMD_VAR
+
+    env_example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
+    assert AGENT_CMD_VAR in env_example

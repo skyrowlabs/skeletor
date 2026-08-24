@@ -111,6 +111,33 @@ does not know its blast radius will pick one. What exceeds the policy is
 escalated as a finding, not acted on: an unattended change nobody authorised is
 worse than a finding nobody acted on.
 
+## Which agent runs the triage stage
+
+The collection stage is deterministic Python with no dependencies. Only triage
+shells out, through one argv template:
+
+```bash
+# the default, and the only invocation tested here
+{{CLI_ENV_PREFIX}}_AGENT_CMD='claude -p {prompt} --permission-mode acceptEdits'
+```
+
+`{prompt}` is replaced with the whole prompt and the argv is executed directly,
+never through a shell — so `codex exec {prompt}` and
+`aider --yes --message={prompt}` both work as shapes.
+
+**There is deliberately no table of supported agents.** Nothing in this
+repository can test one, and an adapter that is subtly wrong fails unattended at
+03:15, which is the one place the failure is invisible. Before pointing this at
+something else, satisfy the contract in `scripts/reporting/agent_runner.py` —
+above all: **exit non-zero unless the agent actually did the work.** The ledger
+records `ok` on a zero exit, and its central rail is that a job whose agent
+never ran must not report `ok`. An agent that exits 0 after refusing the task
+inverts that rail, and the ledger then reports health it has no evidence for.
+
+A template with no `{prompt}` token is refused rather than run: an agent invoked
+with no instruction starts, does nothing, and exits 0 — the failure that looks
+most like success.
+
 ## cron does not give you your login PATH
 
 A job that works in your shell and not under cron is almost always this, and it

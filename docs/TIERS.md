@@ -94,6 +94,7 @@ for on a Tuesday** — dependency drift, doc rot, an ageing backlog, test gaps.
 | `/implement` skill                 | A plan driven end-to-end and **filed**, not just written    |
 | `/release` skill                   | A release as a phased state machine that stops for a human  |
 | `scripts/reporting/jobs.py`        | One registry generating crontab + CLI + status viewer       |
+| One argv template for triage       | The agent is config, not a hardcode — with the contract an adapter must meet |
 | `agent_runner` + `run_ledger`      | Collection/triage split, blast-radius policy, outcome rails |
 | Release-anchored reports           | Every finding scoped to "is this in production right now?"  |
 | One fully-worked example job       | The shape to copy — registry, module, prompt, heartbeat     |
