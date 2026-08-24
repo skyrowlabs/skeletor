@@ -49,6 +49,12 @@ AGENTS = {"claude": "agent-claude", "none": None}
 
 MANIFEST_NAME = ".skeletor.json"
 
+#: The literal `--org` default. A badge is a claim about a repository that
+#: exists, and `OWNER` names one that does not — so the default scaffold ships
+#: no badges at all rather than opening every README with a broken image, which
+#: is the cosmetic form of shipping a gate that is red on arrival.
+ORG_UNSET = "OWNER"
+
 BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".ico", ".woff", ".woff2"}
 
 
@@ -68,6 +74,44 @@ def setup_commands(language: str) -> List[str]:
     return steps
 
 
+def badges(args, slug: str) -> str:
+    """The README badge row — empty unless `--org` names a real owner.
+
+    Two badges, and neither one *stores* a value. That is the whole constraint:
+    a hard-coded `version-0.1.0` badge would be a third home for a number whose
+    first two are the git tag and `VERSION`, and Release Please bumps both
+    without ever touching the README — so it would be correct until the first
+    release and wrong forever after. The release badge is instead a *view* of
+    the latest GitHub release, which is the same tag `get_version()` reads
+    through `git describe`. There is nothing to keep in sync because there is no
+    copy.
+
+    The CI badge is pinned to `--release-branch` and labelled for it. A bare
+    workflow badge reports the repository's DEFAULT branch, which is the
+    `--base-branch` this scaffolder actually creates (`git init -b`), and
+    `ci.yml` has no `push` trigger for that branch at all — only for the release
+    branch. The honest-looking badge is therefore the one that reads "no status"
+    for the life of a perfectly healthy project.
+
+    The trailing blank line is part of the return value: an empty row must leave
+    the tagline sitting directly under the title, with no double blank line for
+    `prettier` to reformat on the first commit.
+    """
+    if args.org == ORG_UNSET:
+        return ""
+    repo = f"{args.org}/{slug}"
+    release = (
+        f"[![Release](https://img.shields.io/github/v/release/{repo}?sort=semver)]"
+        f"(https://github.com/{repo}/releases)"
+    )
+    ci = (
+        f"[![Release CI](https://img.shields.io/github/actions/workflow/status/{repo}/ci.yml"
+        f"?branch={args.release_branch}&label=release%20ci)]"
+        f"(https://github.com/{repo}/actions/workflows/ci.yml)"
+    )
+    return f"{release} {ci}\n\n"
+
+
 def substitutions(args) -> Dict[str, str]:
     slug = args.slug or Path(args.target).resolve().name
     cli = args.cli or re.sub(r"[^a-z0-9]", "", slug.lower())[:8] or "run"
@@ -76,6 +120,7 @@ def substitutions(args) -> Dict[str, str]:
         "PROJECT_NAME": args.name or slug.replace("-", " ").replace(".", " ").title(),
         "PROJECT_SLUG": slug,
         "TAGLINE": args.tagline,
+        "BADGES": badges(args, slug),
         "CLI": cli,
         "CLI_ENV_PREFIX": prefix,
         "CI_ENV_VAR": f"{prefix}_CI",
@@ -284,7 +329,11 @@ def main() -> int:
     parser.add_argument("--release-branch", default="main")
     parser.add_argument("--python", default="3.12")
     parser.add_argument("--line-length", type=int, default=120)
-    parser.add_argument("--org", default="OWNER")
+    parser.add_argument(
+        "--org",
+        default=ORG_UNSET,
+        help="the GitHub owner: CODEOWNERS, and the README badges, which are omitted without it",
+    )
     parser.add_argument("--timezone", default="UTC", help="the timezone the crontab fires in (agentic tier)")
     parser.add_argument("--no-git", action="store_true", help="skip `git init` and the first commit")
     parser.add_argument("--force", action="store_true", help="write into an existing non-empty directory")

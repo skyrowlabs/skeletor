@@ -444,6 +444,102 @@ def agentless_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     return results
 
 
+def badge_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """`--org` decides whether the README carries badges, and the default is none.
+
+    Both halves are the check, and the absent half is the one that matters. A
+    badge names a repository; the `--org` default names one that does not exist,
+    so a scaffold that shipped badges unconditionally would open every README
+    with a broken image — a gate that is red on arrival, wearing a cosmetic hat.
+
+    The CI badge is asserted to carry `?branch=<release branch>`, against a
+    release branch deliberately NOT left at its default so that a hard-coded
+    `main` in the scaffolder fails here. Without that parameter a workflow badge
+    reports the repository's default branch — the `--base-branch` that
+    `skeletor-new` creates with `git init -b` — where `ci.yml` has no `push`
+    trigger at all, and the badge reads "no status" for the life of the project.
+
+    The empty case is checked byte-for-byte rather than by absence, because the
+    way it breaks is whitespace: a `{{BADGES}}` that renders to nothing on its
+    own line leaves a double blank line under the title, which `prettier`
+    rewrites on a tree nobody has touched.
+    """
+    results = []
+
+    # The trees the main loop generated all take the `--org` default.
+    plain = workdir / f"{tier}-python" / "README.md"
+    started = time.time()
+    if not plain.exists():
+        results.append(Result("badges: absent without --org", True, 0.0, "skipped: no python tree at this tier"))
+    else:
+        head = plain.read_text()[:64]
+        expected_head = "# Probe\n\na scaffold under test\n"
+        results.append(
+            Result(
+                "badges: absent without --org",
+                head.startswith(expected_head),
+                time.time() - started,
+                f"README opens with: {head!r}",
+            )
+        )
+
+    target = workdir / "badged"
+    started = time.time()
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(target), "--name", "Badged", "--slug", "badged",
+         "--cli", CLI_NAME, "--tier", tier, "--language", "both", "--org", "acme",
+         "--release-branch", "trunk", "--no-git"],
+        cwd=workdir,
+    )
+    if code != 0:
+        results.append(Result("badges: scaffold --org", False, time.time() - started, output))
+        return results
+    results.append(Result("badges: scaffold --org", True, time.time() - started, output))
+
+    started = time.time()
+    readme = (target / "README.md").read_text()
+    required = [
+        "https://img.shields.io/github/v/release/acme/badged",
+        "https://github.com/acme/badged/releases",
+        "/acme/badged/ci.yml?branch=trunk",
+        "https://github.com/acme/badged/actions/workflows/ci.yml",
+    ]
+    missing = [needle for needle in required if needle not in readme]
+    results.append(
+        Result(
+            "badges: present with --org, pinned to the release branch",
+            not missing,
+            time.time() - started,
+            f"missing from README: {missing}" if missing else readme[:400],
+        )
+    )
+
+    # A badge is markup in a file two checkers read. `check docs` is what says
+    # the row did not cost the tree its own docs gate.
+    (target / ".venv").symlink_to(venv_python.parents[1])
+    started = time.time()
+    code, output = run([f"./{CLI_NAME}", "check", "docs"], cwd=target, env_extra={"PYTHONPATH": str(target)})
+    results.append(Result("badges: check docs", code == 0, time.time() - started, output))
+
+    # The badge row is one very long markdown line, and every OTHER tree checked
+    # here takes the `--org` default — so without this, `prettier` never forms an
+    # opinion about the one line badges actually add. It is `proseWrap:
+    # preserve` in `template/node/package.json` that makes the row survivable;
+    # this is what would go red if that setting ever changed.
+    if not shutil.which("npm"):
+        results.append(Result("badges: prettier", True, 0.0, "skipped: npm not on PATH"))
+        return results
+    started = time.time()
+    code, output = run(["npm", "install", "--no-audit", "--no-fund", "--silent"], cwd=target)
+    if code != 0:
+        results.append(Result("badges: npm install", False, time.time() - started, output))
+        return results
+    started = time.time()
+    code, output = run(["npm", "run", "--silent", "format:check"], cwd=target)
+    results.append(Result("badges: prettier accepts the badge row", code == 0, time.time() - started, output))
+    return results
+
+
 def long_path_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     """Scaffold once into a long path and re-run the formatter on the result.
 
@@ -531,6 +627,9 @@ def main() -> int:
         # wrong tree.
         fullest = max(tiers, key=lambda t: len(scaffolder.TIERS[t]))
         for gate in agentless_gate(fullest, workdir, venv_python):
+            results.append(gate)
+
+        for gate in badge_gate(fullest, workdir, venv_python):
             results.append(gate)
 
         for gate in long_path_gate(fullest, workdir, venv_python):

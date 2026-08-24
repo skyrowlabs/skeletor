@@ -1,6 +1,6 @@
 # {{PROJECT_NAME}}
 
-{{TAGLINE}}
+{{BADGES}}{{TAGLINE}}
 
 <!-- SCAFFOLD: replace the line above with what this project actually does, and
      say it in two or three sentences here. This is the only part of this file

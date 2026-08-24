@@ -83,6 +83,14 @@ into a source line is red for one band of checkout depths and green either side
 of it: the length there is derived from the tree's own line limit rather than
 picked, and a round 120 sat past the band and caught nothing.
 
+The README badge row is gated in both directions, because both directions are
+the same bug: a default scaffold must open with title, blank line, tagline and
+no badges at all (`--org` defaults to `OWNER`, which names no repository), and
+an `--org` scaffold must carry a CI badge pinned to the *release* branch
+(`ci.yml` has no `push` trigger for the branch `git init -b` creates, so a bare
+badge reads "no status" forever). A badge that is broken or permanently grey is
+a gate that is red on arrival wearing a cosmetic hat.
+
 Three things it reads rather than repeats: the tier and language lists come from
 `bin/skeletor-new`, the lint arguments from the generated tree's own
 `.pre-commit-config.yaml`, and the tool versions from

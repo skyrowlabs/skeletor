@@ -557,6 +557,27 @@ is the rule people are surprised by, and it is the one that matters: a message
 with three `feat:` lines is three commits wearing one hat, and the changelog
 generator takes only the first.
 
+### Badges
+
+Two, and only when `--org` names a real owner. Neither one *stores* a value,
+which is the whole constraint: a hard-coded `version-0.1.0` badge would be a
+third home for a number whose first two are the git tag and `VERSION`, and
+Release Please bumps both without ever touching the README — correct until the
+first release, wrong forever after. The release badge is instead a *view* of the
+latest GitHub release, the same tag `get_version()` reads through `git
+describe`. There is nothing to keep in sync because there is no copy.
+
+The CI badge is pinned to `--release-branch` and labelled for it. A bare
+workflow badge reports the repository's **default** branch — which is the
+`--base-branch` that `skeletor-new` creates with `git init -b` — and `ci.yml`
+runs on `push` for the release branch alone. So the obvious badge reads "no
+status" for the life of a perfectly healthy project, and the fix changes what it
+claims: not "is the trunk green" but "is the last release green."
+
+`--org` defaults to `OWNER`, which names no repository, so the default scaffold
+ships no badges rather than opening every README with a broken image — the
+cosmetic form of shipping a gate that is red on arrival.
+
 ---
 
 ## Honest assessment: what is over-built
