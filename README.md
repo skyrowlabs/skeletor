@@ -94,6 +94,8 @@ Every one is runnable locally with the same invocation CI uses.
 | Capability | Detail | Tier |
 | ---------- | ------ | ---- |
 | Marker registration | A file joins a suite by declaring `pytestmark` — no registry anywhere | C |
+| CLI smoke + flag contract | Every command answers `--help` and every read-only one runs; a flag the CLI forwards must be one the script defines | C |
+| Docs lifecycle end-to-end | A plan **moves** to the archive and every index follows — run on a disposable copy of the tree | C |
 | `require_or_skip` | Skips locally, **fails** in CI, so "green" means "ran" | C |
 | Ratchets | Skip count and coverage, each moved deliberately in the same commit | C |
 | Shipped tests | `marker_coverage` · `docs_pipeline` · `ci_draft_gate` · `lint_tool_parity` | C |

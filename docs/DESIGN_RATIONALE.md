@@ -312,6 +312,46 @@ honest. A registry of untested ones is a promise the code cannot keep.
 
 ---
 
+## Test the surface people actually type
+
+A suite can be large and still leave the one thing every user touches unproven.
+This shell had 43 tests and **none of them executed a CLI command** — every one
+checked a module or a config file. The commands were verified by somebody having
+run them once, by hand, at some point.
+
+Two bugs of that exact shape had already shipped: a helper that joined its first
+argument onto the project root made `check pre-push` — the first command the
+scaffolder prints — impossible to pass at any tier; and a `--fix` flag the CLI
+advertised and forwarded had never been defined by the script receiving it, so
+it exited 2 on "unrecognized arguments" for as long as nobody typed it.
+
+The first is caught by running commands. **The second is not**, and that is the
+more interesting half: a smoke run passes no flags, so it exercises exactly the
+path that already worked. Catching it needs the forwarded flags checked against
+the script that receives them — a contract between two source files, invisible
+to both.
+
+Three things worth stealing from how it went:
+
+* **Enrol by walking, not by listing.** The command tree is walked, so a new
+  command is covered by existing. What must not run — anything that invokes an
+  agent, anything that mutates, the suites themselves — is exempt with a written
+  reason. Agent-backed commands are exempt from the *job registry* rather than
+  the allowlist, because they are generated from it and a per-job exemption
+  would be a second registry.
+* **A scan that matches nothing is a test that always passes.** The first
+  version of the flag check compared the flag against the script's `--help`
+  output, and passed against a deliberately reintroduced bug — because the
+  script's *docstring* mentions the flag and argparse prints it as the
+  description. The bug was only visible because the check was tested by breaking
+  the code it protects.
+* **A test that mutates works on a disposable copy.** The lifecycle test copies
+  the tooling into a temporary directory and operates there. That is only
+  possible because every path derives from the location of the package, which
+  was a refactor done for unrelated reasons and paid for itself here.
+
+---
+
 ## Testing
 
 **Registration is marker-based, and this is the strongest single pattern.**
