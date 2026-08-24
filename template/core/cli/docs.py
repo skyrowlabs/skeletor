@@ -1,7 +1,7 @@
 """``{{CLI}} docs`` — the documentation lifecycle.
 
 Everything here is mechanical on purpose. The docs discipline in
-``.claude/rules/docs.md`` only survives if following it is cheaper than not, and
+``docs/rules/docs.md`` only survives if following it is cheaper than not, and
 these commands are what make it cheaper.
 """
 

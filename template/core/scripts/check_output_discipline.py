@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Nobody spells a status symbol, or picks a stream, outside `scripts/output.py`.
 
-The rule this enforces is in `.claude/rules/output.md`, and it exists because it
+The rule this enforces is in `docs/rules/output.md`, and it exists because it
 was already broken here. `cli/helpers.py` shipped `ok()` / `fail()` / `warn()`
 and roughly twenty call sites retyped `print(f"✅ ...")` anyway; `⏸️` meant
 "executed and declined" in three files and was defined in none of them; the gate
@@ -150,7 +150,7 @@ def main() -> int:
             for finding in findings[group]:
                 item(finding)
         detail()
-        detail("Status lines come from scripts/output.py — see .claude/rules/output.md.")
+        detail("Status lines come from scripts/output.py — see docs/rules/output.md.")
         detail("A deliberate exception goes in scripts/output_allowlist.yaml WITH A REASON.")
         return 1
 

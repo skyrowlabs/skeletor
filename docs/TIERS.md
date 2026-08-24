@@ -25,7 +25,7 @@ and every piece pays for itself inside a week.
 
 | You get                          | It buys                                                       |
 | -------------------------------- | ------------------------------------------------------------- |
-| `AGENTS.md` + `.claude/rules/*.md` | Conventions an agent loads every session — `AGENTS.md` is the cross-tool convention, `CLAUDE.md` a pointer to it |
+| `AGENTS.md` + `docs/rules/*.md`  | Conventions an agent loads every session — `AGENTS.md` is the cross-tool convention, `CLAUDE.md` a pointer to it |
 | `AGENTS.md` + `DOCS_INDEX.md`    | Lazy doc loading — 15–40K tokens per task instead of all of it |
 | `docs/TODO/` + `implementations/` | A backlog with a shape, and an archive of *why*               |
 | Generated indexes + READMEs      | "Is this already built but parked?" answerable from one JSON  |
@@ -43,6 +43,19 @@ learning curve, and `{{CLI}} docs file` removes most of it.
 
 **Skip it only if** the project will never have more than one plan, one doc and
 one contributor — in which case you do not need a shell.
+
+### The `--agent` dimension, orthogonal to all three
+
+`--agent claude` (the default) adds one vendor's tooling: `.claude/settings.json`,
+a session-start hook, and at `agentic` three subagents and two skills.
+`--agent none` omits all of it.
+
+What it does **not** touch is `docs/rules/` — commits, docs, testing, output and
+the language rules ship either way. They are plain markdown that nothing
+auto-loads for any agent; they are read because `AGENTS.md` names them, so
+another tool is pointed at the same path. Segmenting by vendor instead of by
+*kind* would have put the testing rules behind the flag, and `--agent none`
+would have quietly produced a project with no testing conventions.
 
 ---
 

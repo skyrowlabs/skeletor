@@ -87,7 +87,7 @@ def output_cmd() -> None:
 
     Status lines and streams are picked in one module so a `--json` payload and
     the ❌ lines explaining it never share a stream. Full rules in
-    `.claude/rules/output.md`.
+    `docs/rules/output.md`.
     """
     sys.exit(script("scripts/check_output_discipline.py"))
 

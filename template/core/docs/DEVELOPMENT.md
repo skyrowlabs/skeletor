@@ -60,7 +60,7 @@ pytestmark = [pytest.mark.unit]
 `--ci` sets `{{CI_ENV_VAR}}=1`, under which an env-gate skip becomes a **failure**.
 That is the difference between "the suite passed" and "the suite ran".
 
-Full rules: [`.claude/rules/testing.md`](../.claude/rules/testing.md).
+Full rules: [`docs/rules/testing.md`](rules/testing.md).
 
 ## CI/CD Pipeline
 
@@ -90,7 +90,7 @@ bump; `CHANGELOG.md` and `VERSION` are generated. **Never hand-edit either.**
 
 A release closes the report window: in-flight reports under
 `docs/reports/regular/` freeze into `docs/reports/releases/<tag>/`. See
-[`.claude/rules/docs.md`](../.claude/rules/docs.md).
+[`docs/rules/docs.md`](rules/docs.md).
 
 ## Command Output
 
@@ -113,7 +113,7 @@ nothing about which way it has been moving.
 
 Nothing spells a status symbol or picks a stream by hand; it all comes from
 `scripts/output.py`, and `{{CLI}} check output` enforces that by pattern.
-Full rules: [`.claude/rules/output.md`](../.claude/rules/output.md).
+Full rules: [`docs/rules/output.md`](rules/output.md).
 
 ## Reproducing a CI Failure Locally
 

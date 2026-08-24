@@ -39,6 +39,14 @@ TIERS: Dict[str, List[str]] = {
 LANGUAGE_OVERLAYS = {"python": "python", "node": "node", "both": "python,node"}
 
 #: Files whose bytes must not be touched by substitution.
+#: Agent -> the overlay directory holding that tool's files, applied after each
+#: tier it specialises. Everything in here is tooling for one vendor: settings,
+#: hooks, subagents, skills. The *conventions* are never in here — they live in
+#: `docs/rules/`, are plain markdown, and are read because `AGENTS.md` names
+#: them. Segmenting by vendor would otherwise put the testing rules behind a
+#: flag, and `--agent none` would silently ship a tree with no testing rules.
+AGENTS = {"claude": "agent-claude", "none": None}
+
 MANIFEST_NAME = ".skeletor.json"
 
 BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".ico", ".woff", ".woff2"}
@@ -226,6 +234,7 @@ def write_manifest(target: Path, args, overlays: List[str]) -> Path:
         "--tagline", args.tagline,
         "--tier", args.tier,
         "--language", args.language,
+        "--agent", args.agent,
         "--base-branch", args.base_branch,
         "--release-branch", args.release_branch,
         "--python", args.python,
@@ -264,6 +273,13 @@ def main() -> int:
     parser.add_argument("--tagline", default="<one line: what this project is>")
     parser.add_argument("--tier", choices=sorted(TIERS), default="core")
     parser.add_argument("--language", choices=["python", "node", "both", "none"], default="python")
+    parser.add_argument(
+        "--agent",
+        choices=sorted(AGENTS),
+        default="claude",
+        help="which agent's tooling to ship (settings, hooks, subagents, skills). "
+        "The conventions in docs/rules/ are shipped either way.",
+    )
     parser.add_argument("--base-branch", default="develop", help="the integration branch")
     parser.add_argument("--release-branch", default="main")
     parser.add_argument("--python", default="3.12")
@@ -281,9 +297,21 @@ def main() -> int:
 
     values = substitutions(args)
     cli_name = values["CLI"]
-    overlays = list(TIERS[args.tier])
-    if args.language != "none":
-        overlays += LANGUAGE_OVERLAYS[args.language].split(",")
+
+    # Each overlay, then that overlay's agent files if the chosen agent ships
+    # any. Applied per-overlay rather than once at the end because agent files
+    # are tier-shaped: `.claude/skills/` describes the agentic workflow and has
+    # no meaning at `core`. An agent overlay that does not exist is skipped —
+    # most overlays have no vendor files at all — while a missing TIER overlay
+    # stays a hard error, because that one is always a bug.
+    agent_root = AGENTS[args.agent]
+    overlays = []
+    for name in list(TIERS[args.tier]) + (
+        LANGUAGE_OVERLAYS[args.language].split(",") if args.language != "none" else []
+    ):
+        overlays.append(name)
+        if agent_root and (TEMPLATE / agent_root / name).is_dir():
+            overlays.append(f"{agent_root}/{name}")
 
     target.mkdir(parents=True, exist_ok=True)
     written: List[str] = []

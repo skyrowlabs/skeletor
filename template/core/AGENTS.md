@@ -10,9 +10,12 @@ across tools; `CLAUDE.md` is a pointer to it rather than a copy, because two
 files stating the same rules drift within the week and the copy that is wrong is
 the one that happens to get loaded. Put rules here, never there.
 
-The detailed rule files live under `.claude/rules/`. That directory name is a
-Claude Code convention, but the files are plain markdown with no tool-specific
-syntax — point any agent at them.
+The detailed rule files are in `docs/rules/`, and they are plain markdown with
+no tool-specific syntax. They sit under `docs/` rather than in a vendor
+directory on purpose: nothing loads them automatically for any agent — they are
+read because this file names them — so putting them somewhere tool-branded
+would have been a claim that was never true, and one that made the conventions
+look optional to anybody not using that tool.
 
 ---
 
@@ -56,7 +59,7 @@ result. If the code runs in a container, run it in that container.
 
 ### 3. Lint Before Committing
 
-Run the blocking set after any change — see `.claude/rules/{{LANG_RULES}}.md`. CI blocks on
+Run the blocking set after any change — see `docs/rules/{{LANG_RULES}}.md`. CI blocks on
 all of it, and the type check is **whole-project**: one stale error anywhere blocks every
 commit, not just commits near it.
 
@@ -64,7 +67,7 @@ commit, not just commits near it.
 
 `./{{CLI}} test <suite>` — all tests must pass. Never commit half-working code. Test files
 self-register via a module-wide `pytestmark` marker; there are no registries to update.
-Full rules in `.claude/rules/testing.md`.
+Full rules in `docs/rules/testing.md`.
 
 ### 5. Keep the CLI in Sync
 
@@ -74,7 +77,7 @@ nobody can discover is a script nobody runs.
 ### 6. Commit Strategy — Frequent, Logical, Bundled
 
 One commit per logical idea, all of its files bundled into that commit. Conventional format,
-one subject line. Full rules in `.claude/rules/commits.md`.
+one subject line. Full rules in `docs/rules/commits.md`.
 
 ### 7. Commit Autonomously — Push When Complete
 
@@ -103,7 +106,7 @@ is actually done.
 
 Decide in planning which docs a change will invalidate, and update them in the same PR. A
 plan that is finished **moves** from `docs/TODO/` to `docs/implementations/` — never copies.
-Both indexes are generated; never hand-edit them. Full rules in `.claude/rules/docs.md`.
+Both indexes are generated; never hand-edit them. Full rules in `docs/rules/docs.md`.
 
 ### 10. No Temp Files in the Project Root
 
@@ -148,7 +151,7 @@ a machine-readable flag is one extra emit rather than a second code path. Every
 `scripts/check_*.py` supports `--json` and answers on every path, including the
 ones that pass. `{{CLI}} check output` enrols every file under `cli/` and
 `scripts/` by pattern; exceptions go in `scripts/output_allowlist.yaml` with a
-reason. Full rules in `.claude/rules/output.md`.
+reason. Full rules in `docs/rules/output.md`.
 
 ---
 

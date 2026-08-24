@@ -384,6 +384,66 @@ def check_no_baked_paths(tree: Path) -> Result:
     return Result("no scaffold-time paths baked into the tree", not hits, time.time() - started, "\n".join(hits))
 
 
+def agentless_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """`--agent none` must produce a tree with no vendor directory that still
+    passes its own gates.
+
+    This is the separability claim, and it was false until it was checked. With
+    the rule files under `.claude/rules/`, deleting that directory left six
+    broken links in `docs/DEVELOPMENT.md`, `docs/README.md`, `.github/
+    CONTRIBUTING.md` and a *generated* `docs/TODO/README.md` — so the tree could
+    not survive losing tooling that nothing in it actually depended on, and the
+    generator recreated one of the dead links on every run.
+
+    Asserted at the fullest tier because that is where the vendor files are:
+    lower tiers ship two, `agentic` ships seven.
+    """
+    results = []
+    target = workdir / "agentless"
+    started = time.time()
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(target), "--name", "Agentless", "--slug", "agentless",
+         "--cli", CLI_NAME, "--tier", tier, "--language", "python", "--agent", "none", "--no-git"],
+        cwd=workdir,
+    )
+    if code != 0:
+        return [Result(f"--agent none: scaffold {tier}", False, time.time() - started, output)]
+    results.append(Result(f"--agent none: scaffold {tier}", True, time.time() - started, output))
+
+    started = time.time()
+    stray = sorted(p.relative_to(target).as_posix() for p in target.rglob(".claude"))
+    results.append(
+        Result(
+            "--agent none: no vendor directory",
+            not stray,
+            time.time() - started,
+            f"unexpected: {stray}" if stray else "",
+        )
+    )
+
+    # The rules are conventions, not tooling — they ship either way. A tree that
+    # dropped them with the vendor directory would be the segmentation bug this
+    # gate exists to catch, not a smaller tree.
+    started = time.time()
+    rules = sorted(p.name for p in (target / "docs" / "rules").glob("*.md"))
+    results.append(
+        Result(
+            f"--agent none: keeps {len(rules)} rule file(s)",
+            len(rules) >= 5,
+            time.time() - started,
+            f"found: {rules}",
+        )
+    )
+
+    # The wrapper needs an interpreter with click on it, the same borrowed venv
+    # every other generated tree here uses.
+    (target / ".venv").symlink_to(venv_python.parents[1])
+    started = time.time()
+    code, output = run([f"./{CLI_NAME}", "check", "docs"], cwd=target, env_extra={"PYTHONPATH": str(target)})
+    results.append(Result("--agent none: check docs", code == 0, time.time() - started, output))
+    return results
+
+
 def long_path_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     """Scaffold once into a long path and re-run the formatter on the result.
 
@@ -470,6 +530,9 @@ def main() -> int:
         # puts `governed` after `agentic`, which would have quietly gated the
         # wrong tree.
         fullest = max(tiers, key=lambda t: len(scaffolder.TIERS[t]))
+        for gate in agentless_gate(fullest, workdir, venv_python):
+            results.append(gate)
+
         for gate in long_path_gate(fullest, workdir, venv_python):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)

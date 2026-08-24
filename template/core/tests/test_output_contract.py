@@ -68,7 +68,7 @@ def test_status_lines_stay_off_stdout(script: Path):
     for symbol in STATE_SYMBOLS.values():
         assert symbol.strip() not in result.stdout, (
             f"{script.name} wrote '{symbol.strip()}' to stdout — status lines belong on stderr. "
-            "See .claude/rules/output.md."
+            "See docs/rules/output.md."
         )
 
 

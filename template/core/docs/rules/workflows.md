@@ -19,7 +19,7 @@ The standard phases for any feature or change. Skip a phase only when it is genu
 
 ## Phase 3 — Quality Checks
 
-8. Run the blocking lint set (see `.claude/rules/{{LANG_RULES}}.md`).
+8. Run the blocking lint set (see `docs/rules/{{LANG_RULES}}.md`).
 9. Run the type checker whole-project.
 10. For a deeper pass, run `/code-review` from the main session.
 
@@ -42,4 +42,4 @@ The standard phases for any feature or change. Skip a phase only when it is genu
 ## Phase 7 — Release (when a tag is cut)
 
 18. Release Please opens the release PR from the conventional commits. A human merges it.
-19. Cutting a release **closes the report window** — see `.claude/rules/docs.md`.
+19. Cutting a release **closes the report window** — see `docs/rules/docs.md`.

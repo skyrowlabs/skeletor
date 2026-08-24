@@ -42,10 +42,16 @@ for the routing table — load only the documents a task needs.
 Load `todo_index.json` to answer *"is this already built but parked?"* **before** rebuilding
 a feature.
 
+## Conventions
+
+- **[rules/](rules/)** — one file per domain: commits, docs, testing, output,
+  and the language rules. `AGENTS.md` points here; they are read, never
+  auto-loaded, so they work with any agent.
+
 ## Archive — Completed Work
 
 - **[implementations/README.md](implementations/README.md)** — index by category
 - **[implementation_index.json](implementation_index.json)** — machine-readable
 
 Both READMEs and both JSON files are generated. Never hand-edit — see
-[`.claude/rules/docs.md`](../.claude/rules/docs.md).
+[`docs/rules/docs.md`](rules/docs.md).

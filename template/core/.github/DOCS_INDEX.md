@@ -47,14 +47,16 @@ and makes the relevant part harder to find, not easier.
 first — the Critical Rules and the documentation routing table. `CLAUDE.md` is a
 pointer to it, never a second copy.
 
-The rest lives under `.claude/`. That directory name is a Claude Code
-convention; the rule files inside it are plain markdown with no tool-specific
-syntax, so another agent can be pointed at them directly.
+- **Rules** (`docs/rules/`) — the conventions, one file per domain. Plain
+  markdown, read because `AGENTS.md` names them. Any agent can be pointed here.
 
-- **Rules** (`.claude/rules/`) — always-loaded conventions, one file per domain.
+Everything under `.claude/` is Claude Code tooling and nothing else depends on
+it — scaffold with `--agent none` to omit it, and the tree keeps every rule:
+
 - **Subagents** (`.claude/agents/`) — focused workers, invoked as `@agent-<name>`.
 - **Skills** (`.claude/skills/`) — multi-agent orchestration, invoked as `/<name>`.
-- **References** (`.claude/references/`) — material an agent loads on demand.
+- **Settings & hooks** (`.claude/settings.json`, `.claude/hooks/`) — a permission
+  allowlist and a session-start toolchain install.
 
 ---
 

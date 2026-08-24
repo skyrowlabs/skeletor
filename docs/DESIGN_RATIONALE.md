@@ -244,6 +244,44 @@ the next upgrade would overwrite the merge.
 
 ---
 
+## Vendor tooling: segment by kind, never by vendor
+
+The shell was built against one agent, and sixteen of its 111 files carried that
+vendor's name. The obvious move is to put all sixteen behind a flag. It is the
+wrong one, and the reason generalises past agents.
+
+Those sixteen files were two unrelated things:
+
+| | Files | Auto-loaded by the tool? |
+| --- | --- | --- |
+| The conventions — commits, docs, testing, output, language rules | 8 | **No.** Nothing loaded them. They were read because the root instruction file *named* them |
+| The tooling — settings, hooks, subagents, skills | 7 | **Yes.** Real product features with no equivalent shape elsewhere |
+
+The rules had never been vendor-anything. They sat in a vendor directory by
+habit, and the directory name was a claim that was never true. Two consequences,
+both real:
+
+* **Segmenting by vendor puts the testing rules behind the flag.** `--agent none`
+  would have shipped a project with no testing conventions — a worse tree, sold
+  as a more portable one.
+* **Neutral documents depended on a vendor path.** `docs/DEVELOPMENT.md`,
+  `docs/README.md` and `.github/CONTRIBUTING.md` all linked into it, and so did
+  a *generated* `docs/TODO/README.md` — the generator recreated the dead link on
+  every run. Deleting the vendor directory broke the tree's own `check docs`.
+
+So the seam is **content versus tooling**, and it costs almost nothing to cut
+there: the rules moved to `docs/rules/`, and the vendor overlay holds only the
+seven files that are genuinely that product's.
+
+The part worth stealing is the test. "Separable" was an assumption for as long
+as nobody tried it, and it was false. `bin/skeletor-verify` now scaffolds with
+the vendor overlay off and asserts three things — no vendor directory anywhere,
+all the rule files still present, and the tree still passing its own gates. The
+middle one matters most: without it, the cheapest way to make the first two pass
+is to drop the conventions along with the tooling.
+
+---
+
 ## Testing
 
 **Registration is marker-based, and this is the strongest single pattern.**

@@ -173,7 +173,7 @@ def build() -> str:
         "```",
         "",
         "Statuses, gates and the queue numbering are defined in",
-        "[`.claude/rules/docs.md`](../../.claude/rules/docs.md). File a finished plan with",
+        "[`docs/rules/docs.md`](../rules/docs.md). File a finished plan with",
         "`{{CLI}} docs file <slug> --category <category>` — never a plain `mv`.",
         "",
     ]

@@ -25,7 +25,7 @@ work is how four CI runs become one. Never on either branch above.
 ## Commits
 
 One logical idea per commit, all of its files bundled in. One subject line.
-See [`.claude/rules/commits.md`](../.claude/rules/commits.md); the commit-msg
+See [`docs/rules/commits.md`](../docs/rules/commits.md); the commit-msg
 hook enforces the format.
 
 ## Why drafts

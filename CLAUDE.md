@@ -44,6 +44,7 @@ does not.
 ```bash
 # Scaffold a project (the only "build" this repo has)
 bin/skeletor-new ../target --name "Name" --cli xx --tagline "..." --tier core
+bin/skeletor-new ../target --agent none          # no Claude tooling; rules still ship
 bin/skeletor-new --help
 
 # Verify a template change end-to-end — run this after ANY edit under template/
@@ -181,9 +182,25 @@ with a reason.
 overwriting earlier ones, so a tier can specialise a file a lower tier ships:
 
 ```
-core  →  governed  →  agentic     (cumulative tiers, TIERS map in skeletor-new)
-                   +  python / node   (language overlay, applied last)
+core  →  governed  →  agentic          (cumulative tiers, TIERS map in skeletor-new)
+                   +  python / node    (language overlay)
+each of the above  +  agent-claude/<overlay>   (agent overlay, if it exists)
 ```
+
+The **agent overlay is applied per overlay, not once at the end**, because its
+files are tier-shaped: `.claude/skills/` describes the agentic workflow and has
+no meaning at `core`. An agent overlay that does not exist is skipped — most
+overlays ship no vendor files — while a missing *tier* overlay stays a hard
+error, because that one is always a bug.
+
+**Only tooling goes in an agent overlay**: settings, hooks, subagents, skills.
+The conventions live in `docs/rules/`, are plain markdown, and are shipped
+whatever `--agent` says. Nothing auto-loads them for any agent — they are read
+because `AGENTS.md` names them — so a vendor-branded home would have been a
+claim that was never true, and would have made the project's own testing and
+commit rules look optional to anyone not using that tool. `--agent none` is
+gated in `bin/skeletor-verify`: no `.claude/` anywhere, all seven rule files
+present, and `check docs` still green.
 
 Consequences to keep in mind when editing:
 
