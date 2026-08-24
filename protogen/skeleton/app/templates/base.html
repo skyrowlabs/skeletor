@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="site">
+    <a class="brand" href="/">{{ app_name }}</a>
+    {% include "_nav.html" %}
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="site">
+    <span>{{ app_purpose }}</span>
+    <span class="muted">prototype</span>
+  </footer>
+</body>
+</html>

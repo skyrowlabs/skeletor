@@ -1,0 +1,37 @@
+name: @@APP_SLUG@@
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: @@APP_SLUG@@
+    healthcheck:
+      # The app waits on this rather than sleeping. A sleep is a race that
+      # passes on your laptop and fails in CI.
+      test: ["CMD-SHELL", "pg_isready -U app -d @@APP_SLUG@@"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    tmpfs:
+      # Prototype data is disposable by design -- no volume, no stale schema
+      # surviving a model change, no `docker volume rm` in the repair loop.
+      - /var/lib/postgresql/data
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://app:app@db:5432/@@APP_SLUG@@
+      APP_NAME: "@@APP_NAME@@"
+      APP_PURPOSE: "@@APP_PURPOSE@@"
+    ports:
+      - "@@PORT@@:8000"
+    volumes:
+      # Hot reload: the repair loop edits app/ on the host and uvicorn picks
+      # it up without a rebuild.
+      - ./app:/srv/app
+      - ./tests:/srv/tests

@@ -1,0 +1,38 @@
+[project]
+name = "protogen"
+version = "0.1.0"
+description = "Turn an idea and a little direction into a running Dockerised prototype app."
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40",
+    "click>=8.1",
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+# The end-to-end test generates a tree and runs that tree's own smoke suite in
+# process, so protogen's dev environment needs the generated app's stack too.
+dev = [
+    "pytest>=8.0",
+    "fastapi>=0.115",
+    "sqlalchemy>=2.0",
+    "jinja2>=3.1",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+]
+
+[project.scripts]
+proto = "protogen.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["protogen", "protogen.passes"]
+
+[tool.setuptools.package-data]
+protogen = ["../skeleton/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

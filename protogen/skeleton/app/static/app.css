@@ -1,0 +1,58 @@
+/* Not generated. A prototype that looks broken reads as broken, and every
+   minute the model spends inventing CSS is a minute it is not spending on
+   the thing that was actually asked for. */
+:root {
+  --bg: #fbfbfa; --fg: #1c1b19; --muted: #6b6a66; --line: #e3e1dc;
+  --accent: #3b5bdb; --card: #ffffff; --danger: #c92a2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171614; --fg: #ecebe7; --muted: #97948d; --line: #2f2d29;
+    --accent: #91a7ff; --card: #201f1c; --danger: #ff8787;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+header.site, footer.site {
+  display: flex; gap: 1rem; align-items: center;
+  padding: .85rem 1.5rem; border-bottom: 1px solid var(--line);
+}
+footer.site { border-bottom: 0; border-top: 1px solid var(--line); justify-content: space-between; }
+.brand { font-weight: 650; text-decoration: none; color: var(--fg); }
+nav { display: flex; gap: 1rem; }
+nav a { color: var(--muted); text-decoration: none; }
+nav a:hover, nav a.active { color: var(--accent); }
+main { max-width: 62rem; margin: 0 auto; padding: 2rem 1.5rem 3rem; }
+h1 { font-size: 1.6rem; margin: 0 0 .35rem; }
+h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
+.muted { color: var(--muted); }
+a { color: var(--accent); }
+table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+th, td { text-align: left; padding: .55rem .7rem; border-bottom: 1px solid var(--line); }
+th { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.card {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px; padding: 1.1rem 1.25rem; margin: 1rem 0;
+}
+form { display: grid; gap: .8rem; max-width: 34rem; }
+label { display: grid; gap: .3rem; font-size: .85rem; color: var(--muted); }
+input, textarea, select {
+  font: inherit; padding: .5rem .6rem; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--card); color: var(--fg);
+}
+input[type="checkbox"] { justify-self: start; width: auto; }
+textarea { min-height: 6rem; }
+button, .button {
+  font: inherit; font-weight: 550; cursor: pointer; padding: .5rem .95rem;
+  border-radius: 7px; border: 1px solid transparent;
+  background: var(--accent); color: #fff; text-decoration: none;
+  justify-self: start;
+}
+button.secondary, .button.secondary {
+  background: transparent; color: var(--fg); border-color: var(--line);
+}
+.row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.empty { padding: 2rem; text-align: center; color: var(--muted); }
