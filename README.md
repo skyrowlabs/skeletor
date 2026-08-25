@@ -166,12 +166,12 @@ agent where skeletor lives, what to ask you, and what to run. If the skill is no
 installed, install it with:
 
 ```bash
-~/skyrow.labs/skeletor/bin/skeletor-install-skill
+~/skyrowlabs/skeletor/bin/skeletor-install-skill
 ```
 
 ### 2. Point the agent at this repo
 
-> **"Read `~/skyrow.labs/skeletor/AGENTS.md` and follow it to set up this repo."**
+> **"Read `~/skyrowlabs/skeletor/AGENTS.md` and follow it to set up this repo."**
 
 [`AGENTS.md`](AGENTS.md) is a one-page instruction sheet written for exactly that
 prompt. It is the same procedure, without needing the skill installed.
@@ -179,7 +179,7 @@ prompt. It is the same procedure, without needing the skill installed.
 ### 3. Run it yourself
 
 ```bash
-~/skyrow.labs/skeletor/bin/skeletor-new . --force --no-git \
+~/skyrowlabs/skeletor/bin/skeletor-new . --force --no-git \
   --name "My Project" --cli mp --tagline "What it is." --tier core
 ```
 
