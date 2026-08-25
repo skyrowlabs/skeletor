@@ -68,6 +68,14 @@ bin/skeletor-verify --tier core --keep # one tier, trees left behind to inspect
 # How far behind are the versions we start other people's repos on?
 bin/skeletor-check-pins
 
+# Apply one of those reports — every location of a pin, or none of them
+bin/skeletor-bump pyright 1.1.413 --dry-run
+bin/skeletor-bump pyright 1.1.413
+
+# The weekly pass: is CI green, is anything stale, and hand the work over
+bin/skeletor-maintain            # docs/MAINTENANCE.md is the procedure
+bin/skeletor-maintain --agent
+
 # Carry a template change into an already-scaffolded tree
 bin/skeletor-upgrade ../target --dry-run
 bin/skeletor-upgrade ../target

@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""The weekly maintenance pass, run locally, waking an agent only if there is work.
+
+`docs/MAINTENANCE.md` is the procedure. This is the part of it a machine can do
+without judgement — establish whether anything needs doing — plus an optional
+handoff to an agent for the part that needs some.
+
+The order matters and is the whole point. Asking two cheap questions first is
+what keeps an unattended weekly job from costing anything on the ~50 weeks a
+year when the answer is "nothing":
+
+    1. is `verify.yml` still green on `main`?   (one API call)
+    2. is any pin behind or in disagreement?    (one registry sweep)
+
+Neither needs a model. If both are clean this exits having spent nothing, and an
+agent is never invoked. If either is not, there is a specific thing to look at,
+and `--agent` hands over with that context rather than asking a model to go
+looking for work — which is how a maintenance bot becomes a thing people mute.
+
+It refuses to run on a dirty tree or off the release branch. An unattended pass
+that starts from uncommitted local edits cannot tell its own changes from the
+ones already there, and the first thing it would do is commit somebody's
+work-in-progress.
+
+Usage:
+    bin/skeletor-maintain                # report; exit 1 if there is work
+    bin/skeletor-maintain --agent        # ... and hand the work to `claude`
+    bin/skeletor-maintain --agent --dry-run
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+SKELETOR = Path(__file__).resolve().parent.parent
+RELEASE_BRANCH = "main"
+PROCEDURE = "docs/MAINTENANCE.md"
+
+
+def run(cmd: List[str]) -> Tuple[int, str]:
+    proc = subprocess.run(cmd, cwd=str(SKELETOR), capture_output=True, text=True)
+    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+def refuse_if_unsafe() -> Optional[str]:
+    """The preconditions an unattended run has no way to recover from."""
+    code, branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    if code != 0:
+        return "not a git repository"
+    if branch.strip() != RELEASE_BRANCH:
+        return f"on branch {branch.strip()!r}, not {RELEASE_BRANCH!r} — refusing to maintain a feature branch"
+
+    code, dirty = run(["git", "status", "--porcelain"])
+    if dirty.strip():
+        return (
+            "the working tree has uncommitted changes:\n    "
+            + dirty.strip().replace("\n", "\n    ")
+            + "\n  an unattended pass cannot tell these from its own edits"
+        )
+    return None
+
+
+def ci_verdict() -> Tuple[str, str]:
+    """The last `verify.yml` conclusion on the release branch.
+
+    Read from GitHub rather than by running the gates here: `verify.yml` already
+    runs them weekly, and a second local run would answer about this machine's
+    toolchain rather than the one that gates a merge. Where they disagree the
+    CI answer is the one that matters, which is 1f899f4's whole lesson.
+    """
+    if not shutil.which("gh"):
+        return "unknown", "gh is not on PATH — cannot read the last verify run"
+
+    code, output = run([
+        "gh", "run", "list", "--workflow", "verify.yml", "--branch", RELEASE_BRANCH,
+        "--limit", "1", "--json", "conclusion,displayTitle,url",
+    ])
+    if code != 0:
+        return "unknown", f"gh could not read the run list:\n{output.strip()}"
+    try:
+        runs = json.loads(output)
+    except ValueError:
+        return "unknown", f"unreadable gh output:\n{output.strip()}"
+    if not runs:
+        return "unknown", "no verify.yml runs recorded on this branch yet"
+
+    last = runs[0]
+    conclusion = last.get("conclusion") or "in_progress"
+    return conclusion, f"{conclusion}: {last.get('displayTitle', '')}\n   {last.get('url', '')}"
+
+
+def pin_verdict() -> Tuple[bool, str]:
+    """Whether any pin is behind or disagreeing, via check-pins' own exit code."""
+    code, output = run([sys.executable, str(SKELETOR / "bin" / "skeletor-check-pins"), "--fail-on-stale"])
+    return code != 0, output.strip()
+
+
+AGENT_PROMPT = f"""\
+You are running skeletor's scheduled weekly maintenance pass, unattended.
+
+Read {PROCEDURE} and follow it. It is the procedure; do not work from memory of
+it and do not improvise a different one.
+
+What triggered this run:
+
+{{trigger}}
+
+Two things that file says and that matter most here, because nobody is watching:
+do not merge anything, and if `bin/skeletor-verify` comes back red, stop and
+report the actual failure output rather than a summary of it.
+"""
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="skeletor-maintain",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--agent", action="store_true", help="hand any work to `claude` (headless)")
+    parser.add_argument("--dry-run", action="store_true", help="with --agent: print the handoff, invoke nothing")
+    args = parser.parse_args()
+
+    if refusal := refuse_if_unsafe():
+        print(f"⏸️  {refusal}")
+        return 2
+
+    code, output = run(["git", "fetch", "--quiet", "origin", RELEASE_BRANCH])
+    if code != 0:
+        print(f"⚠️  could not fetch origin/{RELEASE_BRANCH} — reporting on the local checkout:\n   {output.strip()}")
+
+    code, behind = run(["git", "rev-list", "--count", f"HEAD..origin/{RELEASE_BRANCH}"])
+    unpulled = behind.strip() if code == 0 else "0"
+
+    conclusion, ci_detail = ci_verdict()
+    stale, pins_detail = pin_verdict()
+
+    print(f"skeletor maintenance — {RELEASE_BRANCH}")
+    print(f"   CI:   {ci_detail}")
+    print(f"   pins: {'something is behind or disagrees' if stale else 'all current or allowlisted'}")
+    if unpulled not in ("0", ""):
+        print(f"   git:  {unpulled} commit(s) on origin/{RELEASE_BRANCH} not pulled")
+    print()
+
+    work = []
+    if conclusion not in ("success", "unknown"):
+        work.append(f"`verify.yml` last concluded **{conclusion}** on {RELEASE_BRANCH}:\n{ci_detail}")
+    if conclusion == "unknown":
+        # Loud, never silent: an unreadable CI verdict is not a green one, and a
+        # pass that quietly treats it as green is indistinguishable from one that
+        # checked. It is not by itself work, so it does not wake an agent.
+        print(f"⚠️  CI verdict unavailable — {ci_detail}")
+    if stale:
+        work.append(f"`bin/skeletor-check-pins` reports work:\n\n```\n{pins_detail}\n```")
+
+    if not work:
+        print("✅ nothing to do — CI is green and every pin is current or allowlisted")
+        return 0
+
+    print("── work ──")
+    for item in work:
+        print(item)
+        print()
+
+    if not args.agent:
+        print(f"Follow {PROCEDURE}, or re-run with --agent to hand this over.")
+        return 1
+
+    prompt = AGENT_PROMPT.format(trigger="\n\n".join(work))
+
+    if args.dry_run:
+        print("── would invoke `claude` with ──")
+        print(prompt)
+        return 1
+
+    if not shutil.which("claude"):
+        print("❌ --agent needs `claude` on PATH, and it is not there")
+        return 2
+
+    print("→ handing over to claude …")
+    sys.stdout.flush()
+    # Inherits stdio rather than capturing: this is normally run by a timer whose
+    # journal IS the record, and a captured transcript printed after the fact is
+    # one nobody reads at the moment it would have mattered.
+    return subprocess.run(["claude", "-p", prompt], cwd=str(SKELETOR), env=dict(os.environ)).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

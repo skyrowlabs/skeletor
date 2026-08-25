@@ -135,7 +135,84 @@ outcome in this repository or in the project it was extracted from.
 
 ## Scheduling it
 
-The procedure above is the whole job and does not care what invokes it. The
-runner is a separate decision — a scheduled cloud agent, a workflow calling an
-agent action, or a person on a Monday — and whichever it is, it should be
-pointed at **this file** rather than given its own copy of these steps.
+`bin/skeletor-maintain` is this pass with the deterministic half already done. It
+asks two questions no model is needed for — is `verify.yml` still green on
+`main`, and is any pin behind or disagreeing — and only if one of them is a
+problem does it wake an agent. On the roughly fifty weeks a year when the answer
+is "nothing", a run costs one API call and one registry sweep.
+
+```bash
+bin/skeletor-maintain              # report; exit 1 if there is work
+bin/skeletor-maintain --agent      # ... and hand that work to `claude`
+bin/skeletor-maintain --agent --dry-run
+```
+
+It refuses to run on a dirty tree or off `main`. An unattended pass that starts
+from uncommitted local edits cannot tell them from its own, and the first thing
+it would do is commit somebody's work in progress.
+
+### Weekly, on this machine
+
+A systemd **user** timer. No root, no secret anywhere, and nothing about the
+repository has to change.
+
+`~/.config/systemd/user/skeletor-maintain.service`
+
+```ini
+[Unit]
+Description=skeletor weekly maintenance pass
+
+[Service]
+Type=oneshot
+# Both paths are your checkout. This file does not name one, for the same reason
+# AGENTS.md does not: a path in prose is wrong for every checkout but one.
+WorkingDirectory=/path/to/skeletor
+ExecStart=/path/to/skeletor/bin/skeletor-maintain --agent
+```
+
+`~/.config/systemd/user/skeletor-maintain.timer`
+
+```ini
+[Unit]
+Description=skeletor weekly maintenance pass
+
+[Timer]
+# After pins.yml has posted its issue (Mondays 06:23 UTC), and deliberately not
+# on the hour or the half hour.
+OnCalendar=Mon *-*-* 08:47:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now skeletor-maintain.timer
+systemctl --user list-timers skeletor-maintain.timer      # when it next fires
+journalctl --user -u skeletor-maintain.service -n 100     # what it did
+```
+
+`Persistent=true` is the line that makes a timer on a laptop worth having: if the
+machine was asleep on Monday morning the run fires at the next boot rather than
+being skipped until the following week. Add `loginctl enable-linger $USER` if it
+should fire while you are not logged in.
+
+The journal is the record. That is why `--agent` inherits stdio instead of
+capturing it — a transcript printed after the fact is one nobody reads at the
+moment it would have mattered.
+
+### The two alternatives, and what they cost
+
+**A workflow calling an agent action** puts the schedule next to `pins.yml` and
+`verify.yml`, under the same review as any other change. It needs an
+`ANTHROPIC_API_KEY` repository secret before it can run at all, which is a
+credential living in the repo's settings rather than on one machine.
+
+**A scheduled cloud agent** needs no secret in the repo and runs whether or not
+any machine is on, but the schedule then lives outside the repository — it is
+not version-controlled alongside the procedure it runs, and nothing here can
+tell you it stopped firing.
+
+Whichever runs it, point it at **this file** rather than giving it a copy of
+these steps. One procedure.
