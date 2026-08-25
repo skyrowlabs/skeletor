@@ -1,0 +1,28 @@
+NOTICE — skeletor
+Copyright (c) 2026 SKYROW LABS LLC
+
+This file states one thing that `LICENSE` deliberately does not, so that
+`LICENSE` stays a verbatim MIT text and resolves as MIT rather than as a custom
+license. The statement below is a grant made by the copyright holder and is
+effective on its own.
+
+
+Generated output is unencumbered
+--------------------------------
+
+Files written into another repository by `bin/skeletor-new` — the contents of
+`template/`, with placeholders substituted — are NOT subject to the notice
+requirement in `LICENSE`.
+
+SKYROW LABS LLC places no conditions on scaffolded output. It is yours: license
+it, relicense it, modify it, sell it or keep it private, with no attribution to
+skeletor required and no notice to carry.
+
+This clarifies the MIT grant rather than narrowing it. It is here because
+skeletor exists to produce a repository that belongs to whoever ran it, and 114
+of its 135 tracked files are `template/` — content copied wholesale into a user's
+repo. Read strictly, MIT's "all copies or substantial portions" would put this
+copyright notice into every project ever scaffolded, since a user's `cli/`,
+`scripts/` and `docs/rules/` are substantial portions by any reading. A
+scaffolding tool whose output dragged its own copyright into every project would
+be one nobody could use for the thing it is for.

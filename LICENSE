@@ -19,20 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-## Generated output
-
-Files written into another repository by `bin/skeletor-new` — the contents of
-`template/`, with placeholders substituted — are not subject to the notice
-requirement above.
-
-SKYROW LABS LLC places no conditions on scaffolded output. It is yours: license
-it, relicense it, modify it, sell it or keep it private, with no attribution to
-skeletor required and no notice to carry.
-
-This clarifies the grant above rather than narrowing it, and it is here because
-skeletor exists to produce a repository that belongs to whoever ran it. A
-scaffolding tool whose output dragged its own copyright notice into every
-project would be one nobody could use for the thing it is for.
