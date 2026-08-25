@@ -9,10 +9,20 @@ SKELETOR="$( cd "$( dirname "$(realpath "${BASH_SOURCE[0]}")" )/.." && pwd )"
 DEST="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/new-project"
 
 mkdir -p "$DEST"
-# The skill hard-codes skeletor's location, so it is rewritten to wherever this
-# checkout actually is rather than assuming the path it was authored at.
-sed "s|SKELETOR=~/skyrow.labs/skeletor|SKELETOR=$SKELETOR|" \
+# The skill is a pointer at $SKELETOR/AGENTS.md, and where this checkout lives is
+# the only thing it carries that the repository cannot know about itself. So the
+# rewrite is matched on the whole `SKELETOR=` line rather than on the authored
+# value — and then checked, because a `sed` that matches nothing exits 0 and
+# would leave the skill aimed at whatever path the file happened to ship with.
+sed "s|^SKELETOR=.*|SKELETOR=$SKELETOR|" \
     "$SKELETOR/.claude/skills/new-project/SKILL.md" > "$DEST/SKILL.md"
+
+if ! grep -qxF "SKELETOR=$SKELETOR" "$DEST/SKILL.md"; then
+    echo "❌ no 'SKELETOR=' line to rewrite in .claude/skills/new-project/SKILL.md" >&2
+    echo "   the installed skill would point at a path that exists on nobody's machine" >&2
+    rm -f "$DEST/SKILL.md"
+    exit 1
+fi
 
 echo "✅ installed /new-project → $DEST/SKILL.md"
 echo "   skeletor: $SKELETOR"

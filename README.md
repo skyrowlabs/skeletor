@@ -161,25 +161,27 @@ In the blank repo, say:
 
 > **"Set up this project using skeletor."**
 
-The `/new-project` skill (installed at `~/.claude/skills/new-project/`) tells the
-agent where skeletor lives, what to ask you, and what to run. If the skill is not
-installed, install it with:
+The `/new-project` skill (installed at `~/.claude/skills/new-project/`) records
+where skeletor lives and sends the agent to [`AGENTS.md`](AGENTS.md) for the rest
+— it carries no procedure of its own, so it cannot go stale against one. If the
+skill is not installed, install it with:
 
 ```bash
-~/skyrowlabs/skeletor/bin/skeletor-install-skill
+~/skeletor/bin/skeletor-install-skill
 ```
 
 ### 2. Point the agent at this repo
 
-> **"Read `~/skyrowlabs/skeletor/AGENTS.md` and follow it to set up this repo."**
+> **"Read `~/skeletor/AGENTS.md` and follow it to set up this repo."**
 
 [`AGENTS.md`](AGENTS.md) is a one-page instruction sheet written for exactly that
-prompt. It is the same procedure, without needing the skill installed.
+prompt, and it is the same file the skill above hands you off to. This route just
+skips the install.
 
 ### 3. Run it yourself
 
 ```bash
-~/skyrowlabs/skeletor/bin/skeletor-new . --force --no-git \
+~/skeletor/bin/skeletor-new . --force \
   --name "My Project" --cli mp --tagline "What it is." --tier core
 ```
 
@@ -194,7 +196,7 @@ bin/skeletor-new ../my-project --name "My Project" --cli mp --tier core
 
 cd ../my-project
 python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
-pre-commit install --install-hooks
+.venv/bin/pre-commit install --install-hooks
 ./mp check docs && ./mp test unit     # green from the first run
 ```
 

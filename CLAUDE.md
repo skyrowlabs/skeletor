@@ -21,15 +21,29 @@ Three entry points, all leading to the same `bin/skeletor-new` call:
 | [`AGENTS.md`](AGENTS.md)          | The user points an agent at this repo directly          |
 | `bin/skeletor-new` by hand        | The user runs it themselves                             |
 
-The skill's source is `.claude/skills/new-project/SKILL.md`; `bin/skeletor-install-skill`
-copies it to `~/.claude/skills/` and **rewrites the hard-coded skeletor path** to
-wherever this checkout actually lives. If you change the skill, say so — the
-installed copy does not update itself.
+**[`AGENTS.md`](AGENTS.md) is the procedure, and it is the only copy of it.**
+`.claude/skills/new-project/SKILL.md` is a pointer at it: frontmatter, a
+`SKELETOR=` line, and an instruction to go read it.
+`bin/skeletor-install-skill` copies that pointer to `~/.claude/skills/`,
+rewriting the `SKELETOR=` line to wherever this checkout actually lives — and
+verifies the rewrite happened, because `sed` matching nothing exits 0 and would
+leave the skill aimed at a path on nobody's machine.
 
-`AGENTS.md` and the skill are two renderings of one procedure. **Keep them in
-sync**, or delete one. Two copies of a procedure drift, and the copy that is
-wrong is the one being read — which is the rule this entire repository is an
-application of.
+This used to be two renderings of one procedure with an instruction to keep them
+in sync, and the instruction lost. `bin/skeletor-install-skill` made the drift
+worse by adding a **third** copy that nothing revalidates: a snapshot in the
+user's config directory that goes stale the moment the procedure changes and
+that no gate here can see. It went stale exactly that way, and kept handing
+agents a `--no-git` flag that had been removed for leaving scaffolds with no git
+repository at all.
+
+So the rule is structural now rather than remembered: **do not put a procedure
+step in `SKILL.md`.** The only thing an installed skill knows that this
+repository cannot is where this checkout is, and that is the only thing it
+should carry. Anything else belongs in `AGENTS.md`, which both entry points
+read, and which locates itself — it says `$SKELETOR`, never a written-down path,
+because a path in prose is wrong for every checkout but the one it was authored
+on.
 
 Every mechanism here was extracted from one mature production repository and is
 recorded in [`docs/DESIGN_RATIONALE.md`](docs/DESIGN_RATIONALE.md) with the

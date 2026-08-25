@@ -5,104 +5,29 @@ description: Scaffold a new project from the skeletor shell — agent rules, a d
 
 # /new-project — Scaffold From skeletor
 
-skeletor is a **generator**, not a guide: `bin/skeletor-new` copies real files
-and substitutes placeholders. **Never hand-write the scaffold.**
-
 ```
-SKELETOR=~/skyrow.labs/skeletor
+SKELETOR=~/skeletor
 ```
 
-If that path does not exist, ask the user where skeletor is before going further.
+**Read `$SKELETOR/AGENTS.md` and follow it.** That file is the procedure — what
+to ask the user, the exact `skeletor-new` invocation, how to verify, and how to
+hand off. Do not work from memory of it, and do not hand-write a scaffold:
+`bin/skeletor-new` copies real files and substitutes placeholders.
+
+If that path does not exist, ask the user where skeletor is before going
+further.
 
 ---
 
-## Step 1 — Ask the user, in one turn
+## Why this file is a pointer
 
-| Ask                | Default   | Note                                        |
-| ------------------ | --------- | ------------------------------------------- |
-| **Tier**           | `core`    | The only real decision                      |
-| Project name       | —         | Human form, e.g. "Order Service"            |
-| CLI name           | from slug | Becomes `./<name>`; short, lowercase        |
-| Tagline            | —         | One line: what the project is               |
-| Language           | `python`  | `python` / `node` / `both` / `none`         |
+It used to carry the whole procedure, which made it the third copy of one —
+after `AGENTS.md` and whatever `bin/skeletor-install-skill` had last written
+into `~/.claude/skills/`. Nothing revalidated that third copy, so it went stale
+the first time the procedure changed and kept telling agents to pass a flag that
+had been removed for leaving scaffolds with no git repository.
 
-| Tier       | Take it when                                                      |
-| ---------- | ------------------------------------------------------------------ |
-| `core`     | Always. Agent rules, docs lifecycle, CLI, tests, CI gate, versioning |
-| `governed` | A second person or agent touches the repo, or CI costs money       |
-| `agentic`  | Things rot on their own — deps, docs, backlog — and nobody looks    |
-
-Tell them plainly: **an unmaintained gate is worse than an absent one.** Do not
-upsell `agentic` to a project that does not exist yet. Defaults you only raise if
-they have an opinion: base branch `develop`, release branch `main`, Python
-`3.12`, line length `120`. For `agentic`, also ask the crontab's timezone — never
-leave it implicit.
-
-## Step 2 — Generate
-
-Into the current (usually empty) repo:
-
-```bash
-$SKELETOR/bin/skeletor-new . --force --no-git \
-  --name "<Name>" --cli <cli> --tagline "<one line>" \
-  --tier <tier> --language <lang>
-```
-
-Into a new directory: drop `--force --no-git` and pass the path instead of `.`.
-Add `--org <github-org>` if known, `--timezone <tz>` for `agentic`.
-Full flags: `$SKELETOR/bin/skeletor-new --help`.
-
-## Step 3 — Verify, and stop if red
-
-```bash
-python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
-npm install                                   # node/both trees only
-./<cli> --help && ./<cli> check pre-push
-pre-commit install --install-hooks
-python scripts/git/install_merge_drivers.py
-```
-
-`check pre-push` — the whole bundle, not `check docs` and `test unit`
-separately. Those two skip the lint gate, which is how a scaffold once shipped
-with `black`, `pyright` and `eslint` red without the verification step ever
-touching them. It must be green. If not, **stop and report** — that is a bug in
-skeletor, not something to patch around. A scaffold whose first check is red
-teaches the user that red is normal.
-
-## Step 4 — SCAFFOLD markers
-
-```bash
-grep -rn "SCAFFOLD" --include='*.md' --include='*.yml' --include='*.py' .
-```
-
-Draft the two that matter **with** the user:
-
-- **`CLAUDE.md` § Services** — the real components and what each is for.
-- **`CLAUDE.md` § Critical Rules** — the shipped ones are placeholders. Each
-  replacement must state what goes wrong without it, concretely, and be enforced
-  by something or marked advisory. A rule with neither is decoration.
-
-Leave the rest as markers if the project is too young to answer them, and say
-which you left.
-
-## Step 5 — First commit
-
-```bash
-git add -A && git commit -m "chore: scaffold the project shell"
-```
-
-## Then hand off
-
-Report: the tier used and what it gives them, which markers are still open, the
-three commands they will use most (`check pre-push`, `test unit`, `docs status`),
-and that `$SKELETOR/docs/SETUP_GUIDE.md` steps 4–8 cover branch protection, the
-first plan, ratchet baselines and the PR loop.
-
----
-
-## Adopting into an existing, non-empty repo
-
-Different job. Follow `$SKELETOR/docs/SETUP_GUIDE.md` § "Adopting this into an
-existing repository". The critical part: **baseline every ratchet at what the
-repo already has**, never at zero. A ratchet that starts red gets switched off,
-and the adoption has then made things worse.
+The one thing an installed skill knows that the repository cannot is **where
+this checkout is**, and that is the only thing left in here. Everything else
+lives once, in `AGENTS.md`. Adding a step back to this file re-creates the copy
+this deletion was for — put it in `AGENTS.md`, where both entry points read it.
