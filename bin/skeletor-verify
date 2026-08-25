@@ -164,6 +164,20 @@ def scaffold(tier: str, language: str, workdir: Path, name: Optional[str] = None
             "--force",
         ],
         cwd=SKELETOR,
+        # A git identity, because the machine may not have one and the scaffolder
+        # makes a commit. A GitHub runner ships no `user.name`/`user.email`, so
+        # without this the scaffolder takes its own "commit did not happen"
+        # fallback and every tree arrives with a repository but no HEAD — which
+        # is a real path it handles and warns about, and not the one the gates
+        # below are written for. Controlling the variable is the same fix as
+        # `--pythonpath` in `pyright_gate`: this was green here and red on the
+        # first CI run, decided by config nobody set on purpose.
+        env_extra={
+            "GIT_AUTHOR_NAME": "skeletor-verify",
+            "GIT_AUTHOR_EMAIL": "verify@skeletor.invalid",
+            "GIT_COMMITTER_NAME": "skeletor-verify",
+            "GIT_COMMITTER_EMAIL": "verify@skeletor.invalid",
+        },
     )
     return Result(f"scaffold {tier}/{language}", code == 0, time.time() - started, output), target
 
@@ -725,7 +739,11 @@ def check_scaffold_is_its_own_repo(tree: Path) -> Result:
     else:
         code, count = run(["git", "rev-list", "--count", "HEAD"], cwd=tree)
         if code != 0:
-            problems.append("the repository has no HEAD — the first commit was never made")
+            problems.append(
+                "the repository has no HEAD — the first commit was never made. "
+                "Usually no git identity on this machine: the scaffolder warns and carries on, "
+                "so check for `user.name`/`user.email` before suspecting the template"
+            )
         elif count.strip() != "1":
             problems.append(f"expected exactly one scaffold commit, found {count.strip()}")
 
