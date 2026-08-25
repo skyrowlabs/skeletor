@@ -405,6 +405,8 @@ def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     results.append(check_groups_register(tree))
     results.append(check_script_targets(tree))
     results.append(check_no_baked_paths(tree))
+    results.append(check_setup_block_is_self_contained(tree))
+    results.append(check_scaffold_is_its_own_repo(tree))
     results += lint_gates(tree, venv_python)
     results += pyright_gate(tree, venv_python, pyright_ok)
     return results
@@ -561,6 +563,108 @@ def check_no_baked_paths(tree: Path) -> Result:
             hits.append(f"{path.relative_to(tree)}:{line}: contains the scaffold-time absolute path")
 
     return Result("no scaffold-time paths baked into the tree", not hits, time.time() - started, "\n".join(hits))
+
+
+#: Tools the generated Setup block is allowed to look up on PATH, with the
+#: reason each one has no in-tree path to be run by.
+#:
+#: `python` only ever bootstraps the venv — at that line there is by definition
+#: no `.venv/bin/python` to use instead. `npm` ships with node and has no
+#: per-tree copy. Everything else must be run by path.
+SETUP_PATH_LOOKUPS = {"npm"}
+
+
+def check_setup_block_is_self_contained(tree: Path) -> Result:
+    """Every command in the generated README's Setup block runs a tool by path.
+
+    This is the first thing a new reader runs, and it shipped failing on line
+    one. The block said `pip install -r scripts/requirements.txt && pre-commit
+    install --install-hooks`: on Arch, Debian 12+, Ubuntu 23.04+, Fedora or
+    Homebrew macOS, pip refuses an externally-managed environment outright (PEP
+    668) and the reader is stopped at the first line of the file that exists to
+    onboard them; everywhere else it installs system-wide, and then `pre-commit`
+    is not on PATH because the venv that would have provided it was never made.
+
+    It is checked here rather than in `setup_commands()` because the README is
+    the artifact — the thing a user reads and pastes — and because the failure
+    is platform-dependent. Actually running the block would find this on this
+    developer's box and never on a CI runner, whose `setup-python` is not
+    externally managed. A static rule finds it on both.
+    """
+    started = time.time()
+    readme = (tree / "README.md").read_text(encoding="utf-8")
+    match = re.search(r"^## Setup\n+```bash\n(.*?)^```", readme, re.MULTILINE | re.DOTALL)
+    if not match:
+        return Result("README Setup block runs tools by path", False, time.time() - started,
+                      "no '## Setup' bash block in the generated README")
+
+    commands = [
+        segment.strip()
+        for line in match.group(1).splitlines()
+        if line.strip() and not line.strip().startswith("#")
+        for segment in line.split("&&")
+        if segment.strip()
+    ]
+    if not commands:
+        return Result("README Setup block runs tools by path", False, time.time() - started,
+                      "the Setup block is empty — nothing was checked")
+
+    bare = []
+    for command in commands:
+        tool = command.split()[0]
+        if tool.startswith(("./", ".venv/bin/")) or tool in SETUP_PATH_LOOKUPS:
+            continue
+        if tool in ("python", "python3") and command.split()[1:3] == ["-m", "venv"]:
+            continue
+        bare.append(f"{command!r} resolves {tool!r} through PATH")
+
+    return Result(
+        f"README Setup block runs {len(commands)} commands by path",
+        not bare,
+        time.time() - started,
+        "\n".join(bare),
+    )
+
+
+def check_scaffold_is_its_own_repo(tree: Path) -> Result:
+    """A fresh scaffold is a repository of its own, with its first commit made.
+
+    "Governs itself from its first commit" is not true of a tree that has none,
+    and three shipped consequences say so. isort's `skip_gitignore` shells out
+    to `git ls-files`, so the very first `check pre-push` a new user runs opened
+    with `fatal: not a git repository` three times — on the run the setup guide
+    prescribes specifically to show that a scaffold is green. The `regen-docs`
+    merge driver is defined in `.git/config` and so cannot be installed at all.
+    And `check reports` and every worktree command need a HEAD to diff against.
+
+    All three came from the documented invocation carrying `--no-git`, which
+    reads as the careful choice for scaffolding into a repo that already exists
+    and is a no-op in exactly that case — the scaffolder skips a tree with a
+    `.git` regardless. It only ever bit the empty directory it looked safest in.
+
+    The toplevel assertion is the other half, and it is the one that would go
+    unnoticed: a tree generated *inside* another repository has git answering
+    every question about the parent, so `check merge-drivers` passes by reading
+    a driver installed for something else entirely. Green, and about the wrong
+    repository.
+    """
+    started = time.time()
+    problems = []
+
+    code, top = run(["git", "rev-parse", "--show-toplevel"], cwd=tree)
+    if code != 0:
+        problems.append("not a git repository at all — the scaffold made no `git init`")
+    elif Path(top.strip()).resolve() != tree.resolve():
+        problems.append(f"git resolves this tree to {top.strip()} — it is borrowing an enclosing repository")
+    else:
+        code, count = run(["git", "rev-list", "--count", "HEAD"], cwd=tree)
+        if code != 0:
+            problems.append("the repository has no HEAD — the first commit was never made")
+        elif count.strip() != "1":
+            problems.append(f"expected exactly one scaffold commit, found {count.strip()}")
+
+    return Result("scaffold is its own repo, at its first commit", not problems, time.time() - started,
+                  "\n".join(problems))
 
 
 def agentless_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:

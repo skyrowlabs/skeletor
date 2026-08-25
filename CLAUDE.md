@@ -69,10 +69,46 @@ against every language — a placeholder that only appears in the `node` overlay
 is a `render()` failure a user would otherwise find first — and against each
 Python tree runs the unit suite, `check docs`, `check merge-drivers`,
 `check output`, a `--help` group-registration check, a static check that every
-`script()` call in the tree's CLI names a file that exists, the lint hooks, and
-pyright.
+`script()` call in the tree's CLI names a file that exists, a check that the
+generated README's Setup block runs every tool by path, a check that the tree is
+its own repository at its first commit, the lint hooks, and pyright.
 eslint and prettier run once, on the fullest tier's `both` tree, and the fullest
 tier is scaffolded a second time into a deliberately long path.
+
+The two newest are the **setup path**, which this file's own gates had never
+once executed. Everything above verifies a tree that is already installed —
+`make_venv` builds one shared venv and symlinks it in — so the commands a reader
+actually runs first were the only part of a scaffold nothing checked, and both
+of them shipped broken.
+
+The README said `pip install -r scripts/requirements.txt && pre-commit install
+--install-hooks`. On any distribution carrying an `EXTERNALLY-MANAGED` marker —
+Arch, Debian 12+, Ubuntu 23.04+, Fedora, Homebrew macOS — pip refuses outright
+under PEP 668, so line one of the file that exists to onboard a reader exited
+non-zero, which reads as user error at the exact moment they cannot tell.
+Everywhere else it installed system-wide and `pre-commit` was then not on PATH
+at all. That gate is deliberately **static** rather than a real install:
+executing the block would have caught this here and never on a CI runner, whose
+`setup-python` is not externally managed, so the rule — every tool run by path,
+with `npm` the one allowlisted PATH lookup — is what makes the two agree.
+
+The repository gate is the one that had to be paid for twice. `--no-git` reads
+as the careful flag for scaffolding into a repo that already exists, and it is a
+no-op in precisely that case: the scaffolder skips a tree that has a `.git`
+regardless. It only ever bit the empty directory it looked safest in, and the
+documented invocation carried it — so `isort`'s `skip_gitignore`, which shells
+out to `git ls-files`, opened the first `check pre-push` a new user ever runs
+with `fatal: not a git repository`, three times, on the run the setup guide
+prescribes specifically to show that a scaffold is green. The merge driver, whose
+definition lives in `.git/config`, could not be installed at all. `bin/skeletor-verify`
+never saw any of it because `scaffold()` does not pass `--no-git` — the
+verifier and the documentation disagreed about the command, and the verifier was
+right. The docs no longer say it.
+
+That gate also asserts git resolves the tree to *itself*, which is the half that
+would have gone unnoticed: a tree generated inside another repository has git
+answering every question about the parent, so `check merge-drivers` passes by
+reading a driver installed for something else entirely.
 
 Those last two are each a bug that shipped. `script()` joins its argument onto
 `PROJECT_ROOT`, so `script("-m", "pytest", ...)` became the path `<root>/-m` and
