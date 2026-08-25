@@ -136,6 +136,14 @@ def discover() -> Dict[str, Pin]:
             # CI installs the same tools by hand: `pip install pyright==1.1.409`
             for match in re.finditer(r"pip install\s+([A-Za-z0-9_.-]+)==([\d.]+)", line):
                 add("pypi", match.group(1), match.group(2), path, index)
+            # An exact pin inside a quoted string — a tool a script installs for
+            # itself rather than through a requirements file, like
+            # `EXTRA_PACKAGES` in bin/skeletor-verify. Markdown is excluded for
+            # the same reason the `uses:` pattern is restricted to YAML: a
+            # version in prose is documentation, not a pin in effect.
+            if path.suffix != ".md":
+                for match in re.finditer(r"['\"]([A-Za-z0-9_.-]+)==([\d.]+)['\"]", line):
+                    add("pypi", match.group(1), match.group(2), path, index)
             # workflow steps. Restricted to YAML because the same string in
             # prose or in a comment is documentation, not a pin — this script
             # found its own comment on the first run.

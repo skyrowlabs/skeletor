@@ -44,7 +44,11 @@ SCAFFOLDER = SKELETOR / "bin" / "skeletor-new"
 #: `pytest-timeout` is here not because a gate calls it but because the tree's
 #: pytest config *sets* `timeout`. Without the plugin pytest warns and ignores
 #: it, so the suite would be verified under a config the tree does not have.
-EXTRA_PACKAGES = ["pytest", "pytest-timeout", "click"]
+#: `actionlint-py` is a pip wrapper around a Go binary, and it is the only entry
+#: here that no generated tree installs. It checks what skeletor SHIPS rather
+#: than what a tree runs on itself — see `actionlint_gate`. Pinned, so
+#: `bin/skeletor-check-pins` reports it going stale like every other pin.
+EXTRA_PACKAGES = ["pytest", "pytest-timeout", "click", "actionlint-py==1.7.12.24"]
 
 #: Lint hooks whose args are read out of the generated tree's own
 #: `.pre-commit-config.yaml` rather than repeated here. Copying the args would
@@ -409,8 +413,70 @@ def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     results.append(check_scaffold_is_its_own_repo(tree))
     results += lint_gates(tree, venv_python)
     results += pyright_gate(tree, venv_python, pyright_ok)
+    results += actionlint_gate(tree, venv_python.parent)
     return results
 
+
+def workflow_files(tree: Path) -> List[str]:
+    """Every workflow a scaffold ships, as paths relative to the tree."""
+    workflows = tree / ".github" / "workflows"
+    return sorted(
+        str(path.relative_to(tree))
+        for path in list(workflows.glob("*.yml")) + list(workflows.glob("*.yaml"))
+    )
+
+
+def actionlint_gate(tree: Path, venv_bin: Path) -> List[Result]:
+    """The workflows a scaffold ships are valid GitHub Actions.
+
+    Four of them ship — `ci.yml`, `docs-validation.yml`, `pr-draft-discipline.yml`
+    and, from `governed`, `coverage-nightly.yml` — and until this gate not one had
+    ever been executed, or read by anything that understands Actions.
+    `tests/test_ci_draft_gate.py` asserts the pieces of `ci.yml` that are
+    load-bearing, but it does it with a regex over the file as text.
+
+    What this adds, each one confirmed by planting it: an expression whose syntax
+    is wrong, a `needs.<job>` naming a job that does not exist, a job output
+    somebody renamed, an unknown runner label, and — where shellcheck is on PATH
+    — the `run:` blocks.
+
+    What it does not add, checked rather than assumed: it does not verify that an
+    action reference resolves. `actions/checkout@v99` passes this green, because
+    knowing better takes a network call. That belongs to an end-to-end test that
+    actually runs these workflows, and its absence here is why this gate is
+    milliseconds.
+
+    This is the one lint here that does **not** read its arguments out of the
+    tree's `.pre-commit-config.yaml`, because the tree has no actionlint hook.
+    The asymmetry is the point rather than an oversight: black, isort, flake8 and
+    pyright ask "does this tree govern itself", and are read from its config so
+    the answer is the tree's own. This asks "is what skeletor ships valid at
+    all" — the same question `check_no_baked_paths` asks, and equally not the
+    tree's business. Shipping actionlint as a hook in the generated tree would be
+    a different and also good change, since it would check a user's own edits to
+    these files. It is not this one.
+    """
+    started = time.time()
+    workflows = workflow_files(tree)
+    if not workflows:
+        # The `filesAnalyzed` lesson, in the tool that has no equivalent field:
+        # bare `actionlint` walks for workflows and exits 0 having found none.
+        return [Result("actionlint", False, time.time() - started,
+                       "no workflows under .github/workflows — a green here would mean nothing")]
+
+    binary = venv_bin / "actionlint"
+    if not binary.exists():
+        return [Result("actionlint", True, 0.0, "skipped: toolchain unavailable (offline?)")]
+
+    code, output = run([str(binary), *workflows], cwd=tree)
+    # actionlint lints `run:` blocks by shelling out to shellcheck, and when it
+    # is absent it simply does not, without saying so. GitHub's ubuntu runners
+    # ship shellcheck and a developer box may not, so the two answer differently
+    # about the same file — the pyright lesson wearing a different tool. Which
+    # check actually ran goes in the label rather than being left to be assumed.
+    depth = "with shellcheck" if shutil.which("shellcheck") else "no shellcheck"
+    return [Result(f"actionlint ({len(workflows)} workflows, {depth})", code == 0,
+                   time.time() - started, output)]
 
 def check_docs_gate_sees_the_tree(tree: Path) -> Result:
     """`check docs` passing is worth nothing if its source→doc checker looked at

@@ -85,7 +85,8 @@ Python tree runs the unit suite, `check docs`, `check merge-drivers`,
 `check output`, a `--help` group-registration check, a static check that every
 `script()` call in the tree's CLI names a file that exists, a check that the
 generated README's Setup block runs every tool by path, a check that the tree is
-its own repository at its first commit, the lint hooks, and pyright.
+its own repository at its first commit, the lint hooks, pyright, and
+`actionlint` over the workflows the tree ships.
 eslint and prettier run once, on the fullest tier's `both` tree, and the fullest
 tier is scaffolded a second time into a deliberately long path.
 
@@ -123,6 +124,31 @@ That gate also asserts git resolves the tree to *itself*, which is the half that
 would have gone unnoticed: a tree generated inside another repository has git
 answering every question about the parent, so `check merge-drivers` passes by
 reading a driver installed for something else entirely.
+
+`actionlint` is the same shape of hole one layer out: four workflows ship —
+`ci.yml`, `docs-validation.yml`, `pr-draft-discipline.yml`, and
+`coverage-nightly.yml` from `governed` — and not one had ever been executed, or
+read by anything that understands Actions. `tests/test_ci_draft_gate.py` asserts
+the load-bearing pieces of `ci.yml` with a regex over the text, which catches a
+trigger somebody deleted and nothing about whether the file is *valid*.
+
+It is the one lint that does not read its arguments out of the tree's
+`.pre-commit-config.yaml`, because the tree has no actionlint hook. The
+asymmetry is the point: black, isort, flake8 and pyright ask whether the tree
+governs itself, and are read from its config so the answer is the tree's own.
+This asks whether what skeletor ships is valid at all — `check_no_baked_paths`'s
+question, equally not the tree's business. Adding actionlint as a hook in the
+generated tree would be a different and also good change, since it would check a
+user's own edits to those files.
+
+Both halves of its scope were measured rather than assumed, by planting each
+case. It catches a malformed expression, a `needs.<job>` naming a job that does
+not exist, a renamed job output, an unknown runner label, and the `run:` blocks
+where shellcheck is on PATH. It does **not** catch an action reference that does
+not resolve: `actions/checkout@v99` passes it green, because knowing better
+takes a network call. Whether shellcheck was present goes in the gate's label,
+because actionlint skips those blocks silently when it is not — the pyright
+lesson, in a different tool.
 
 Those last two are each a bug that shipped. `script()` joins its argument onto
 `PROJECT_ROOT`, so `script("-m", "pytest", ...)` became the path `<root>/-m` and
