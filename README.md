@@ -4,7 +4,7 @@
 
 # skeletor
 
-[![version](https://img.shields.io/github/v/tag/skyrowlabs/skeletor?sort=semver&label=version)](https://github.com/skyrowlabs/skeletor/tags) [![verify](https://img.shields.io/github/actions/workflow/status/skyrowlabs/skeletor/verify.yml?branch=main&label=verify)](https://github.com/skyrowlabs/skeletor/actions/workflows/verify.yml) [![license](https://img.shields.io/github/license/skyrowlabs/skeletor)](LICENSE)
+[![version](https://img.shields.io/github/v/tag/skyrowlabs/skeletor?sort=semver&label=version)](https://github.com/skyrowlabs/skeletor/tags) [![verify](https://img.shields.io/github/actions/workflow/status/skyrowlabs/skeletor/verify.yml?branch=main&label=verify)](https://github.com/skyrowlabs/skeletor/actions/workflows/verify.yml) [![license](https://img.shields.io/github/license/skyrowlabs/skeletor?style=flat)](LICENSE)
 
 A **project shell generator**. Run one command in a blank repo and you get a
 tree that governs itself from the first commit: documented conventions an agent
