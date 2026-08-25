@@ -4,8 +4,11 @@ You have been asked to set up a project using skeletor. **This is a generator,
 not a guide**: you run one command that copies real files. Do not hand-write the
 scaffold.
 
-skeletor lives at `~/skyrow.labs/skeletor`. Everything below assumes you are
-standing in the **target** repository (usually empty).
+skeletor is the directory this file is in; everything below writes it
+`$SKELETOR`, and you already know what it is — you just read this from it. It is
+not written down anywhere on purpose: a path in prose is wrong for every
+checkout but the one it was authored on. Everything below assumes you are
+standing in the **target** repository (usually empty), not in skeletor.
 
 ---
 
@@ -25,7 +28,7 @@ annoying to change later.
 Defaults you only need to raise if the user has an opinion: base branch
 `develop`, release branch `main`, Python `3.12`, line length `120`.
 
-**Tiers** (cumulative — read `~/skyrow.labs/skeletor/docs/TIERS.md` for detail):
+**Tiers** (cumulative — read `$SKELETOR/docs/TIERS.md` for detail):
 
 | Tier       | Take it when                                                     |
 | ---------- | ----------------------------------------------------------------- |
@@ -44,7 +47,7 @@ leave it implicit.
 ## Step 2 — Generate
 
 ```bash
-~/skyrow.labs/skeletor/bin/skeletor-new . --force --no-git \
+$SKELETOR/bin/skeletor-new . --force \
   --name "Order Service" \
   --cli ord \
   --tagline "Takes orders, bills them, ships them." \
@@ -52,9 +55,15 @@ leave it implicit.
   --language python
 ```
 
-Use `--force --no-git` when scaffolding **into** the current repo (the usual
-case). Drop both when creating a new directory:
-`skeletor-new ../new-dir --name ...`.
+Use `--force` when scaffolding **into** the current directory (the usual
+case); drop it when creating a new one: `skeletor-new ../new-dir --name ...`.
+
+Do **not** add `--no-git`. It reads like the safe choice for an existing repo,
+but a tree that already has a `.git` is skipped regardless — so the flag does
+nothing in the case it looks written for, and in an empty directory it leaves a
+tree with no repository: no first commit for `git diff` and `check reports` to
+work against, and no `regen-docs` merge driver, whose definition lives in
+`.git/config`.
 
 Add `--org <github-org>` if you know it, and `--timezone <tz>` for the agentic
 tier. Full flags: `skeletor-new --help`.
@@ -82,9 +91,14 @@ the user that red is normal.
 Then install the hooks:
 
 ```bash
-pre-commit install --install-hooks
-python scripts/git/install_merge_drivers.py
+.venv/bin/pre-commit install --install-hooks
+.venv/bin/python scripts/git/install_merge_drivers.py
 ```
+
+Every tool here is run by path, including the ones above. Nothing activates the
+venv, so a bare `pre-commit` is not on PATH at all, and a bare `pip` resolves to
+a system Python that on Arch, Debian 12+, Ubuntu 23.04+, Fedora or Homebrew
+macOS refuses to install into itself (PEP 668).
 
 ---
 
@@ -109,12 +123,19 @@ you left.
 
 ---
 
-## Step 5 — First commit
+## Step 5 — Commit your edits
 
 ```bash
 git add -A
-git commit -m "chore: scaffold the project shell"
+git commit -m "docs: fill in the scaffold markers"
 ```
+
+The shell's own commit already exists — `skeletor-new` made it, which is what
+gives `git diff` and `check reports` a HEAD to work against from the start, so
+`git log` shows it before you write anything. This commit carries your Step 4
+edits, not the scaffold. If you scaffolded into a repository that already had
+history, the scaffolder committed nothing and this is the first commit after
+all — read `git log` rather than assuming either.
 
 Conventional commits are enforced by the hook you just installed. One subject
 line.
@@ -129,8 +150,8 @@ Tell the user, in a few lines:
 - Which SCAFFOLD markers are still open.
 - The three commands they will use most: `./<cli> check pre-push`,
   `./<cli> test unit`, `./<cli> docs status`.
-- That `docs/SETUP_GUIDE.md` in the new repo's source (`~/skyrow.labs/skeletor`)
-  covers branch protection, the first plan, ratchet baselines, and the PR loop —
+- That `$SKELETOR/docs/SETUP_GUIDE.md` in the new repo's source covers
+  branch protection, the first plan, ratchet baselines, and the PR loop —
   steps 4 through 8 — which are worth doing but are not part of scaffolding.
 
 ---
@@ -138,7 +159,7 @@ Tell the user, in a few lines:
 ## Adopting into an existing, non-empty repo
 
 Different job, different risks. Read
-`~/skyrow.labs/skeletor/docs/SETUP_GUIDE.md` § "Adopting this into an existing
+`$SKELETOR/docs/SETUP_GUIDE.md` § "Adopting this into an existing
 repository" and follow it — in particular, **baseline every ratchet at what the
 repo already has**, never at zero. A ratchet that starts red gets switched off,
 and then the adoption has made things worse.

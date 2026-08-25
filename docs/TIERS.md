@@ -131,7 +131,7 @@ repo teaches you to ignore its reports.
 Tiers are plain file overlays, so upgrading is a re-run into the existing tree:
 
 ```bash
-bin/skeletor-new . --tier governed --force --no-git \
+bin/skeletor-new . --tier governed --force \
   --name "..." --cli "..." --slug "..."     # same values as the original run
 ```
 

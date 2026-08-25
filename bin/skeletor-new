@@ -65,10 +65,26 @@ def setup_commands(language: str) -> List[str]:
     writes. They were two separate copies once, and the one people actually read
     — the README — was the stale one: it omitted `npm install`, so `check lint`
     failed on `eslint: command not found` and read as a broken scaffold.
+
+    Every step here runs a tool by **path**, never through a PATH lookup, and
+    both halves of that shipped broken. A bare `pip install` is refused outright
+    on any distribution carrying an `EXTERNALLY-MANAGED` marker — Arch, Debian
+    12+, Ubuntu 23.04+, Fedora, Homebrew macOS — so PEP 668 made line one of the
+    generated quick start exit non-zero, which reads as user error at exactly
+    the moment a new reader has no way to tell. A bare `pre-commit` then fails
+    on any machine at all, because the install that provides it puts it in
+    `.venv/bin`, which is not on PATH and which nothing here activates.
+
+    The venv is not a portability nicety either — it is what the tree already
+    assumes. `CLI_WRAPPER` looks for `.venv/bin/python` first and only falls
+    through to whatever `python3` it can find; a system-wide install left every
+    `./<cli>` invocation resolving against an interpreter nobody chose, which is
+    the same ambient-resolution bug the pyright gate was fixed for.
     """
     steps = []
     if language in ("python", "both"):
-        steps.append("pip install -r scripts/requirements.txt && pre-commit install --install-hooks")
+        steps.append("python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt")
+        steps.append(".venv/bin/pre-commit install --install-hooks")
     if language in ("node", "both"):
         steps.append("npm install")
     return steps
@@ -335,7 +351,12 @@ def main() -> int:
         help="the GitHub owner: CODEOWNERS, and the README badges, which are omitted without it",
     )
     parser.add_argument("--timezone", default="UTC", help="the timezone the crontab fires in (agentic tier)")
-    parser.add_argument("--no-git", action="store_true", help="skip `git init` and the first commit")
+    # Not the flag to reach for when scaffolding into a repository that already
+    # exists: the guard below already skips a tree with a `.git`, so `--no-git`
+    # is a no-op there and only bites in the case it looks safest in — an empty
+    # directory, where it leaves a tree with no repository at all. This is for a
+    # render that must never become one (`skeletor-upgrade`'s base, a probe).
+    parser.add_argument("--no-git", action="store_true", help="render a tree that is not a repository at all")
     parser.add_argument("--force", action="store_true", help="write into an existing non-empty directory")
     args = parser.parse_args()
 
@@ -407,10 +428,11 @@ def main() -> int:
             print("   " + (first.stderr or first.stdout).strip().replace("\n", "\n   "))
             print("   (usually an unset user.name/user.email — commit by hand once it is set)")
 
-    # Install the merge driver whenever there IS a repo, including the in-place
-    # `--force --no-git` case. Its definition lives in .git/config, which is not
-    # version controlled — without it, .gitattributes points at a driver that
-    # does not exist and git silently three-way-merges a generated JSON.
+    # Install the merge driver whenever there IS a repo — the one just created,
+    # or the one already there that the block above deliberately left alone. Its
+    # definition lives in .git/config, which is not version controlled — without
+    # it, .gitattributes points at a driver that does not exist and git silently
+    # three-way-merges a generated JSON.
     if (target / ".git").exists():
         subprocess.run([sys.executable, "scripts/git/install_merge_drivers.py"], cwd=str(target), capture_output=True)
 

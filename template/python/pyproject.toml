@@ -19,6 +19,14 @@ extend-exclude = '''
 [tool.isort]
 profile = "black"
 line_length = {{LINE_LENGTH}}
+
+# Asks git which files are ignored rather than keeping a second copy of
+# `.gitignore` in the `skip` list below — which is the same reason every other
+# discovered set in this repo is discovered rather than listed. The cost is that
+# isort shells out to `git ls-files`, so in a tree that is not a repository git
+# writes `fatal: not a git repository` to stderr three times and isort carries
+# on with the skip silently doing nothing. That is not a case to design around:
+# a scaffold gets `git init` and its first commit before it ever runs a gate.
 skip_gitignore = true
 
 # Name the first-party packages instead of letting isort infer them from what

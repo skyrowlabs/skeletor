@@ -84,8 +84,8 @@ python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
 ## Step 2 — Install the hooks and the merge driver
 
 ```bash
-pre-commit install --install-hooks
-python scripts/git/install_merge_drivers.py
+.venv/bin/pre-commit install --install-hooks
+.venv/bin/python scripts/git/install_merge_drivers.py
 ./mp check merge-drivers
 ```
 
@@ -304,7 +304,7 @@ and the adoption has made things worse.
 
 Do it in this order, one commit each:
 
-1. **Scaffold into the existing tree** with `--force --no-git`, then review the
+1. **Scaffold into the existing tree** with `--force`, then review the
    diff file by file. Keep your own `README.md`, `.gitignore` and CI if they are
    better; take the rules, the docs pipeline and the CLI.
 2. **Baseline every ratchet at what you inherited**, not at zero:
