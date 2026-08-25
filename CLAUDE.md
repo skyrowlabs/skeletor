@@ -69,7 +69,8 @@ against every language — a placeholder that only appears in the `node` overlay
 is a `render()` failure a user would otherwise find first — and against each
 Python tree runs the unit suite, `check docs`, `check merge-drivers`,
 `check output`, a `--help` group-registration check, a static check that every
-`script()` call in the tree's CLI names a file that exists, and the lint hooks.
+`script()` call in the tree's CLI names a file that exists, the lint hooks, and
+pyright.
 eslint and prettier run once, on the fullest tier's `both` tree, and the fullest
 tier is scaffolded a second time into a deliberately long path.
 
@@ -114,27 +115,32 @@ flake8 only ever reads Python, so it never spared a file, and excluding nothing
 is what makes the two gates agree. A companion check asserts the enumeration
 found the tree, since a lint over zero files is green and worth nothing.
 
-`pyright` is the one hook not gated here: it is a node package wearing a Python
-name, and installing a JS toolchain to check types on a tree that has none is
-not worth the minute. `{{CLI}} check lint` runs it in a real project.
+`pyright` was for a long time the one hook not gated here, exempted as a node
+package wearing a Python name whose toolchain was not worth the minute. The
+minute was never measured. Its pip wrapper caches node in
+`~/.cache/pyright-python` **keyed by version — once per machine, not once per
+tree** — so the real cost is a cold download on a fresh runner (67MB), a
+re-download on every pin bump, and about 1.1s per tree after that. Three Python
+trees, three and a half seconds. It is gated now, from the same
+`requirements.txt` pin as every other tool, and it reads its own arguments out
+of the generated tree's `.pre-commit-config.yaml` — which names them with
+`entry:` rather than `args:`, so it needs its own reader.
 
-Measure that reason before repeating it. The pip wrapper caches its node
-toolchain in `~/.cache/pyright-python`, keyed by version — 67MB, once per
-machine rather than once per tree — and a warm run over a `governed` tree is
-~1.2s. The cost is a cold download on a fresh runner and a re-download on every
-pin bump, not a minute per tier. If that is judged worth paying, the gate is
-three Python trees and about four seconds.
+What the exemption bought, while it lasted: `commit()` reassigned its own
+`paths: tuple` parameter to a list, and the resulting errors shipped red in
+every `governed` and `agentic` scaffold while this file stayed green. `f1f75ab`
+fixed that, and it is history rather than a standing red — a `governed` tree is
+clean under `pyright==1.1.411`. Reintroducing it now turns `governed` and
+`agentic` red and leaves `core` green, which is the tier signature you would
+expect, since `core` ships no `cli/commit.py`.
 
-Know what that bought. Two `reportAssignmentType` errors in `governed`'s
-`cli/commit.py` once shipped and stayed shipped — `commit()` reassigned its own
-`paths: tuple` parameter to a list — red in every scaffold at that tier and
-above while this file stayed green. **That example is history, not a standing
-red**: `f1f75ab` fixed it, and a `governed` scaffold is clean under
-`pyright==1.1.411` today. Confirm before acting on it either way; the claim read
-as a current failure for long enough to send somebody looking for it. The *gap*
-is what remains true — nothing here would catch the next one — and the
-compensating control is that `AGENTS.md` and the skill both run `check pre-push`
-(which does run pyright) before anything else, and stop if it is red.
+Two things that gate is careful about, both of them the failure this file exists
+to prevent. It asserts `filesAnalyzed`, because pyright prints `0 errors` just
+as cheerfully when its `include` paths match nothing. And it is the one gate
+that does not use `run()`: `--outputjson` writes its report to stdout and its
+complaints to stderr, so merging the streams makes the JSON unparseable at
+exactly the moment it carries the explanation. A toolchain that cannot be
+fetched is skipped **loudly**, never silently.
 
 **Never run `black` directly on `template/`.** It sees `{{PLACEHOLDER}}` rather
 than the value it renders to, so its line-length decisions are made against the

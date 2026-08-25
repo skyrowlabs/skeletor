@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import importlib.machinery
 import importlib.util
 import re
@@ -44,11 +45,6 @@ SCAFFOLDER = SKELETOR / "bin" / "skeletor-new"
 #: pytest config *sets* `timeout`. Without the plugin pytest warns and ignores
 #: it, so the suite would be verified under a config the tree does not have.
 EXTRA_PACKAGES = ["pytest", "pytest-timeout", "click"]
-
-#: Pinned in requirements but not installable here: pyright is a node package
-#: wearing a Python name, and installing it pulls a toolchain for one gate.
-#: `{{CLI}} check lint` in a real tree runs it; this does not.
-UNINSTALLABLE = {"pyright"}
 
 #: Lint hooks whose args are read out of the generated tree's own
 #: `.pre-commit-config.yaml` rather than repeated here. Copying the args would
@@ -101,13 +97,21 @@ def toolchain() -> List[str]:
     Read from `template/core/scripts/requirements.txt` rather than listed here:
     a bump has to reach the verifier, and a second list is a second thing to
     forget.
+
+    `pyright` used to be filtered out of this as uninstallable — a node package
+    wearing a Python name, said to cost a toolchain download for one gate. The
+    number was never measured. Its pip wrapper caches node in
+    `~/.cache/pyright-python` keyed by version, so the download is once per
+    machine rather than once per tree, and a warm run over a governed tree is
+    about a second. What the exemption actually bought was two
+    `reportAssignmentType` errors that shipped red in every `governed` and
+    `agentic` scaffold while this file stayed green.
     """
     requirements = SKELETOR / "template" / "core" / "scripts" / "requirements.txt"
     pinned = [
         line.strip()
         for line in requirements.read_text(encoding="utf-8").splitlines()
         if re.match(r"^[A-Za-z0-9_.-]+==", line.strip())
-        and line.split("==")[0].strip() not in UNINSTALLABLE
     ]
     return pinned + EXTRA_PACKAGES
 
@@ -260,6 +264,87 @@ def lint_gates(tree: Path, venv_python: Path) -> List[Result]:
     return results
 
 
+def pyright_entry(tree: Path) -> List[str]:
+    """The arguments the tree's own pyright hook runs with.
+
+    Read, not repeated, for the same reason as `hook_args`: the pyright hook
+    names its config with `entry:` rather than `args:`, and a copy here would
+    verify the template against an invocation the template does not use.
+    """
+    config = (tree / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    match = re.search(r"- id: pyright\b[^\n]*\n(?:\s+[^\n]*\n)*?\s+entry: pyright ([^\n]*)", config)
+    return match.group(1).split() if match else ["--project", "pyrightconfig.json"]
+
+
+def warm_pyright(venv_python: Path) -> Tuple[bool, str]:
+    """Fetch pyright's node toolchain once, before any tree is gated.
+
+    The download happens on first run and is cached per machine, so doing it
+    here keeps it out of the first tree's timing and — the point — turns "no
+    network" into one honest skip rather than three type checks that fail for a
+    reason that has nothing to do with the template.
+    """
+    code, output = run([str(venv_python), "-m", "pyright", "--version"], cwd=venv_python.parent)
+    return code == 0, output.strip()
+
+
+def pyright_gate(tree: Path, venv_python: Path, available: bool) -> List[Result]:
+    """Whole-project type checking, the gate whose absence shipped red scaffolds.
+
+    Skipped loudly, never silently, when the toolchain could not be fetched: a
+    gate that quietly reports success when it did not run is worse than no gate,
+    because it is indistinguishable from one that did.
+
+    `filesAnalyzed` is asserted for the same reason the lint gate counts its
+    files. pyright prints `0 errors` just as happily when its `include` paths
+    match nothing, and this whole file exists because a check that inspected an
+    empty set stayed green through the bug it was written to catch.
+    """
+    if not available:
+        return [Result("pyright", True, 0.0, "skipped: toolchain unavailable (offline?)")]
+
+    started = time.time()
+    # The one gate that does not use `run()`, which merges the two streams.
+    # `--outputjson` puts its report on stdout and everything else on stderr —
+    # an unreadable config, an include path that resolves to nothing — so
+    # merging them makes the JSON unparseable exactly when it carries the
+    # explanation. Keeping them apart is what lets a bad config report itself.
+    proc = subprocess.run(
+        [str(venv_python), "-m", "pyright", *pyright_entry(tree), "--outputjson"],
+        cwd=str(tree),
+        capture_output=True,
+        text=True,
+    )
+    code, noise = proc.returncode, (proc.stderr or "").strip()
+    try:
+        report = json.loads(proc.stdout)
+        summary = report["summary"]
+        analyzed, errors = summary["filesAnalyzed"], summary["errorCount"]
+    except (ValueError, KeyError):
+        return [Result("pyright", False, time.time() - started, f"unreadable --outputjson:\n{noise}\n{proc.stdout}")]
+
+    if errors:
+        # Rendered from the JSON rather than dumped as it: the raw report is a
+        # screenful of spans and rule metadata per finding, and a gate nobody
+        # can read the output of is one people learn to skip.
+        detail = "\n".join(
+            f"{Path(d['file']).relative_to(tree)}:{d['range']['start']['line'] + 1} "
+            f"{d.get('rule', 'error')} — {d['message'].splitlines()[0]}"
+            for d in report.get("generalDiagnostics", [])
+            if d.get("severity") == "error"
+        )
+    elif analyzed <= 20:
+        detail = (
+            f"pyright analyzed only {analyzed} files — its include paths have stopped matching the tree"
+            f"{chr(10) + noise if noise else ''}"
+        )
+    else:
+        detail = f"{analyzed} files analyzed, no errors"
+
+    ok = code == 0 and errors == 0 and analyzed > 20
+    return [Result(f"pyright ({analyzed} files)", ok, time.time() - started, detail)]
+
+
 def node_gates(tree: Path) -> List[Result]:
     """eslint and prettier, once, on the one tree that has a package.json.
 
@@ -283,7 +368,7 @@ def node_gates(tree: Path) -> List[Result]:
     return results
 
 
-def gates(tree: Path, venv_python: Path) -> List[Result]:
+def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     """The tree's own checks, run the way its user would run them."""
     results = []
 
@@ -310,6 +395,7 @@ def gates(tree: Path, venv_python: Path) -> List[Result]:
     results.append(check_script_targets(tree))
     results.append(check_no_baked_paths(tree))
     results += lint_gates(tree, venv_python)
+    results += pyright_gate(tree, venv_python, pyright_ok)
     return results
 
 
@@ -691,6 +777,9 @@ def main() -> int:
     results: List[Result] = []
     try:
         venv_python = make_venv(workdir, args.quiet)
+        pyright_ok, pyright_note = warm_pyright(venv_python)
+        if not args.quiet:
+            print(f"   pyright {pyright_note}" if pyright_ok else f"   ⚠️  pyright unavailable: {pyright_note}")
         for tier in tiers:
             for language in languages:
                 result, tree = scaffold(tier, language, workdir)
@@ -698,7 +787,7 @@ def main() -> int:
                 if not result.ok or language != gated_language:
                     continue
                 (tree / ".venv").symlink_to(venv_python.parents[1])
-                for gate in gates(tree, venv_python):
+                for gate in gates(tree, venv_python, pyright_ok):
                     gate.label = f"{tier}: {gate.label}"
                     results.append(gate)
                 if not args.quiet:
