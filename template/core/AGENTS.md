@@ -22,11 +22,18 @@ look optional to anybody not using that tool.
 ## Quick Start
 
 ```bash
-./{{CLI}} setup            # first-time setup (.env, git hooks, merge drivers)
-./{{CLI}} service up       # start the stack
-./{{CLI}} check health     # verify everything is up
+{{SETUP_COMMANDS}}
+./{{CLI}} check pre-push   # everything CI blocks on; green on a fresh tree
 ./{{CLI}} test unit        # the fast suite
+./{{CLI}} check health     # is the local stack up? (SCAFFOLD: wire the probes)
 ```
+
+These are rendered from the same source as the README's Setup block, and every
+one of them exists. An earlier version of this file opened with `./{{CLI}} setup`
+and `./{{CLI}} service up`, which the CLI has never implemented — and `setup`
+could not be implemented, because the CLI cannot run until the install it would
+be performing has already put `click` in the venv. A quick start that fails on
+line one reads as user error at the exact moment a reader has no way to tell.
 
 ---
 

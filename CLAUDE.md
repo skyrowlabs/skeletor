@@ -103,6 +103,17 @@ files `black` would rewrite, 20 imports `flake8` rejects, and markdown
 `prettier` re-pads. `pre-commit run --all-files` — the first command the README
 gives a new user — was red on a tree nobody had touched.
 
+They pass **explicit filenames**, because that is what pre-commit passes and the
+difference is not cosmetic. flake8 applies its `exclude` list when it walks a
+directory and ignores it for a file named on the command line, so `flake8 .` and
+the hook answer differently about precisely the files somebody excluded. This
+gate ran against `.` and was green while a `docs` entry in `.flake8` — matched
+against every path component, so it also silenced `scripts/docs/` — hid four
+dead imports that failed the user's first commit. There is now no `docs` entry:
+flake8 only ever reads Python, so it never spared a file, and excluding nothing
+is what makes the two gates agree. A companion check asserts the enumeration
+found the tree, since a lint over zero files is green and worth nothing.
+
 `pyright` is the one hook not gated here: it is a node package wearing a Python
 name, and installing a JS toolchain to check types on a tree that has none is
 not worth the minute. `{{CLI}} check lint` runs it in a real project.

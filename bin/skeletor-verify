@@ -206,6 +206,20 @@ def hook_args(tree: Path, hook: str) -> List[str]:
     return [single or double for single, double in re.findall(r"'([^']*)'|\"([^\"]*)\"", match.group(1))]
 
 
+#: Directories a fresh scaffold can contain that pre-commit would never hand a
+#: hook, because git does not track them. Everything else that is a `.py` is.
+UNTRACKED_DIRS = {".git", ".venv", ".venv-ci", "node_modules", "__pycache__", "tmp"}
+
+
+def python_files(tree: Path) -> List[str]:
+    """Every Python file in the tree, as the filenames pre-commit would pass."""
+    return [
+        str(path.relative_to(tree))
+        for path in sorted(tree.rglob("*.py"))
+        if not UNTRACKED_DIRS & set(path.relative_to(tree).parts)
+    ]
+
+
 def lint_gates(tree: Path, venv_python: Path) -> List[Result]:
     """The formatters and the linter, run exactly as the tree's hooks run them.
 
@@ -213,13 +227,35 @@ def lint_gates(tree: Path, venv_python: Path) -> List[Result]:
     would rewrite and 20 unused imports flake8 rejects: `pre-commit run
     --all-files`, the first command the README tells a new user to run, was red
     on a tree nobody had touched.
+
+    "Exactly" is carried by the **filenames**, and it used to be a lie: this ran
+    each hook against `.`, which is how the tree's own `check lint` invokes
+    them and not how pre-commit does. The difference is not cosmetic — flake8 applies its
+    `exclude` list when it walks a directory and ignores it for a file named on
+    the command line, so the two invocations answer differently about exactly
+    the files somebody chose to exclude. A `docs` entry in `.flake8` matched the
+    `scripts/docs/` component, and four dead imports shipped: green here and in
+    `check lint`, red in the pre-commit hook that runs on a user's first commit.
+    Passing filenames is also the strictly stronger of the two, since an exclude
+    can only ever remove files — so this being green implies `flake8 .` is.
     """
-    results = []
+    files = python_files(tree)
+    results = [
+        Result(
+            f"lint sees {len(files)} python files",
+            # A lint over nothing is green and worth nothing. The lower bound is
+            # loose on purpose — it is here to catch an enumeration that broke,
+            # not to be a file count somebody has to update.
+            len(files) > 20 and any(f.startswith("scripts/docs/") for f in files),
+            0.0,
+            "\n".join(files),
+        )
+    ]
     for hook in LINT_HOOKS:
         args = hook_args(tree, hook)
         checkish = ["--check-only"] if hook == "isort" else ["--check"] if hook == "black" else []
         started = time.time()
-        code, output = run([str(venv_python), "-m", hook, *args, *checkish, "."], cwd=tree)
+        code, output = run([str(venv_python), "-m", hook, *args, *checkish, *files], cwd=tree)
         results.append(Result(f"{hook} {' '.join(args)}", code == 0, time.time() - started, output))
     return results
 

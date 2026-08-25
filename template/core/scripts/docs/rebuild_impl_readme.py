@@ -18,7 +18,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.docs import plans  # noqa: E402
 from scripts.output import die, fail, ok  # noqa: E402
 from scripts.paths import IMPL_DIR, PROJECT_ROOT  # noqa: E402
 

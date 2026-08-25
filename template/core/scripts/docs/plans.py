@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docs import frontmatter  # noqa: E402
-from scripts.paths import IMPL_DIR, PROJECT_ROOT, TODO_DIR  # noqa: E402
+from scripts.paths import PROJECT_ROOT  # noqa: E402
 
 #: Files in the plan trees that are not plans.
 NOT_A_PLAN = {"README.md", "_TEMPLATE.md"}

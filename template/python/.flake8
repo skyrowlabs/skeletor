@@ -21,8 +21,17 @@ exclude =
     # inside it. Without this, `flake8 .` lints those site-packages and fails
     # the unit suite for everyone — including the agent whose worktree it is.
     .claude,
-    # Documentation only
-    docs,
+    # There is deliberately no `docs` entry here, and re-adding one reopens a
+    # bug that shipped. An entry is matched against every path component, so
+    # `docs` also silenced `scripts/docs/` — the entire docs-lifecycle engine,
+    # 11 modules — and hid four dead imports in it. `{{CLI}} check lint` runs
+    # `flake8 .` and saw nothing; pre-commit passes explicit filenames, and
+    # flake8 ignores `exclude` for those, so it failed. Same binary, same venv,
+    # same `--select`, opposite answers — and the green one was the one the
+    # scaffold told you to trust. Anchoring to `./docs` fixes `scripts/docs/`
+    # but leaves the two gates still disagreeing about `docs/*.py`. Excluding
+    # nothing is what makes them agree, and it costs nothing: flake8 only ever
+    # reads Python, so a `docs` entry never spared it a single file.
     # Scratch (gitignored)
     tmp
 
