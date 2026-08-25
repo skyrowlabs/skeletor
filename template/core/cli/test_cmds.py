@@ -12,7 +12,10 @@ import sys
 
 import click
 
-from cli.helpers import PROJECT_ROOT, run, shell, step, summarize
+from cli.helpers import PROJECT_ROOT, run, shell, skip, step, summarize
+
+#: pytest's exit code for "the marker you asked for selected nothing".
+NO_TESTS_COLLECTED = 5
 
 #: marker -> (help text, whether the suite needs the stack running)
 SUITES = {
@@ -34,7 +37,19 @@ def _pytest(marker: str, extra: tuple, ci: bool) -> int:
     shell(" ".join(cmd))
     import subprocess
 
-    return subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=env).returncode
+    code = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=env).returncode
+
+    # A suite that needs the stack is one this project has not written a test
+    # for yet, and pytest calls an empty selection an ERROR. So a fresh tree is
+    # red the first time anybody runs it or CI does — and a first check that is
+    # red is how a team learns that red is normal.
+    #
+    # Reported as empty, never as a pass, and never for `unit`: tests ship for
+    # that one, so nothing collected there means the harness is broken.
+    if code == NO_TESTS_COLLECTED and SUITES[marker][1]:
+        skip(f"no {marker} tests are marked yet — the suite is empty, not passing")
+        return 0
+    return code
 
 
 @click.group(invoke_without_command=True)

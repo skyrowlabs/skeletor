@@ -268,6 +268,7 @@ def gates(tree: Path, venv_python: Path) -> List[Result]:
         results.append(Result(f"{CLI_NAME} {' '.join(command)}", code == 0, time.time() - started, output))
 
     results.append(check_docs_gate_sees_the_tree(tree))
+    results.append(check_empty_suite_is_not_red(tree))
     results.append(check_upgrade_is_noop(tree))
     results.append(check_groups_register(tree))
     results.append(check_script_targets(tree))
@@ -301,6 +302,23 @@ def check_docs_gate_sees_the_tree(tree: Path) -> Result:
     elif checked == 0:
         output = f"source -> doc refs inspected 0 references: the walk skipped the whole tree\n{output}"
     return Result(f"check docs inspects the tree ({checked} source refs)", passed, time.time() - started, output)
+
+
+def check_empty_suite_is_not_red(tree: Path) -> Result:
+    """A suite the scaffold ships no tests for must not fail on arrival.
+
+    pytest exits 5 when a marker selects nothing, and no scaffold can ship a
+    test that needs a stack it does not know about — so `test integration` and
+    the CI job that runs the same selection were red on every fresh tree, and
+    stayed red until somebody wrote their first integration test.
+
+    This ran nowhere before: verify ran `pytest -m unit` directly and never the
+    CLI's own suite commands, so the one selection guaranteed to be empty was
+    the one nothing exercised.
+    """
+    started = time.time()
+    code, output = run([f"./{CLI_NAME}", "test", "integration"], cwd=tree)
+    return Result("test integration on an empty suite", code == 0, time.time() - started, output)
 
 
 def check_upgrade_is_noop(tree: Path) -> Result:

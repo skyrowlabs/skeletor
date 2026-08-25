@@ -172,8 +172,19 @@ jobs:
       # SCAFFOLD: stand up the stack here. If two workflows both do this, put
       # the steps in a composite action under .github/actions/ and have both
       # use it — never hand-copy. See AGENTS.md Critical Rule 11.
+      # Exit 5 is pytest for "the marker selected nothing", and a scaffold ships
+      # no integration test — so a bare call is red on arrival, which is how a
+      # team learns that red is normal. An empty selection is REPORTED, never
+      # passed off as a run; every other non-zero status still fails the job.
+      # The unit job above gets no such tolerance: tests ship for it.
       - name: Integration suite
-        run: python -m pytest tests/ -m integration -q --durations=25
+        run: |
+          python -m pytest tests/ -m integration -q --durations=25 || status=$?
+          if [ "${status:-0}" -eq 5 ]; then
+            echo "::notice title=Integration suite::no integration tests are marked yet — the suite is empty, not passing"
+          elif [ "${status:-0}" -ne 0 ]; then
+            exit "$status"
+          fi
 
   # ── Release automation ──────────────────────────────────────────────────
   release-please:
