@@ -428,3 +428,19 @@ interlock, and which you cannot understand from one file:
 - `docs:` for changes under `docs/` only.
 - Template content is prose as much as code — match the surrounding voice:
   specific, causal, and willing to say what went wrong.
+
+**Versioning.** skeletor is versioned by annotated git tag and nothing else.
+There is deliberately **no `VERSION` file**: nothing installs this repository, so
+a file would be a second home for a number whose first home is the tag — the
+copy this project refuses everywhere else.
+
+The tag is not decoration. `skeletor_ref()` writes `git describe --tags --always
+--dirty` into every scaffold's `.skeletor.json`, and that is the value
+`bin/skeletor-upgrade` re-renders a tree's base from. Untagged, it recorded a
+bare sha: unreadable, and strippable by a rebase, which drops an upgrade into the
+degraded hash-only fallback that can classify but cannot merge. Tagged, a
+scaffold records `v0.1.0` or `v0.1.0-3-gabc1234`.
+
+So: tag after a change users would scaffold against, `git tag -a vX.Y.Z` with a
+message saying what moved, and push the tag — an unpushed tag describes a base
+only this machine can resolve.
