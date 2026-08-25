@@ -118,11 +118,23 @@ found the tree, since a lint over zero files is green and worth nothing.
 name, and installing a JS toolchain to check types on a tree that has none is
 not worth the minute. `{{CLI}} check lint` runs it in a real project.
 
-Know what that costs. Two `reportAssignmentType` errors in `governed`'s
-`cli/commit.py` shipped and stayed shipped, red in every scaffold at that tier
-and above, while this file stayed green — the gap is real, and the compensating
-control is that `AGENTS.md` and the skill both run `check pre-push` (which does
-run pyright) before anything else, and stop if it is red.
+Measure that reason before repeating it. The pip wrapper caches its node
+toolchain in `~/.cache/pyright-python`, keyed by version — 67MB, once per
+machine rather than once per tree — and a warm run over a `governed` tree is
+~1.2s. The cost is a cold download on a fresh runner and a re-download on every
+pin bump, not a minute per tier. If that is judged worth paying, the gate is
+three Python trees and about four seconds.
+
+Know what that bought. Two `reportAssignmentType` errors in `governed`'s
+`cli/commit.py` once shipped and stayed shipped — `commit()` reassigned its own
+`paths: tuple` parameter to a list — red in every scaffold at that tier and
+above while this file stayed green. **That example is history, not a standing
+red**: `f1f75ab` fixed it, and a `governed` scaffold is clean under
+`pyright==1.1.411` today. Confirm before acting on it either way; the claim read
+as a current failure for long enough to send somebody looking for it. The *gap*
+is what remains true — nothing here would catch the next one — and the
+compensating control is that `AGENTS.md` and the skill both run `check pre-push`
+(which does run pyright) before anything else, and stop if it is red.
 
 **Never run `black` directly on `template/`.** It sees `{{PLACEHOLDER}}` rather
 than the value it renders to, so its line-length decisions are made against the
