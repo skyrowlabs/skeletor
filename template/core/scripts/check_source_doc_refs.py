@@ -38,7 +38,11 @@ from scripts.paths import DOCS_DIR, GITHUB_DIR, PROJECT_ROOT  # noqa: E402
 IGNORE_FILE = GITHUB_DIR / "scripts" / ".validate-ignore"
 
 SOURCE_SUFFIXES = {".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".sh", ".yml", ".yaml", ".toml"}
-SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__", "tmp", ".claude/worktrees"}
+SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__", "tmp"}
+
+#: Skipped by path prefix rather than by name, because no single path component
+#: ever equals them. In `SKIP_DIRS` they matched nothing at all.
+SKIP_PREFIXES = (".claude/worktrees",)
 
 _REF = re.compile(r"(?P<path>docs/[A-Za-z0-9_./-]+\.(?:md|json|ya?ml))")
 
@@ -58,7 +62,15 @@ def _sources() -> List[Path]:
     for path in PROJECT_ROOT.rglob("*"):
         if not path.is_file() or path.suffix not in SOURCE_SUFFIXES:
             continue
-        if any(part in SKIP_DIRS for part in path.parts):
+        # Match against the path RELATIVE to the project root. Matching the
+        # absolute path lets an ancestor directory decide: a checkout under
+        # `/tmp`, `~/build/` or `~/dist/` hits `tmp`/`build`/`dist` on a
+        # component nobody chose, skips every file in the repository, and
+        # reports "0 references, all resolve" — a green that means unchecked.
+        rel = path.relative_to(PROJECT_ROOT)
+        if any(part in SKIP_DIRS for part in rel.parts):
+            continue
+        if any(rel.as_posix().startswith(f"{prefix}/") for prefix in SKIP_PREFIXES):
             continue
         out.append(path)
     return sorted(out)

@@ -267,12 +267,40 @@ def gates(tree: Path, venv_python: Path) -> List[Result]:
         code, output = run([f"./{CLI_NAME}", *command], cwd=tree)
         results.append(Result(f"{CLI_NAME} {' '.join(command)}", code == 0, time.time() - started, output))
 
+    results.append(check_docs_gate_sees_the_tree(tree))
     results.append(check_upgrade_is_noop(tree))
     results.append(check_groups_register(tree))
     results.append(check_script_targets(tree))
     results.append(check_no_baked_paths(tree))
     results += lint_gates(tree, venv_python)
     return results
+
+
+def check_docs_gate_sees_the_tree(tree: Path) -> Result:
+    """`check docs` passing is worth nothing if its source→doc checker looked at
+    no files.
+
+    This exists because it happened. `check_source_doc_refs.py` matched its skip
+    list against the ABSOLUTE path, and every tree this script generates lives
+    under `/tmp` — so `tmp` matched an ancestor, every file was skipped, and the
+    checker reported "0 references, all resolve" while the same tree in the
+    user's home directory failed on three references the template itself ships.
+    Verify was green for as long as that bug existed, which is the whole reason
+    it reached a user's first CI run.
+
+    A gate that cannot report how much it inspected cannot be trusted to have
+    inspected anything, so the assertion here is on the count, not the exit code.
+    """
+    started = time.time()
+    code, output = run([sys.executable, "scripts/check_source_doc_refs.py", "--json"], cwd=tree)
+    match = re.search(r'"checked"\s*:\s*(\d+)', output)
+    checked = int(match.group(1)) if match else 0
+    passed = code == 0 and checked > 0
+    if not match:
+        output = f"--json emitted no `checked` count\n{output}"
+    elif checked == 0:
+        output = f"source -> doc refs inspected 0 references: the walk skipped the whole tree\n{output}"
+    return Result(f"check docs inspects the tree ({checked} source refs)", passed, time.time() - started, output)
 
 
 def check_upgrade_is_noop(tree: Path) -> Result:
