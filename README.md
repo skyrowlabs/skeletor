@@ -259,3 +259,15 @@ cd /tmp/probe && python -m venv .venv && .venv/bin/pip install -q pytest click
 
 A scaffold whose first check is red teaches that red is normal — so the shell's
 own definition of done is that a fresh tree passes its own gates.
+
+---
+
+## License
+
+MIT — see [`LICENSE`](LICENSE). Copyright (c) 2026 SKYROW LABS LLC.
+
+**What you scaffold is yours.** The files `bin/skeletor-new` writes into your
+repository carry no notice requirement and no attribution to skeletor. License
+the result however you like — the `LICENSE` file says so explicitly, because a
+scaffolding tool whose output dragged its own copyright into every project would
+be one nobody could use for the thing it is for.
