@@ -226,6 +226,7 @@ maintain, not the one that looks most thorough.
 | `docs/SETUP_GUIDE.md`       | The full procedure, including adoption into an existing repo |
 | `docs/TIERS.md`             | What each tier buys, and what it costs                 |
 | `docs/DESIGN_RATIONALE.md`  | The incident behind each mechanism                     |
+| `docs/MAINTENANCE.md`       | The weekly pass, and what an agent running it must not do |
 
 ---
 

@@ -296,12 +296,34 @@ reproduce its own tree makes every later upgrade a diff against the wrong base
 **Pins are reported, never bumped automatically.** `bin/skeletor-check-pins`
 discovers every pinned version by pattern and asks the registries what is
 current; `.github/workflows/pins.yml` puts the result in one issue, weekly.
-Bumping is a hand edit followed by `bin/skeletor-verify`, because a bump changes
-what `black` does to a generated tree, and because `pyright` is pinned in three
-places — a bot that bumps one of them produces a tree whose own
+Applying a report is a separate, deliberate act, because a bump changes what
+`black` does to a generated tree and what a user's first `pre-commit run` does —
+and only `bin/skeletor-verify` can judge that. Deliberate exceptions go in
+`.github/pin-allowlist.yaml` with a reason.
+
+The hazard that rule was written around now has a tool rather than a warning.
+`pyright` is pinned in **three files under two ecosystem keys** — `npm:pyright`
+for the pre-commit hook's `rev`, `pypi:pyright` for `scripts/requirements.txt`
+and for `ci.yml`'s `pip install` — because they are looked up in different
+registries, and `check-pins` is right to report them separately. Anybody working
+down that report key by key bumps one and stops, producing a tree whose own
 `test_lint_tool_parity.py` is red on arrival, which this repo treats as the one
-unacceptable outcome. Deliberate exceptions go in `.github/pin-allowlist.yaml`
-with a reason.
+unacceptable outcome. `black` has the same shape.
+
+`bin/skeletor-bump <tool> <version>` takes the **tool name, not the pin key**,
+rewrites every location every ecosystem resolves that name to, and has no way to
+ask it for half. It reads its locations from `check-pins`' own `discover()`
+rather than repeating the patterns — a second copy would bump the locations this
+file knows about while the report kept naming the ones it knows about, both of
+them green — and it re-runs that discovery afterwards, failing if any location
+still holds the old version. It does not run the gates and does not decide
+whether a bump is wanted; it prints `bin/skeletor-verify` as the next step,
+because that is the step that makes a bump real.
+
+The weekly pass this is the middle of — read the report, bump whole pins,
+verify, PR, allowlist a refusal, tag what shipped — is written once, in
+[`docs/MAINTENANCE.md`](docs/MAINTENANCE.md), so a person, a scheduled agent and
+a workflow can run the same procedure instead of three copies of it.
 
 ---
 

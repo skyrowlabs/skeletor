@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""Bump every location of a pinned tool at once, or refuse to bump it at all.
+
+`bin/skeletor-check-pins` reports what is stale. This applies one of those
+reports, and it exists because of the specific way applying one by hand goes
+wrong: **a tool is pinned in more than one file, under more than one ecosystem,
+and the copies must agree.**
+
+    pyright   template/core/.pre-commit-config.yaml   (npm, the hook `rev`)
+              template/core/scripts/requirements.txt  (pypi)
+              template/core/.github/workflows/ci.yml   (pypi, installed by hand)
+
+    black     template/core/.pre-commit-config.yaml   (github, the hook `rev`)
+              template/core/scripts/requirements.txt  (pypi)
+
+Three locations, two ecosystem keys, one tool. `check-pins` reports them as
+`npm:pyright` and `pypi:pyright` — correctly, since they are looked up in
+different registries — so anybody working from that report location by location
+bumps one key and stops. The result is a generated tree whose own
+`tests/test_lint_tool_parity.py` is red on arrival, which this repository treats
+as the single unacceptable outcome. CLAUDE.md has warned about it in prose for as
+long as the warning has existed. Prose does not run.
+
+So this tool takes a **tool name, not a pin key**, and rewrites every location
+of every ecosystem that name resolves to. There is no way to ask it for half.
+
+It does not decide whether a bump is a good idea and it does not run the gates.
+A bump changes what `black` does to a generated tree, and the only thing that can
+judge that is `bin/skeletor-verify` — which is printed as the next step, and is
+the step that makes a bump real.
+
+Usage:
+    bin/skeletor-bump pyright 1.1.413
+    bin/skeletor-bump black 26.6.0 --dry-run
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.machinery
+import importlib.util
+import sys
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+SKELETOR = Path(__file__).resolve().parent.parent
+CHECKER = SKELETOR / "bin" / "skeletor-check-pins"
+
+
+def load_checker():
+    """Import `bin/skeletor-check-pins` for its `discover()`.
+
+    Read rather than reimplemented, and that is the whole safety property: a
+    second copy of the discovery patterns here would bump the locations this
+    file knows about while `check-pins` kept reporting the ones it knows about,
+    and the two lists would diverge silently — each of them green.
+    """
+    loader = importlib.machinery.SourceFileLoader("skeletor_check_pins", str(CHECKER))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    # Registered before it executes: `check-pins` defines `@dataclass` types at
+    # module level, and dataclasses resolves a field's type through
+    # `sys.modules[cls.__module__]`, which is None until this line runs.
+    sys.modules[loader.name] = module
+    loader.exec_module(module)
+    return module
+
+
+def matching(pins: Dict[str, object], name: str) -> List[object]:
+    """Every pin for this tool, across ecosystems.
+
+    Matched on the bare name so `black` finds `github:psf/black` as well as
+    `pypi:black`: a github pin is keyed `owner/repo`, and requiring the owner
+    would mean the caller has to already know the thing this tool exists to
+    stop them having to know.
+    """
+    wanted = name.lower()
+    hits = []
+    for pin in pins.values():
+        candidates = {pin.name.lower(), pin.name.lower().split("/")[-1]}
+        if wanted in candidates:
+            hits.append(pin)
+    return hits
+
+
+def rewrite(path: Path, line_no: int, olds: List[str], new: str) -> Tuple[bool, str]:
+    """Replace a version on one known line. Never guesses which token is one.
+
+    The old values come from `check-pins`' own parse of that line, so a line
+    that does not contain any of them is a line this tool has misunderstood —
+    reported, not edited. Longest first, because `1.1.4` is a prefix of
+    `1.1.41` and replacing the short one first corrupts the long one.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    if line_no > len(lines):
+        return False, f"{path}:{line_no} is past the end of the file"
+    original = lines[line_no - 1]
+
+    for old in sorted(olds, key=len, reverse=True):
+        for written in (f"v{old}", old):
+            if written in original:
+                replacement = f"v{new}" if written.startswith("v") else new
+                lines[line_no - 1] = original.replace(written, replacement, 1)
+                path.write_text("".join(lines), encoding="utf-8")
+                return True, f"{original.strip()}  →  {lines[line_no - 1].strip()}"
+
+    return False, f"{path}:{line_no} holds none of {olds} — refusing to guess:\n    {original.strip()}"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="skeletor-bump",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("name", help="the tool, not the pin key: `pyright`, not `pypi:pyright`")
+    parser.add_argument("version", help="the version to write everywhere it is pinned")
+    parser.add_argument("--dry-run", action="store_true", help="say what would change; write nothing")
+    args = parser.parse_args()
+
+    checker = load_checker()
+    pins = checker.discover()
+    hits = matching(pins, args.name)
+
+    if not hits:
+        known = sorted({p.name.split("/")[-1] for p in pins.values()})
+        print(f"❌ nothing pinned under the name {args.name!r}")
+        print(f"   known: {', '.join(known)}")
+        return 1
+
+    targets = sorted({where for pin in hits for where in pin.where})
+    olds = sorted({v for pin in hits for v in getattr(pin, "versions", [pin.version])})
+
+    print(f"{args.name}: {', '.join(olds)} → {args.version}")
+    print(f"   {len(targets)} location(s) across {len(hits)} ecosystem key(s): {', '.join(p.key for p in hits)}")
+    print()
+
+    if args.dry_run:
+        for where in targets:
+            print(f"   would rewrite {where}")
+        print()
+        print("Nothing written (--dry-run).")
+        return 0
+
+    failures = []
+    for where in targets:
+        rel, _, line_no = where.rpartition(":")
+        ok, detail = rewrite(SKELETOR / rel, int(line_no), olds, args.version)
+        print(f"   {'✅' if ok else '❌'} {rel}:{line_no}")
+        print(f"      {detail}")
+        if not ok:
+            failures.append(where)
+
+    if failures:
+        # A partial rewrite is the exact state this tool exists to prevent, and
+        # it is worse than not having run at all: the tree now disagrees with
+        # itself, and the half that succeeded looks like a completed bump.
+        print()
+        print(f"❌ {len(failures)} of {len(targets)} location(s) were not rewritten, so the pin now DISAGREES")
+        print("   with itself. Revert before doing anything else:  git checkout -- .")
+        return 1
+
+    # Ask `check-pins` again rather than trusting the writes above. It is the
+    # same discovery that chose the locations, so a location it now reports at
+    # the old version is one this tool rewrote wrongly or one it never saw.
+    after = matching(load_checker().discover(), args.name)
+    stale = sorted({v for pin in after for v in getattr(pin, "versions", [pin.version])} - {args.version})
+    print()
+    if stale:
+        print(f"❌ after rewriting, {args.name} still reads {', '.join(stale)} somewhere")
+        print("   the discovery patterns and the rewrite disagree — revert:  git checkout -- .")
+        return 1
+
+    print(f"✅ {args.name} reads {args.version} in every location discovery can see")
+    print()
+    print("Next, and this is the step that decides whether the bump is real:")
+    print("   bin/skeletor-verify")
+    print()
+    print("A bump changes what `black` does to a generated tree and what CI installs.")
+    print("Nothing here judged that; only a full scaffold-and-gate run can.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

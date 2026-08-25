@@ -9,6 +9,7 @@ longer-form material behind them.
 | **[SETUP_GUIDE.md](SETUP_GUIDE.md)**           | You need the full procedure, including branch protection, ratchet baselines, and adoption into an existing repo |
 | **[TIERS.md](TIERS.md)**                       | Choosing a tier, or deciding whether to add one     |
 | **[DESIGN_RATIONALE.md](DESIGN_RATIONALE.md)** | A rule looks like overhead and you want the evidence |
+| **[MAINTENANCE.md](MAINTENANCE.md)**           | The weekly pass: pin reports, bumps, verification, tags |
 
 `AGENTS.md` covers scaffolding (steps 1–3 of the setup guide). The setup guide's
 steps 4–8 — branch protection, the first plan, ratchet baselines, the PR loop,
