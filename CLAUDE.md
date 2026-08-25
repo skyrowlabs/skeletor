@@ -134,13 +134,31 @@ clean under `pyright==1.1.411`. Reintroducing it now turns `governed` and
 `agentic` red and leaves `core` green, which is the tier signature you would
 expect, since `core` ships no `cli/commit.py`.
 
-Two things that gate is careful about, both of them the failure this file exists
-to prevent. It asserts `filesAnalyzed`, because pyright prints `0 errors` just
-as cheerfully when its `include` paths match nothing. And it is the one gate
+Three things that gate is careful about, all of them the failure this file
+exists to prevent. It asserts `filesAnalyzed`, because pyright prints `0 errors`
+just as cheerfully when its `include` paths match nothing. It is the one gate
 that does not use `run()`: `--outputjson` writes its report to stdout and its
 complaints to stderr, so merging the streams makes the JSON unparseable at
-exactly the moment it carries the explanation. A toolchain that cannot be
-fetched is skipped **loudly**, never silently.
+exactly the moment it carries the explanation. And it passes **`--pythonpath`**,
+which is the difference between a check and a coincidence.
+
+That last one shipped broken and CI caught it within the minute. pyright
+resolves imports against an interpreter it finds on PATH; it does **not** read
+the tree's `.venv`, symlinked or otherwise. So the gate checked whatever python
+the machine happened to offer. This developer box has `click` in
+`/usr/lib/python3.14/site-packages`, so every decorator resolved and all three
+tiers were green; the CI runner's `setup-python` has no `click`, so
+`reportMissingImports: none` left `click.group` unresolved, every
+`@group.command()` became an attribute access on an undecorated function, and
+`core`, `governed` and `agentic` came back with 24 errors apiece. Same tree,
+same pyright, opposite answers, decided by a package nobody installed on
+purpose — which is exactly what `pyrightconfig.json`'s own comment warns about,
+and it prescribes the remedy it does: *reproduce a CI result with
+`pyright --pythonpath <the CI interpreter>`*. Reproduce that condition locally
+by putting a click-free interpreter first on PATH; without `--pythonpath` it
+fails identically to CI, with it the two are indistinguishable.
+
+A toolchain that cannot be fetched is skipped **loudly**, never silently.
 
 **Never run `black` directly on `template/`.** It sees `{{PLACEHOLDER}}` rather
 than the value it renders to, so its line-length decisions are made against the

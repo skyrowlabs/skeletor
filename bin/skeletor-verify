@@ -310,7 +310,18 @@ def pyright_gate(tree: Path, venv_python: Path, available: bool) -> List[Result]
     # merging them makes the JSON unparseable exactly when it carries the
     # explanation. Keeping them apart is what lets a bad config report itself.
     proc = subprocess.run(
-        [str(venv_python), "-m", "pyright", *pyright_entry(tree), "--outputjson"],
+        # `--pythonpath` is not optional here, and leaving it off is a green that
+        # means nothing. pyright resolves imports against an interpreter it picks
+        # off PATH — it does NOT read the tree's `.venv`, symlinked or otherwise
+        # — so this gate silently checked whatever python the machine happened to
+        # offer. On a developer box with `click` installed system-wide that is
+        # every decorator resolved and a clean run; on a CI runner whose
+        # setup-python has no `click` it is 24 errors, because
+        # `reportMissingImports` is `none`, so an unresolved `click.group` leaves
+        # the function undecorated and `@group.command()` becomes an attribute
+        # access on a plain function. Same tree, same pyright, opposite answers,
+        # decided by a package nobody installed on purpose.
+        [str(venv_python), "-m", "pyright", *pyright_entry(tree), "--pythonpath", str(venv_python), "--outputjson"],
         cwd=str(tree),
         capture_output=True,
         text=True,
