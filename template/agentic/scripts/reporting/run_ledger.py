@@ -28,9 +28,19 @@ from typing import List, Optional
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.paths import TMP_DIR  # noqa: E402
+from scripts.paths import state_dir  # noqa: E402
 
-LEDGER = TMP_DIR / "reporting" / "ledger.jsonl"
+
+def ledger_path() -> Path:
+    """Where the run ledger lives — resolved, never spelled out.
+
+    A call rather than a module constant so the environment override still
+    works when a test sets it in a fixture: a constant would have frozen the
+    answer at import. The root, and the name of that knob, are
+    `scripts/paths.py::state_dir`'s to state — not this module's.
+    """
+    return state_dir("ledger", "ledger.jsonl")
+
 
 #: Terminal states. `declined` is NOT a failure: a job that correctly chose not
 #: to answer (the tree was on the wrong branch, a queue was not quiet) executed
@@ -73,15 +83,17 @@ class Run:
 
 def record(run: Run) -> None:
     run.validate()
-    LEDGER.parent.mkdir(parents=True, exist_ok=True)
-    with LEDGER.open("a", encoding="utf-8") as handle:
+    ledger = ledger_path()
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    with ledger.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(asdict(run)) + "\n")
 
 
 def recent(limit: int = 50) -> List[dict]:
-    if not LEDGER.exists():
+    ledger = ledger_path()
+    if not ledger.exists():
         return []
-    lines = LEDGER.read_text(encoding="utf-8").splitlines()[-limit:]
+    lines = ledger.read_text(encoding="utf-8").splitlines()[-limit:]
     out = []
     for line in lines:
         try:

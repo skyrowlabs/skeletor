@@ -44,6 +44,7 @@ Stdlib only, and imported by `cli/` and `scripts/` alike.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 #: The repository root. The only place in the tree this is worked out.
@@ -68,6 +69,43 @@ SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 TESTS_DIR = PROJECT_ROOT / "tests"
 GITHUB_DIR = PROJECT_ROOT / ".github"
 
-#: Scratch, and gitignored. Ledgers, tree locks, coverage XML, merge markers —
-#: everything whose lifetime is a run rather than a commit.
+#: Scratch, and gitignored. Tree locks, coverage XML, merge markers — everything
+#: whose lifetime is a run rather than a commit, and which nothing will want
+#: next week. The record of what ran is **not** here; see `state_dir` below.
 TMP_DIR = PROJECT_ROOT / "tmp"
+
+
+# ── State: the record, outside the checkout ──────────────────────────────────
+#: The workspace-wide root for the agentic record — transcripts, ledgers,
+#: per-job memory, the payloads agent stages read. Deliberately **not** under
+#: `PROJECT_ROOT`, and that is the whole point: it outlives any one checkout, is
+#: shared by every worktree of this repo, and cannot be reached by
+#: `git clean -fdx`. See `~/skyrow.labs/sl-agent-logs/README.md`.
+STATE_ROOT_ENV = "SL_AGENT_LOGS"
+STATE_ROOT_DEFAULT = Path.home() / "skyrow.labs" / "sl-agent-logs"
+
+#: This project's directory under that root. Written in rather than taken from
+#: `PROJECT_ROOT.name`, because a **linked worktree's directory is not the
+#: slug**: a job running in a pool tree would otherwise resolve to a private
+#: state root of its own, which is precisely the per-tree scattering this
+#: layout exists to end. The slug is a fact about the project, not about which
+#: copy of it you happen to be standing in.
+STATE_SLUG = "{{PROJECT_SLUG}}"
+
+
+def state_dir(*parts: str) -> Path:
+    """This project's state root, plus any path below it.
+
+    A function rather than a constant, unlike everything above, and for one
+    reason: a constant freezes the override at import time, so a test that sets
+    the environment variable in a fixture gets the live path anyway. The knob
+    has to be read when the path is used or it is not a knob.
+
+    **One resolver for readers and the writer alike.** Split them — define the
+    write path here and the read path in the module that consumes it — and a
+    test can point the write at a scratch file while the read still finds the
+    live one. It passes, and proves nothing. That is not hypothetical: it is
+    why this function exists instead of the three definitions it replaced.
+    """
+    root = os.environ.get(STATE_ROOT_ENV) or STATE_ROOT_DEFAULT
+    return Path(root, STATE_SLUG, *parts)

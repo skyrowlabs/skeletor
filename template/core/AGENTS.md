@@ -118,7 +118,8 @@ Both indexes are generated; never hand-edit them. Full rules in `docs/rules/docs
 ### 10. No Temp Files in the Project Root
 
 Use tool-based file editing. If a scratch file is genuinely necessary it goes in `tmp/`
-(gitignored).
+(gitignored). `tmp/` is for things nothing will want next week — the record of what
+ran is not a temp file and does not go there. See Rule 14.
 
 ### 11. Anything That Stands Up the Stack Stays in Sync
 
@@ -159,6 +160,19 @@ a machine-readable flag is one extra emit rather than a second code path. Every
 ones that pass. `{{CLI}} check output` enrols every file under `cli/` and
 `scripts/` by pattern; exceptions go in `scripts/output_allowlist.yaml` with a
 reason. Full rules in `docs/rules/output.md`.
+
+### 14. Agent State Goes Through the Resolver
+
+Transcripts, ledgers, per-job memory and the payloads agent stages read live under
+`~/skyrow.labs/sl-agent-logs/{{PROJECT_SLUG}}/`, never in this checkout. A record that
+lives in a working tree is one `git clean -fdx` from gone, and is invisible to every
+other worktree of this repo.
+
+Reach it with `state_dir()` from `scripts/paths.py`. **Never a literal path, and never
+a second definition of one.** The second is the one that looks fine in review: split
+the resolver and a test can point the write at a scratch file while the read still
+finds the live one — it passes, and proves nothing. `tests/test_state_paths.py` holds
+this line; run it rather than trusting the rule.
 
 ---
 
