@@ -92,6 +92,17 @@ STATE_ROOT_DEFAULT = Path.home() / "skyrow.labs" / "sl-agent-logs"
 #: copy of it you happen to be standing in.
 STATE_SLUG = "{{PROJECT_SLUG}}"
 
+#: The classes the state root is divided into, named so a caller asks for one
+#: rather than spelling a directory — and so a retention sweep has a single list
+#: to walk instead of a pattern to guess. Retention differs per class, which is
+#: the reason they are directories at all.
+LOG = "log"  # the transcript: what every run printed
+LEDGER = "ledger"  # append-only structured record, trimmed on write
+INPUT = "input"  # the payload an agent stage actually read
+MEMORY = "memory"  # what a job saw last time; overwritten every run
+INFLIGHT = "inflight"  # what is running right now; removed in a `finally`
+PRODUCT = "product"  # a job's own output, overwritten every run
+
 
 def state_dir(*parts: str) -> Path:
     """This project's state root, plus any path below it.

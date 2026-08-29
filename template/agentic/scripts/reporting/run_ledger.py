@@ -28,7 +28,7 @@ from typing import List, Optional
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.paths import state_dir  # noqa: E402
+from scripts.paths import LEDGER, state_dir  # noqa: E402
 
 
 def ledger_path() -> Path:
@@ -39,7 +39,7 @@ def ledger_path() -> Path:
     answer at import. The root, and the name of that knob, are
     `scripts/paths.py::state_dir`'s to state — not this module's.
     """
-    return state_dir("ledger", "ledger.jsonl")
+    return state_dir(LEDGER, "ledger.jsonl")
 
 
 #: Terminal states. `declined` is NOT a failure: a job that correctly chose not
