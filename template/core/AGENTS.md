@@ -174,6 +174,11 @@ the resolver and a test can point the write at a scratch file while the read sti
 finds the live one — it passes, and proves nothing. `tests/test_state_paths.py` holds
 this line; run it rather than trusting the rule.
 
+`state_dir()` being a function does not help a caller that freezes it: a module-level
+`LEDGER = state_dir(...)` is evaluated at import, so a fixture setting the environment
+runs too late and the suite writes to the live record with every test green. Resolve at
+the point of use, or set the variable at `conftest.py` import time.
+
 ---
 
 ## Documentation Reference

@@ -112,6 +112,15 @@ def state_dir(*parts: str) -> Path:
     the environment variable in a fixture gets the live path anyway. The knob
     has to be read when the path is used or it is not a knob.
 
+    **A function here does not save a caller that freezes it.** A module opening
+    with ``LEDGER = state_dir(LEDGER, "ledger.jsonl")`` has evaluated this at
+    import, and a fixture's ``monkeypatch.setenv`` runs long after that — so the
+    suite writes to the live record and every test still passes. Resolve at the
+    point of use, or set the variable at ``conftest.py`` import time. It is
+    invisible by construction: ``test_state_paths.py`` excludes shared
+    append-only files, correctly, which also means it cannot catch a test
+    appending to them.
+
     **One resolver for readers and the writer alike.** Split them — define the
     write path here and the read path in the module that consumes it — and a
     test can point the write at a scratch file while the read still finds the
