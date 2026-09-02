@@ -639,6 +639,20 @@ not "nobody ran it". It was run, it disagreed, and believing the comment would
 have cost nothing until the day a default changed somewhere else. Say what a
 claim depends on, and it stops being a coincidence you are relying on.
 
+**Not every fact should be promoted, and the split is now-versus-always.** An
+invariant — these two files pin the same version, every `script()` names a file
+that exists, this allowlist holds no stale entries — is checkable forever, and an
+assertion is its right home. A *contingent* fact is not: proto.pilot's dead-symbol
+check excludes `NOTES.md` by role and observes that the exclusion exempts nothing
+today, which is true and is expected to stop being true, because that file is
+meant to eventually name a removed symbol. Asserting it would build a gate that
+goes red the day the thing it guards starts working — the inverse of a ratchet,
+and a worse failure than the comment it replaced. The honest form for a
+contingent fact is what that one has: a dated observation, stated as an
+observation. Same discipline as separating a perishable reason from a durable
+one, and it resists being made into a rule for the same reason — telling the two
+apart is a judgement about what the claim is *for*.
+
 The other half of what made all three findable is not a rule at all, and cannot
 be turned into one here: a second person naming the shape while somebody happened
 to be looking at the right file. A rule on the wall is not a check. It is a thing
