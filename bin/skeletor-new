@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Set
 
@@ -299,6 +300,51 @@ def produced_files(written: List[str], after_copy: Dict[str, str], final: Dict[s
     return {rel for rel in produced if rel in final}
 
 
+def pristine_post_copy(target: Path, written: List[str], values: Dict[str, str]) -> Dict[str, str]:
+    """Hashes of the post-copy steps run against the render ALONE, with nothing
+    of the target's own in the tree.
+
+    The manifest has to record what the base render produces, because that is
+    what `skeletor-upgrade` re-renders and compares against — and for most files
+    the render is simply what was written. Two steps break that: both
+    `register_shipped_docs` and `regen.py` read the tree they are writing into,
+    so in a `--force` scaffold they read the user's files too. proto.pilot had a
+    `docs/hosted.md` of its own, `register_shipped_docs` dutifully gave it a row
+    in `.github/DOCS_INDEX.md` — correctly, that is the step's whole job — and
+    the recorded hash was then of a file no render of those arguments can ever
+    produce. Every later upgrade refused, on a hash rather than a surplus entry,
+    which pruning cannot repair.
+
+    Recording the *contaminated* hash is not a near miss either. In the
+    hash-only fallback the recorded value stands in for the old render on both
+    sides of the matrix, so a file the user never touched would read as
+    "template moved, user untouched" and get overwritten with a render that has
+    no row for their doc. Silent loss of exactly the content the step was
+    written to add.
+
+    So the post-copy steps run twice on a populated target: once on the tree,
+    which is what the user wants, and once here on a copy holding only the
+    rendered files — which at this moment is byte-for-byte the pristine render,
+    since the steps have not run yet. The second pass costs a file copy and one
+    subprocess, and is skipped entirely for the empty-directory case, where the
+    two are the same tree by definition.
+    """
+    with tempfile.TemporaryDirectory(prefix="skeletor-pristine-") as scratch:
+        clean = Path(scratch)
+        for rel in written:
+            source = target / rel
+            if not source.is_file():
+                continue
+            destination = clean / rel
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+        (clean / "tmp").mkdir(exist_ok=True)
+        (clean / "tmp" / ".gitkeep").touch()
+        register_shipped_docs(clean, values)
+        subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(clean), capture_output=True)
+        return hash_tree(clean)
+
+
 def write_manifest(target: Path, args, overlays: List[str], files: Dict[str, str]) -> Path:
     """Record how this tree was generated, so an upgrade can reproduce it.
 
@@ -404,7 +450,8 @@ def main() -> int:
     args = parser.parse_args()
 
     target = Path(args.target).expanduser().resolve()
-    if target.exists() and any(target.iterdir()) and not args.force:
+    populated = target.exists() and any(target.iterdir())
+    if populated and not args.force:
         print(f"❌ {target} exists and is not empty (pass --force to write into it)")
         return 1
 
@@ -444,6 +491,7 @@ def main() -> int:
     # whose first `check docs` is red teaches that red is normal, and a gate
     # people have learned to expect red from is a gate that has stopped working.
     after_copy = hash_tree(target)
+    pristine = pristine_post_copy(target, written, values) if populated else {}
     register_shipped_docs(target, values)
     subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(target), capture_output=True)
 
@@ -453,7 +501,10 @@ def main() -> int:
     # apart from files that were simply already here — see `produced_files`.
     final = hash_tree(target)
     produced = produced_files(written, after_copy, final)
-    write_manifest(target, args, overlays, {rel: final[rel] for rel in sorted(produced)})
+    # `pristine` wins where it has an answer: it is what the base render makes,
+    # and `final` is what this tree ended up with. They differ only for a file a
+    # post-copy step derived from something that was already here.
+    write_manifest(target, args, overlays, {rel: pristine.get(rel, final[rel]) for rel in sorted(produced)})
 
     committed = False
     if not args.no_git and not (target / ".git").exists():

@@ -204,6 +204,61 @@ def cross_check(base_files: Dict[str, Path], recorded: Dict[str, str]) -> List[s
     return disagreements
 
 
+def repair_manifest(target: Path, manifest: dict, base_files: Dict[str, Path], args) -> int:
+    """Rewrite the `files` map from the base render, and stop.
+
+    For one situation only: a manifest written by a version of skeletor that
+    recorded the wrong thing. The first release recorded a walk of the target
+    directory, so a `--force` scaffold into a populated repository recorded the
+    user's own files as skeletor output, and — one layer subtler — recorded a
+    hash for `.github/DOCS_INDEX.md` that included a row for a doc of theirs.
+
+    A surplus entry can be deleted by hand. A *wrong* one cannot: the correct
+    value is a hash of a render, and only skeletor can produce that render. So
+    the repair is not a repair of the file, it is a re-derivation — the base
+    render is standing right here, having just been produced from the arguments
+    the manifest itself records, and hashing it is the definition of the value
+    that belongs in the map.
+
+    It deliberately does no upgrading. Repair, look at what it says, then run
+    the upgrade: a flag that silently fixed the manifest on its way past would
+    make `cross_check` unable to refuse anything, which is the one guarantee the
+    fallback rests on.
+    """
+    recorded: Dict[str, str] = manifest.get("files") or {}
+    rebuilt = {rel: sha256(path) for rel, path in sorted(base_files.items())}
+
+    surplus = sorted(set(recorded) - set(rebuilt))
+    missing = sorted(set(rebuilt) - set(recorded))
+    wrong = sorted(rel for rel in set(recorded) & set(rebuilt) if recorded[rel] != rebuilt[rel])
+
+    if not (surplus or missing or wrong):
+        say("✅", f"{MANIFEST_NAME} already matches the base render — nothing to repair")
+        return 0
+
+    say("→", f"{MANIFEST_NAME}: {len(recorded)} recorded → {len(rebuilt)} from the base render")
+    for label, entries in (("not produced by the render", surplus), ("wrong hash", wrong),
+                           ("produced but unrecorded", missing)):
+        if entries:
+            detail(f"{len(entries)} {label}:")
+            for rel in entries[:10]:
+                item(rel)
+            if len(entries) > 10:
+                detail(f"… and {len(entries) - 10} more")
+
+    if args.json:
+        print(json.dumps({"ok": True, "repaired": not args.dry_run, "surplus": surplus,
+                          "wrong": wrong, "missing": missing}, indent=2))
+    if args.dry_run:
+        say("⏸️ ", "dry run — the manifest was not written")
+        return 0
+
+    manifest["files"] = rebuilt
+    (target / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    say("✅", f"{MANIFEST_NAME} rewritten. Run the upgrade now; nothing else was touched.")
+    return 0
+
+
 def read(path: Optional[Path]) -> Optional[str]:
     if path is None or not path.exists():
         return None
@@ -253,6 +308,12 @@ def main() -> int:
         "'what have I edited?' without git, but cannot merge.",
     )
     parser.add_argument("--json", action="store_true", help="emit the result on stdout as well")
+    parser.add_argument(
+        "--repair-manifest",
+        action="store_true",
+        help="rewrite the manifest's `files` map from the base render, then stop. "
+        "For a manifest written by a version of skeletor that recorded the wrong thing.",
+    )
     args = parser.parse_args()
 
     target = Path(args.target).expanduser().resolve()
@@ -271,6 +332,12 @@ def main() -> int:
     cleanup_worktree: Optional[Path] = None
     try:
         base_src: Optional[Path] = None
+        if args.no_base and args.repair_manifest:
+            # The correct hashes ARE the base render's. Without one there is
+            # nothing to derive them from, and the alternative — keeping what is
+            # there and calling it repaired — is the only outcome worse than
+            # refusing, since it would look like the manifest had been checked.
+            die("--repair-manifest needs the base render it repairs from; drop --no-base")
         if args.no_base:
             if not hashes:
                 die("--no-base needs the `files` hashes, and this manifest has none")
@@ -302,6 +369,8 @@ def main() -> int:
             base_tree = workdir / "base"
             render_with(base_src, recorded, base_tree)
             base_files = files_under(base_tree)
+            if args.repair_manifest:
+                return repair_manifest(target, manifest, base_files, args)
             if hashes:
                 drift = cross_check(base_files, hashes)
                 if drift:
@@ -314,6 +383,14 @@ def main() -> int:
                     detail("The recorded hashes are the fallback used when history is unreachable,")
                     detail("so a manifest that cannot describe its own base would silently classify")
                     detail("an edited file as untouched. Refusing rather than guessing.")
+                    detail()
+                    detail("If the manifest was written by an older skeletor rather than edited by")
+                    detail("hand, --repair-manifest rewrites it from this base render.")
+                    # The full list on stdout when something is parsing this. A
+                    # consumer that reads the truncated human list sees a fifth
+                    # of the problem and believes it has all of it.
+                    if args.json:
+                        print(json.dumps({"ok": False, "error": "manifest-drift", "drift": drift}, indent=2))
                     return 1
 
         added, updated, merged, conflicted, kept, dropped = [], [], [], [], [], []

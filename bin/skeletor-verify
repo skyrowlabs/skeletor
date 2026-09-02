@@ -994,6 +994,15 @@ def populated_tree_gate(tier: str, workdir: Path) -> List[Result]:
     (populated / "src" / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
     (populated / ".pytest_cache" / "lastfailed").write_text("{}\n", encoding="utf-8")
     (populated / "README.md").write_text("# Theirs\n\nnot skeletor's.\n", encoding="utf-8")
+    # The fourth shape, and the one the first three decoys could not reach: a
+    # doc of the user's own, which `register_shipped_docs` correctly registers
+    # into `.github/DOCS_INDEX.md`. That makes a SHIPPED file's content depend
+    # on a file the base render has never heard of — so the manifest can hold a
+    # hash no render of those arguments reproduces, which pruning cannot repair
+    # and which only the upgrade below can see. proto.pilot hit it; the three
+    # decoys above were all files skeletor ignores, and this one it reads.
+    (populated / "docs").mkdir(parents=True, exist_ok=True)
+    (populated / "docs" / "adopted.md").write_text("# Adopted\n\nours, from before.\n", encoding="utf-8")
 
     result, target = scaffold(tier, "python", workdir, name="populated")
     results.append(Result(f"populated: {result.label}", result.ok, result.seconds, result.output))

@@ -335,6 +335,32 @@ cannot rot unnoticed. Note also what a match proves — an equal hash means the
 file *is* byte-for-byte what skeletor generated, so replacing it cannot lose an
 edit that was never made. That is why the fallback is allowed to write at all.
 
+Two post-copy steps make "what skeletor produces" harder than it looks, and the
+first consumer found the difference. `register_shipped_docs` and `regen.py` both
+*read* the tree they write into, so in a `--force` scaffold they read the user's
+files too: proto.pilot had a `docs/hosted.md`, that step correctly gave it a row
+in `.github/DOCS_INDEX.md`, and the manifest then recorded a hash of a file no
+render of those arguments can produce. Every later upgrade refused — this time on
+a wrong hash rather than a surplus entry, which is the worse of the two, because
+a surplus entry can be deleted by hand and a wrong one cannot. Recording it was
+not a near miss either: in the offline fallback that file would read as "template
+moved, user untouched" and be overwritten with a render that has no row for their
+doc, silently losing the thing the step exists to add.
+
+So on a populated target the post-copy steps run **twice** — once on the tree,
+which is what the user wants, and once in `pristine_post_copy()` on a copy holding
+only the rendered files, which at that instant is byte-for-byte the base render.
+The second run is what the manifest records. It costs a file copy and one
+subprocess, and is skipped entirely for an empty target, where the two trees are
+the same by definition.
+
+For a manifest already written by a version that got this wrong,
+`bin/skeletor-upgrade --repair-manifest` re-derives the whole map from the base
+render standing in front of it and stops without upgrading. It has to be a
+re-derivation rather than an edit, because the correct value is a hash of a render
+and only skeletor can produce that render. It refuses under `--no-base` for the
+same reason.
+
 The hashes recorded are of **what skeletor produces**, never of what is on disk.
 The difference decides whether the next upgrade destroys work: a merged file is
 neither the old render nor the new one, so hashing the tree would record it as
