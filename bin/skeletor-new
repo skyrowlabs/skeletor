@@ -300,6 +300,28 @@ def produced_files(written: List[str], after_copy: Dict[str, str], final: Dict[s
     return {rel for rel in produced if rel in final}
 
 
+def post_copy_steps(tree: Path, values: Dict[str, str]) -> None:
+    """Everything the scaffolder does after the overlays are on disk.
+
+    Register whatever docs the chosen overlays actually shipped, then generate
+    the indexes, so the tree's own checks pass on the first run. A scaffold whose
+    first `check docs` is red teaches that red is normal, and a gate people have
+    learned to expect red from is a gate that has stopped working.
+
+    It is a function rather than two lines inlined at the call site **because
+    there are two call sites** — here on the real tree, and again in
+    `pristine_post_copy` on a copy holding only the render. Written out twice
+    they would be two sequences that merely look alike, and a third step added to
+    one of them would go in silently: the manifest would record a hash the base
+    render cannot produce, every upgrade would refuse, and the failure would
+    surface in somebody else's repository weeks later. That is exactly the defect
+    this pass exists to fix, so the shape that reintroduces it does not get to
+    live here.
+    """
+    register_shipped_docs(tree, values)
+    subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(tree), capture_output=True)
+
+
 def pristine_post_copy(target: Path, written: List[str], values: Dict[str, str]) -> Dict[str, str]:
     """Hashes of the post-copy steps run against the render ALONE, with nothing
     of the target's own in the tree.
@@ -322,7 +344,7 @@ def pristine_post_copy(target: Path, written: List[str], values: Dict[str, str])
     no row for their doc. Silent loss of exactly the content the step was
     written to add.
 
-    So the post-copy steps run twice on a populated target: once on the tree,
+    So `post_copy_steps` runs twice on a populated target: once on the tree,
     which is what the user wants, and once here on a copy holding only the
     rendered files — which at this moment is byte-for-byte the pristine render,
     since the steps have not run yet. The second pass costs a file copy and one
@@ -340,8 +362,7 @@ def pristine_post_copy(target: Path, written: List[str], values: Dict[str, str])
             shutil.copy2(source, destination)
         (clean / "tmp").mkdir(exist_ok=True)
         (clean / "tmp" / ".gitkeep").touch()
-        register_shipped_docs(clean, values)
-        subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(clean), capture_output=True)
+        post_copy_steps(clean, values)
         return hash_tree(clean)
 
 
@@ -486,14 +507,9 @@ def main() -> int:
     (target / "tmp").mkdir(exist_ok=True)
     (target / "tmp" / ".gitkeep").touch()
 
-    # Register whatever docs the chosen overlays actually shipped, then generate
-    # the indexes, so the tree's own checks pass on the first run. A scaffold
-    # whose first `check docs` is red teaches that red is normal, and a gate
-    # people have learned to expect red from is a gate that has stopped working.
     after_copy = hash_tree(target)
     pristine = pristine_post_copy(target, written, values) if populated else {}
-    register_shipped_docs(target, values)
-    subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(target), capture_output=True)
+    post_copy_steps(target, values)
 
     # Last, and after the two steps above: both write files, and a manifest
     # hashed before them would describe a tree that no longer exists. The two
