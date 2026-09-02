@@ -603,6 +603,47 @@ gate needing four exemptions on its first run is describing the wrong shape.
 Asking git instead — did this repository ever define that name — has no
 exemptions at all.
 
+### The cost of the rule that every rule carries its reason
+
+This document's first principle manufactures the artifact class that is hardest
+to keep true. **A claim in a docstring or a comment is the least-checked prose in
+a repository**: it reads as already verified, so nobody re-derives it, and
+nothing recomputes it. Three of the six defects found on 2026-09-01 were code
+contradicting a comment sitting directly above it, and all three yielded to the
+same method — somebody ran the thing — and to no amount of reading.
+
+- `bin/skeletor-verify`'s actionlint gate gave its reason as "the tree has no
+  actionlint hook", two sentences from a note saying such a hook would be a good
+  change. A reason with its own trigger on the same page.
+- `pristine_post_copy` existed because the manifest had recorded something no
+  render produces, and held a second literal copy of the post-copy sequence — the
+  duplication sitting inside the apology for that duplication's consequence.
+- A comment in `ci.yml` claimed a malformed `pyproject.toml` fails the step
+  loudly. The first run showed it printing a traceback and carrying on to install
+  the wrong thing; it is true only under a shell that sets `-e`, which GitHub
+  happens to provide. A guarantee that holds by accident reads exactly like one
+  that holds by design.
+
+The remedy is not fewer comments — the rule earns its place, and the alternative
+is rules nobody can evaluate. It is to keep two kinds of claim apart:
+
+- **Why something is done** is a judgement. No machine checks it, it does not
+  rot on its own, and writing it down is the whole point.
+- **What the code does** is a fact, and a fact in a comment is a *test that never
+  runs*. Either check it — `test_lint_tool_parity.py` and the manifest
+  cross-check are both a comment somebody turned into an assertion — or run the
+  thing and say what the answer depended on.
+
+The third example is the one to remember, because it is the hardest class: it was
+not "nobody ran it". It was run, it disagreed, and believing the comment would
+have cost nothing until the day a default changed somewhere else. Say what a
+claim depends on, and it stops being a coincidence you are relying on.
+
+The other half of what made all three findable is not a rule at all, and cannot
+be turned into one here: a second person naming the shape while somebody happened
+to be looking at the right file. A rule on the wall is not a check. It is a thing
+you agree with while doing something else.
+
 This paragraph is itself the second instance. The reason was fixed in
 `badges()` and in `CLAUDE.md` within a minute of the trigger change, and stood
 stale here for an hour, in the document [`CLAUDE.md`](../CLAUDE.md) calls *the
