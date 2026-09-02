@@ -593,6 +593,16 @@ badge is a claim about what was released" survives any fix anywhere. When you
 close a defect, the rules justified *by* it are now justified by nothing — and
 they will not tell you. Go and re-read them.
 
+The semantic half of that cannot be a test: nothing can read "because X is broken"
+and go check whether X still is. The mechanical cousin can, and the scaffold now
+ships it — `tests/test_docs_name_live_code.py` fails when a reference doc names a
+callable the tree used to define. It came from proto.pilot, which built it after
+this exchange and found the useful predicate on the second attempt: "every
+backticked call must resolve" flagged four correct references out of five, and a
+gate needing four exemptions on its first run is describing the wrong shape.
+Asking git instead — did this repository ever define that name — has no
+exemptions at all.
+
 This paragraph is itself the second instance. The reason was fixed in
 `badges()` and in `CLAUDE.md` within a minute of the trigger change, and stood
 stale here for an hour, in the document [`CLAUDE.md`](../CLAUDE.md) calls *the

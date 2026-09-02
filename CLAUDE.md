@@ -469,6 +469,18 @@ interlock, and which you cannot understand from one file:
   `cli/report.py` *generates* its subcommands from it, and
   `tests/test_reporting_jobs.py` asserts both directions plus the prompt files,
   heartbeat variables and cron-collision rules.
+- **The dead-reference check and its clone depth.**
+  `tests/test_docs_name_live_code.py` fails when a reference doc names a callable
+  the tree once defined and no longer does — it asks git, so a name that was never
+  the tree's own is out of scope by construction rather than by allowlist, and the
+  narrative stages of the docs lifecycle are excluded by role, read from
+  `scripts/paths.py`. It is a ratchet at 0: a one-commit scaffold cannot have
+  removed anything. The interlock is `ci.yml`, whose unit job checks out with
+  `fetch-depth: 0` **because of this test** — `git log --all` answers "never
+  defined" for everything in a shallow clone, so the check would pass having
+  looked at nothing. It asserts the clone is not shallow rather than trusting it,
+  which turns that silent pass into a loud failure; the fetch depth is what makes
+  it pass honestly instead.
 
 ---
 
