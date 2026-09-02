@@ -393,7 +393,7 @@ def main() -> int:
                         print(json.dumps({"ok": False, "error": "manifest-drift", "drift": drift}, indent=2))
                     return 1
 
-        added, updated, merged, conflicted, kept, dropped = [], [], [], [], [], []
+        added, updated, merged, conflicted, collided, kept, dropped = [], [], [], [], [], [], []
         patches = target / "tmp" / "upgrade"
 
         for rel in sorted(set(base_files) | set(head_files)):
@@ -423,8 +423,22 @@ def main() -> int:
                 # recorded hash, which answers "untouched?" and nothing else.
                 recorded_hash = hashes.get(rel)
                 if recorded_hash is None:
+                    # Never recorded, so skeletor never wrote it: the user had a
+                    # file here before the template claimed the path. Handled the
+                    # same as a conflict and named differently, because the name
+                    # is what the reader acts on. "You edited this" sends them to
+                    # `git log` for a change they never made; the truth sends them
+                    # to the question that is actually in front of them, which is
+                    # whether two files written for the same purpose should now be
+                    # one — a choice between implementations, not a hunk to port.
+                    # The manifest draws the line exactly: an entry with a
+                    # different hash is an edit, no entry at all is a collision.
                     if theirs != ours:
-                        conflicted.append(rel)
+                        collided.append(rel)
+                        if not args.dry_run:
+                            sidecar = patches / f"{rel}.new"
+                            sidecar.parent.mkdir(parents=True, exist_ok=True)
+                            sidecar.write_text(ours, encoding="utf-8")
                     continue
 
                 # The recorded hash is the hash of the OLD RENDER, so it answers
@@ -503,6 +517,7 @@ def main() -> int:
                         "updated": updated,
                         "merged": merged,
                         "conflicted": conflicted,
+                        "collided": collided,
                         "dropped": dropped,
                     },
                     indent=2,
@@ -535,13 +550,23 @@ def main() -> int:
             else:
                 detail("tmp/upgrade/<path>.patch — port it by hand.")
 
+        if collided:
+            say("❌", f"{len(collided)} file(s) you already had where the template now ships one")
+            for rel in collided:
+                item(rel)
+            detail()
+            detail("Not an edit — these were never in your manifest, so skeletor never wrote")
+            detail("them. Two files written for the same purpose now want the same path, and")
+            detail("which one survives is a judgement only you can make. The template's is in")
+            detail("tmp/upgrade/<path>.new; yours is untouched where it has always been.")
+
         if dropped:
             say("⚠️ ", f"{len(dropped)} file(s) the template no longer ships — NOT deleted")
             for rel in dropped:
                 item(rel)
             detail("Delete them yourself if you agree. This never removes your files.")
 
-        if not any((added, updated, merged, conflicted, dropped)):
+        if not any((added, updated, merged, conflicted, collided, dropped)):
             say("✅", "already current — nothing to carry over")
             return 0
 
@@ -550,7 +575,7 @@ def main() -> int:
             say("⏸️ ", "dry run — nothing was written")
         else:
             say("✅", "nothing was committed. Read the diff, then commit as one `chore(skeletor):` change")
-        return 1 if conflicted else 0
+        return 1 if (conflicted or collided) else 0
     finally:
         if cleanup_worktree is not None:
             subprocess.run(

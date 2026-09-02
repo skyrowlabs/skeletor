@@ -366,6 +366,17 @@ The difference decides whether the next upgrade destroys work: a merged file is
 neither the old render nor the new one, so hashing the tree would record it as
 pristine and the following run would overwrite the merge.
 
+A file the user had *before* the template claimed its path is reported as its own
+category, not as an edit. The handling is identical — left alone, template's
+version to `tmp/upgrade/`, never overwritten — and only the sentence differs,
+because the sentence is what the reader acts on: "you edited this" sends somebody
+to `git log` for a change they never made, when the real question is whether two
+files written for the same purpose should now be one. The manifest draws that line
+exactly, which is why it costs nothing: an entry with a different hash is an edit,
+no entry at all is a collision. proto.pilot hit it on a test file it had written
+by hand — the same one whose design this template then adopted, so the collision
+was with its own idea arriving back as ours.
+
 `skeletor-verify` runs `skeletor-upgrade --dry-run` against every fresh scaffold
 twice — once `--from-dir .` and once `--no-base` — and requires "already
 current" from both. The offline pass matters most: it is the path nobody runs by
