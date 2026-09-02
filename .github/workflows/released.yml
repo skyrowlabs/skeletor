@@ -1,0 +1,44 @@
+name: Tell the site
+
+# skeletor's version segment on skyrowlabs.com is baked into index.html by that
+# repo's badges.py. Its only trigger was a daily cron, so a tag cut after the
+# run sat unannounced until the next morning — v0.2.0 did exactly that on
+# 2026-09-01. This closes the gap: the tag push tells the site, and the site
+# decides what to do about it.
+#
+# It posts an event, not a command. `project-released` is the site's published
+# type and every project repo sends the same one; which workflows respond, and
+# what they rewrite, stays the site's business. Nothing here knows what a badge
+# is.
+on:
+  push:
+    tags: ['v*']
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      # SITE_DISPATCH_TOKEN is an org secret: a fine-grained PAT whose only
+      # grant is Actions: Read and write on skyrowlabs/skyrowlabs.com. Every
+      # repo that ships this workflow reads the same secret, so going public
+      # with the next project costs a file, not another token.
+      #
+      # This must not fail the tag. A stale bar on a marketing page is not a
+      # reason to redden a release, and the site's own cron picks the tag up
+      # within the day regardless — so the step reports and moves on.
+      - name: Post project-released to skyrowlabs.com
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "SITE_DISPATCH_TOKEN is not set — the site will catch up on its cron."
+            exit 0
+          fi
+          gh api repos/skyrowlabs/skyrowlabs.com/dispatches \
+            -f event_type=project-released \
+            -f 'client_payload[project]=skeletor' \
+            -f "client_payload[version]=${GITHUB_REF_NAME}" \
+            && echo "asked the site to refresh for ${GITHUB_REF_NAME}"
