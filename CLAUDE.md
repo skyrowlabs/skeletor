@@ -172,10 +172,20 @@ picked, and a round 120 sat past the band and caught nothing.
 The README badge row is gated in both directions, because both directions are
 the same bug: a default scaffold must open with title, blank line, tagline and
 no badges at all (`--org` defaults to `OWNER`, which names no repository), and
-an `--org` scaffold must carry a CI badge pinned to the *release* branch
-(`ci.yml` has no `push` trigger for the branch `git init -b` creates, so a bare
-badge reads "no status" forever). A badge that is broken or permanently grey is
-a gate that is red on arrival wearing a cosmetic hat.
+an `--org` scaffold must carry a CI badge pinned to the *release* branch (a
+badge answers "should I expect this to work", which is a question about what was
+released). A badge that is broken or permanently grey is a gate that is red on
+arrival wearing a cosmetic hat.
+
+That pin was originally load-bearing for a stronger reason — `ci.yml` had no
+`push` trigger for the branch `git init -b` creates, so a bare badge read "no
+status" forever. proto.pilot found what that trigger actually cost: a repo that
+commits straight to its base branch, which every project does while it is one
+person, ran no CI at all, and three commits landed before anybody noticed,
+because "no workflow ran" and "the workflow passed" are the same absence of red
+from the terminal. The base branch is in the `push` trigger now. The badge stays
+pinned, but on the weaker of its two reasons, and both are written down so the
+next reader can tell which one they are holding.
 
 The **populated tree** is the newest, and it is the first gate here that an
 outside consumer wrote the bug report for. Every other tree is generated into a

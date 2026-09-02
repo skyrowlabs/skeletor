@@ -104,10 +104,17 @@ def badges(args, slug: str) -> str:
 
     The CI badge is pinned to `--release-branch` and labelled for it. A bare
     workflow badge reports the repository's DEFAULT branch, which is the
-    `--base-branch` this scaffolder actually creates (`git init -b`), and
-    `ci.yml` has no `push` trigger for that branch at all — only for the release
-    branch. The honest-looking badge is therefore the one that reads "no status"
-    for the life of a perfectly healthy project.
+    `--base-branch` this scaffolder actually creates (`git init -b`) — and a
+    badge answers "should I expect this to work", which is a question about
+    what was released, not about what is being worked on. Pinning it is what
+    makes the label honest.
+
+    That pin used to be load-bearing for a second and much worse reason: `ci.yml`
+    had no `push` trigger for the base branch at all, so an unpinned badge read
+    "no status" for the life of a perfectly healthy project. It now does have
+    one, and that hazard is gone — recorded here because the remaining reason is
+    a preference about meaning where the old one was a defect, and somebody
+    re-reading this should know which kind of rule they are looking at.
 
     The trailing blank line is part of the return value: an empty row must leave
     the tagline sitting directly under the title, with no double blank line for

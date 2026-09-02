@@ -567,12 +567,39 @@ first release, wrong forever after. The release badge is instead a *view* of the
 latest GitHub release, the same tag `get_version()` reads through `git
 describe`. There is nothing to keep in sync because there is no copy.
 
-The CI badge is pinned to `--release-branch` and labelled for it. A bare
-workflow badge reports the repository's **default** branch — which is the
-`--base-branch` that `skeletor-new` creates with `git init -b` — and `ci.yml`
-runs on `push` for the release branch alone. So the obvious badge reads "no
-status" for the life of a perfectly healthy project, and the fix changes what it
-claims: not "is the trunk green" but "is the last release green."
+The CI badge is pinned to `--release-branch` and labelled for it, and it changes
+what the badge claims: not "is the trunk green" but "is the last release green."
+A bare workflow badge reports the repository's **default** branch — the
+`--base-branch` that `skeletor-new` creates with `git init -b` — and that is a
+different question. A badge is read by somebody deciding whether to depend on
+this, so it should answer the released one.
+
+That is the reason today. It is **not** the reason the pin was introduced, and
+the difference is the point of recording it here. `ci.yml` used to run on `push`
+for the release branch alone, so an unpinned badge read "no status" for the life
+of a perfectly healthy project — the pin was a workaround for a defect one file
+away. proto.pilot, scaffolding into a real repository, found what that trigger
+actually cost: a project that commits straight to its base branch, which every
+project does while it is one person, ran no CI at all, and three commits landed
+before anybody noticed, because "no workflow ran" and "the workflow passed" are
+the same absence of red. The base branch is in the `push` trigger now.
+
+So the defect is gone and the conclusion survived — which is the case worth
+naming, because nothing goes red when it happens and nobody re-reads the reason.
+The tell is a reason phrased as a **workaround** rather than an **intention**:
+"pinned because the badge would otherwise read no-status" names a broken thing
+and therefore has an expiry date nobody wrote down, while "pinned because a
+badge is a claim about what was released" survives any fix anywhere. When you
+close a defect, the rules justified *by* it are now justified by nothing — and
+they will not tell you. Go and re-read them.
+
+This paragraph is itself the second instance. The reason was fixed in
+`badges()` and in `CLAUDE.md` within a minute of the trigger change, and stood
+stale here for an hour, in the document [`CLAUDE.md`](../CLAUDE.md) calls *the
+evidence* — the widest-audience copy, and the one nobody was looking at. The
+distance that hides a stale reason is not measured in files. It is measured in
+audiences: each copy has its own reader, and you update the copy whose reader
+you are at the time.
 
 `--org` defaults to `OWNER`, which names no repository, so the default scaffold
 ships no badges rather than opening every README with a broken image — the

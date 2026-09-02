@@ -27,7 +27,15 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [{{BASE_BRANCH}}, {{RELEASE_BRANCH}}]
   push:
-    branches: [{{RELEASE_BRANCH}}]
+    # BOTH branches, not just the release one. A repo that commits directly to
+    # {{BASE_BRANCH}} — every project does, while it is one person — otherwise
+    # runs nothing at all on those commits, and "no workflow ran" is
+    # indistinguishable from "the workflow passed" anywhere you would look for
+    # the answer. That is the expensive half; the cost is the cheap half: a PR
+    # flow tests the merge commit a second time, which is one bounded extra run
+    # per merge and is not even pure duplication, since a squash merge is a
+    # different commit than the PR head ever tested.
+    branches: [{{BASE_BRANCH}}, {{RELEASE_BRANCH}}]
   workflow_dispatch:
 
 concurrency:
@@ -144,6 +152,24 @@ jobs:
           python-version: '{{PY}}'
       - run: pip install -r scripts/requirements.txt
 
+      # A scaffold ships no `[project]` block, so this does nothing until the
+      # tree becomes a real package — and the moment it does, every test that
+      # imports it fails COLLECTION, which is exit 2 and is not the exit 5 the
+      # integration job tolerates. The job then goes red for a reason
+      # that has nothing to do with the tests it is named for. Reading whether
+      # the block is there is a fact about the tree, not a guess about it, and
+      # both branches say out loud which one they took: a step that installs
+      # nothing in silence is the same failure as a suite that selects nothing
+      # in silence.
+      - name: Install the project, if it is one
+        run: |
+          if [ -f pyproject.toml ] && grep -q '^\[project\]' pyproject.toml; then
+            echo "pyproject.toml declares [project] — installing it editable"
+            pip install -e .
+          else
+            echo "no [project] block in this tree — nothing to install"
+          fi
+
       - name: Unit suite
         run: python -m pytest tests/ -m unit -q --durations=25
 
@@ -168,6 +194,18 @@ jobs:
         with:
           python-version: '{{PY}}'
       - run: pip install -r scripts/requirements.txt
+
+      # Same step as the unit job, and the reason is stated there. It matters
+      # more here: a collection failure is exit 2, and the tolerance below is
+      # written for exit 5.
+      - name: Install the project, if it is one
+        run: |
+          if [ -f pyproject.toml ] && grep -q '^\[project\]' pyproject.toml; then
+            echo "pyproject.toml declares [project] — installing it editable"
+            pip install -e .
+          else
+            echo "no [project] block in this tree — nothing to install"
+          fi
 
       # SCAFFOLD: stand up the stack here. If two workflows both do this, put
       # the steps in a composite action under .github/actions/ and have both
