@@ -23,7 +23,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Set
 
 SKELETOR = Path(__file__).resolve().parents[1]
 TEMPLATE = SKELETOR / "template"
@@ -247,8 +247,13 @@ def skeletor_ref() -> str:
 MANIFEST_SKIP = ("tmp/", ".git/", "node_modules/", ".venv/")
 
 
-def tree_hashes(target: Path) -> Dict[str, str]:
-    """sha256 of every file this scaffold produced, keyed by relative path."""
+def hash_tree(target: Path) -> Dict[str, str]:
+    """sha256 of every file under `target`, keyed by relative path.
+
+    Everything on disk, including files this scaffold had nothing to do with.
+    Used twice: once to hash what the scaffold produced, and once on each side
+    of the post-copy steps to find out what they wrote.
+    """
     out: Dict[str, str] = {}
     for path in sorted(target.rglob("*")):
         if not path.is_file() or "__pycache__" in path.parts:
@@ -260,7 +265,34 @@ def tree_hashes(target: Path) -> Dict[str, str]:
     return out
 
 
-def write_manifest(target: Path, args, overlays: List[str]) -> Path:
+def produced_files(written: List[str], after_copy: Dict[str, str], final: Dict[str, str]) -> Set[str]:
+    """What this scaffold rendered or generated — never simply what is on disk.
+
+    `--force` writes into a directory that already has files in it, and
+    `AGENTS.md` calls that the usual case: the interesting target is a repo
+    somebody already works in. Hashing the tree therefore recorded the user's
+    own source as skeletor output. proto.pilot, the first real consumer, got a
+    manifest of 228 files of which 114 were its own — its product source, its
+    tests, its build artifacts, a gitignored `prototypes/` tree — and every
+    later `skeletor-upgrade` on it refused outright, because `cross_check`
+    correctly reported 114 files "recorded, but the base render does not
+    produce it". The guard held; the manifest was the thing that was wrong.
+
+    So the set is computed from what the scaffolder did, in two parts. The copy
+    phase reports every file it renders, collisions included — a README the
+    scaffold overwrote *is* skeletor output and must be recorded, which is why
+    this cannot be "everything that was not here before". The post-copy steps
+    are found by comparing the tree either side of them rather than by naming
+    the four files they currently write: a list would go stale the next time
+    `regen.py` learns to emit an index, and it would go stale silently, since
+    a file missing from the manifest reads exactly like a file the user edited.
+    """
+    produced = {Path(rel).as_posix() for rel in written}
+    produced |= {rel for rel, digest in final.items() if after_copy.get(rel) != digest}
+    return {rel for rel in produced if rel in final}
+
+
+def write_manifest(target: Path, args, overlays: List[str], files: Dict[str, str]) -> Path:
     """Record how this tree was generated, so an upgrade can reproduce it.
 
     The **arguments** are the primary record: `bin/skeletor-upgrade` re-renders
@@ -285,6 +317,10 @@ def write_manifest(target: Path, args, overlays: List[str]) -> Path:
     byte-for-byte what skeletor generated, so replacing it with a newer render
     loses nothing — that is a proof, not a heuristic, which is why the fallback
     is allowed to write files at all.
+
+    `files` is therefore `produced_files()`, and never a walk of the tree: what
+    is recorded has to be exactly what the base render produces, or the very
+    check that makes the fallback trustworthy fails on every run.
     """
     values = substitutions(args)
     recorded = [
@@ -314,7 +350,7 @@ def write_manifest(target: Path, args, overlays: List[str]) -> Path:
                 ),
                 "skeletor_ref": skeletor_ref(),
                 "args": recorded,
-                "files": tree_hashes(target),
+                "files": files,
             },
             indent=2,
         )
@@ -400,12 +436,17 @@ def main() -> int:
     # the indexes, so the tree's own checks pass on the first run. A scaffold
     # whose first `check docs` is red teaches that red is normal, and a gate
     # people have learned to expect red from is a gate that has stopped working.
+    after_copy = hash_tree(target)
     register_shipped_docs(target, values)
     subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(target), capture_output=True)
 
     # Last, and after the two steps above: both write files, and a manifest
-    # hashed before them would describe a tree that no longer exists.
-    write_manifest(target, args, overlays)
+    # hashed before them would describe a tree that no longer exists. The two
+    # snapshots either side of them are what tells the files they generate
+    # apart from files that were simply already here — see `produced_files`.
+    final = hash_tree(target)
+    produced = produced_files(written, after_copy, final)
+    write_manifest(target, args, overlays, {rel: final[rel] for rel in sorted(produced)})
 
     committed = False
     if not args.no_git and not (target / ".git").exists():

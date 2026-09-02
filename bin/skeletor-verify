@@ -941,6 +941,86 @@ def long_path_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     return results
 
 
+def populated_tree_gate(tier: str, workdir: Path) -> List[Result]:
+    """Scaffold into a directory that already has files in it, and require the
+    manifest to describe skeletor's output and nothing else.
+
+    Every other tree here is generated into a fresh directory, where every file
+    present is by definition skeletor's — so the manifest was only ever built
+    on the one path that cannot tell the two apart. `--force` into a populated
+    repository is the other path, and `AGENTS.md` Step 2 calls it *the usual
+    case*: the interesting target is a repo somebody already works in.
+
+    It shipped broken, and an outside consumer found it in ten minutes.
+    proto.pilot's manifest recorded 228 files of which 114 were its own source,
+    tests and build artifacts, and `skeletor-upgrade` then refused on that tree
+    forever — `cross_check` doing exactly its job against a manifest that could
+    not describe its own base.
+
+    The expected set is **recomputed, not listed**: the same arguments are
+    scaffolded into an empty directory and the two manifests must have the same
+    keys. A list of decoy paths would pin the decoys this file happens to plant
+    and stay green for the next thing that leaks in. The decoys themselves are
+    chosen to cover the three shapes that leaked: tracked source, a gitignored
+    directory, and a file the scaffold overwrites — that last one must be
+    *present*, since a collision is skeletor output and dropping it fails
+    `cross_check` from the other direction.
+
+    Both assertions below are needed, and planting each bug is how that was
+    established rather than assumed. Comparing the two manifests catches what
+    leaked *in* — but it is two readings of the same scaffolder, so a manifest
+    that under-records leaves both sides equally short and the comparison stays
+    green. Only the upgrade, which compares against an independently rendered
+    base, sees that one. Two copies of a mistake agree with each other; that is
+    the whole reason this gate exists at all.
+    """
+    results: List[Result] = []
+    started = time.time()
+    manifest_name = load_scaffolder().MANIFEST_NAME
+
+    populated = workdir / "populated"
+    (populated / "src").mkdir(parents=True, exist_ok=True)
+    (populated / ".pytest_cache").mkdir(parents=True, exist_ok=True)
+    (populated / "src" / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (populated / ".pytest_cache" / "lastfailed").write_text("{}\n", encoding="utf-8")
+    (populated / "README.md").write_text("# Theirs\n\nnot skeletor's.\n", encoding="utf-8")
+
+    result, target = scaffold(tier, "python", workdir, name="populated")
+    results.append(Result(f"populated: {result.label}", result.ok, result.seconds, result.output))
+    if not result.ok:
+        return results
+
+    reference, clean = scaffold(tier, "python", workdir, name="populated-reference")
+    results.append(Result(f"populated: reference {reference.label}", reference.ok, reference.seconds, reference.output))
+    if not reference.ok:
+        return results
+
+    theirs = set(json.loads((target / manifest_name).read_text(encoding="utf-8"))["files"])
+    expected = set(json.loads((clean / manifest_name).read_text(encoding="utf-8"))["files"])
+    extra = sorted(theirs - expected)
+    missing = sorted(expected - theirs)
+    detail = ""
+    if extra:
+        detail += "recorded, but not part of a scaffold:\n  " + "\n  ".join(extra) + "\n"
+    if missing:
+        detail += "scaffolded, but not recorded:\n  " + "\n  ".join(missing) + "\n"
+    results.append(
+        Result(
+            f"populated: the manifest records only what was scaffolded ({len(expected)} files)",
+            not extra and not missing,
+            time.time() - started,
+            detail,
+        )
+    )
+
+    # The consequence, not just the symptom: a manifest carrying the user's own
+    # files fails `cross_check` and makes every later upgrade on that tree an
+    # outright refusal. This is the assertion that would have caught it.
+    results.append(check_upgrade_is_noop(target))
+    results[-1].label = f"populated: {results[-1].label}"
+    return results
+
+
 def hook_args_for_tree(workdir: Path, tier: str) -> List[str]:
     """black's args from any already-generated tree of this tier."""
     for candidate in (workdir / f"{tier}-python", workdir / f"{tier}-both"):
@@ -1000,6 +1080,10 @@ def main() -> int:
             results.append(gate)
 
         for gate in badge_gate(fullest, workdir, venv_python):
+            results.append(gate)
+
+        for gate in populated_tree_gate(fullest, workdir):
+            gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 
         for gate in long_path_gate(fullest, workdir, venv_python):

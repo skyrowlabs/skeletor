@@ -96,7 +96,8 @@ generated README's Setup block runs every tool by path, a check that the tree is
 its own repository at its first commit, the lint hooks, pyright, and
 `actionlint` over the workflows the tree ships.
 eslint and prettier run once, on the fullest tier's `both` tree, and the fullest
-tier is scaffolded a second time into a deliberately long path.
+tier is scaffolded a second time into a deliberately long path and a third time
+into a directory that already has files in it.
 
 The two newest are the **setup path**, which this file's own gates had never
 once executed. Everything above verifies a tree that is already installed —
@@ -175,6 +176,41 @@ an `--org` scaffold must carry a CI badge pinned to the *release* branch
 (`ci.yml` has no `push` trigger for the branch `git init -b` creates, so a bare
 badge reads "no status" forever). A badge that is broken or permanently grey is
 a gate that is red on arrival wearing a cosmetic hat.
+
+The **populated tree** is the newest, and it is the first gate here that an
+outside consumer wrote the bug report for. Every other tree is generated into a
+fresh directory, where every file present is by definition skeletor's — so
+`.skeletor.json` was only ever built on the one path that cannot tell the two
+apart, while `--force` into a repository somebody already works in is the path
+[`AGENTS.md`](AGENTS.md) calls *the usual case*. `tree_hashes()` walked the tree
+and recorded whatever it found. proto.pilot, the first real consumer, got a
+manifest of 228 files of which 114 were its own product source, its tests, a
+build artifact and a gitignored `prototypes/` tree.
+
+What that cost is worth being exact about, because the guard held: it did **not**
+overwrite anybody's source. `cross_check` refused, correctly and permanently —
+114 files "recorded, but the base render does not produce it" — so the damage was
+that `bin/skeletor-upgrade` was unusable, forever, on precisely the trees it
+exists for, and said so in a message that reads like the *tree* is at fault. The
+mechanism was right; the manifest it was handed was wrong.
+
+The manifest now records what the scaffolder **did**, not what is on disk:
+`copy_overlay` already reports every file it renders, and the post-copy steps are
+found by hashing the tree either side of them. Neither half is a list — naming
+the four files `regen.py` currently writes would go stale the next time it learns
+to emit an index, and silently, since a file missing from the manifest reads
+exactly like a file the user edited. A collision *is* skeletor output and stays
+recorded, which is why "everything that was not here before" is the wrong rule.
+
+The gate asserts the recorded set by **recomputing** it — the same arguments
+scaffolded into an empty directory, and the two manifests must have identical
+keys — rather than listing the decoys it plants. It then runs the upgrade, and
+both assertions are load-bearing: the comparison is two readings of the same
+scaffolder, so a manifest that under-records leaves both sides equally short and
+stays green, and only the upgrade's independently rendered base catches that
+direction. Each was established by planting the bug it claims to catch. Two
+copies of a mistake agree with each other — which is the whole reason a gate
+built on a fresh directory could not see this one.
 
 Three things it reads rather than repeats: the tier and language lists come from
 `bin/skeletor-new`, the lint arguments from the generated tree's own
