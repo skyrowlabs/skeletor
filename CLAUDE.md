@@ -142,8 +142,12 @@ the load-bearing pieces of `ci.yml` with a regex over the text, which catches a
 trigger somebody deleted and nothing about whether the file is *valid*.
 
 It is the one lint that does not read its arguments out of the tree's
-`.pre-commit-config.yaml`, because the tree has no actionlint hook. The
-asymmetry is the point: black, isort, flake8 and pyright ask whether the tree
+`.pre-commit-config.yaml`. Two reasons are available and only one survives —
+the tree has no actionlint hook to read (true today, falsified the day one
+ships) and this gate is not asking the tree's question at all (true whatever
+ships). The second is the load-bearing one, and they are kept apart on purpose,
+because the first kind expires without anything going red. The asymmetry is
+the point: black, isort, flake8 and pyright ask whether the tree
 governs itself, and are read from its config so the answer is the tree's own.
 This asks whether what skeletor ships is valid at all — `check_no_baked_paths`'s
 question, equally not the tree's business. Adding actionlint as a hook in the

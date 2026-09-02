@@ -461,14 +461,24 @@ def actionlint_gate(tree: Path, venv_bin: Path) -> List[Result]:
     milliseconds.
 
     This is the one lint here that does **not** read its arguments out of the
-    tree's `.pre-commit-config.yaml`, because the tree has no actionlint hook.
-    The asymmetry is the point rather than an oversight: black, isort, flake8 and
+    tree's `.pre-commit-config.yaml`. Two reasons are available for that and only
+    one of them survives: the tree has no actionlint hook to read (a fact about
+    today, which shipping such a hook would falsify), and this gate is not asking
+    the tree's question anyway (a fact about what it is for, which nothing
+    falsifies). The second is the load-bearing one. black, isort, flake8 and
     pyright ask "does this tree govern itself", and are read from its config so
-    the answer is the tree's own. This asks "is what skeletor ships valid at
+    the answer is the tree's own; this asks "is what skeletor ships valid at
     all" — the same question `check_no_baked_paths` asks, and equally not the
-    tree's business. Shipping actionlint as a hook in the generated tree would be
-    a different and also good change, since it would check a user's own edits to
-    these files. It is not this one.
+    tree's business. So shipping actionlint as a hook in the generated tree
+    would be a different and also good change, since it would check a user's own
+    edits to these files — and it would **not** make this gate read its
+    arguments from there.
+
+    The reasons are separated because the first kind expires silently. A rule
+    whose stated reason names something broken or absent loses that reason the
+    day somebody fixes it, and nothing goes red to say so — see the CI badge in
+    `docs/DESIGN_RATIONALE.md`, which was pinned for a defect that no longer
+    exists and is still pinned, correctly, for a different reason entirely.
     """
     started = time.time()
     workflows = workflow_files(tree)
