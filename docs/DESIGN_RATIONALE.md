@@ -275,6 +275,38 @@ Two rules do the work:
   same posture as `skeletor-check-pins`, which reports a bump and never makes
   one.
 
+### The category with no evidence behind it
+
+An upgrade classifies from the manifest: an entry with a different hash is an
+edit, no entry at all is a collision. **A genuinely new file has neither**, so
+it is added, and that is the one verdict backed by nothing.
+
+Usually right, and there is one case where it is reliably wrong — which the
+report-and-adopt loop *manufactures*. The sequence that produces a good template
+change is: a consumer hits a hole, writes the gate **in their tree** to close
+it, reports the idea, and this repository implements it at the path it would
+have chosen anyway. Both halves are correct. The paths differ for no reason but
+that they were picked independently, and the upgrade then reports as a clean
+addition a file that leaves the consumer running one gate twice, under two
+names, in two files that will drift.
+
+It happened the first time it could: `tests/test_pyright_scope.py` shipped here
+from proto.pilot's report, and their `test_lint_tool_parity.py` already held the
+same gate — not merely similar, the same precondition argued the same way, both
+docstrings quoting the same sentence about matchers.
+
+No manifest can catch it. `cross_check` compares paths and hashes, and this
+needs a diff of *purposes*. So the remedy is not in the tool, and it is cheap
+because the missing fact is already in hand: the docstring says who reported it.
+**When a gate ships from a report, tell the reporter the path it shipped at** —
+one line in a message being sent anyway. Then they delete theirs before
+upgrading, or keep theirs and skip ours, and either way it is a decision instead
+of a silent accretion.
+
+Worth stating as a general shape rather than a courtesy: a producer that adopts
+consumer ideas will hand back duplicates of them, and only the producer knows
+which of its files came from whom.
+
 The part worth stealing is how the manifest handles its one derived value. The
 base is reproduced by re-rendering, which needs the generator's git history —
 and there are ordinary reasons that is absent: a `--depth 1` clone, a tarball, a
