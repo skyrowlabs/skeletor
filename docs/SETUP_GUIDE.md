@@ -344,6 +344,26 @@ Do it in this order, one commit each:
    Keep your own `README.md`, `.gitignore` and CI if they are better; take the
    rules, the docs pipeline and the CLI.
 
+   **Check each rule against decisions your repo has already made.** A file with
+   no machinery in it can still name a tool you have ruled out. `docs/rules/`
+   is the part that looks safest to take wholesale and it is not: these are
+   opinions, and yours may already be different for reasons you paid for.
+
+   sky.boss found this in `javascript.md`, which mentions no CLI command and no
+   path — so every measure of coupling to *this* template scores it zero — and
+   which mandates Prettier. They reject Prettier deliberately: `htm` is a
+   template-literal parser rather than JSX, so a `/* … */` inside a tag is
+   parsed as attribute text and **silently removes that element's children**
+   without throwing, and a formatter that reflows those templates is that bug
+   with write access. A rule that is true here and wrong there, with nothing
+   measurable to say so.
+
+   Only you can make this check, which is why it is here and not in a gate:
+   coupling to infrastructure is visible from the template, and coupling to a
+   *decision* is a fact about your repo. Zero machinery references means
+   "no coupling to skeletor" — never "safe to adopt", and the two read
+   identically from this side.
+
    Two things about that list, both measured on a real repository rather than
    assumed. **Every loss is silent**: `--force` writes over whatever is in its
    way, and a line that is gone raises nothing. sky.boss lost `PYTHONSAFEPATH`

@@ -43,10 +43,25 @@ from scripts.paths import PROJECT_ROOT, TMP_DIR  # noqa: E402
 
 LOCK_DIR = TMP_DIR / "tree-locks"
 
-#: A hold older than this with a live pid is still honoured — long jobs exist.
-#: This bound is only for records whose process is gone AND which are old enough
-#: that a pid reuse would be a coincidence rather than the same job.
-STALE_AFTER_S = 6 * 60 * 60
+#: How long a record whose process is gone is left alone before `sweep()` drops
+#: it. Small on purpose: once the pid is gone the holder is definitely gone, and
+#: the only thing this margin protects is the window between a record being
+#: written and its writer becoming observable — a concurrent sweeper must not
+#: unlink a hold that is racing its own creation.
+#:
+#: **A live pid is honoured at any age**, deliberately and with no upper bound.
+#: Long jobs exist, and dropping a running job's hold is fail-open — the same
+#: asymmetry `would_strand` is built on, where a false refusal costs one retry
+#: and a false clearance costs somebody's work.
+#:
+#: This replaced a `STALE_AFTER_S = 6 * 60 * 60` that `sweep()` never read: the
+#: constant was defined, documented with a pid-reuse rationale, and referenced
+#: nowhere, while the sweep hardcoded 60. A reader budgeting for that coincidence
+#: believed the window was six hours when it was one minute. Reported by
+#: jam.sense. A documented rule with no code under it is the harder direction of
+#: the failure this repository writes rules about — an undocumented rule at least
+#: reads as unknown, where this one reads as settled.
+DEAD_GRACE_S = 60
 
 
 @dataclass
@@ -95,7 +110,7 @@ def sweep() -> int:
             path.unlink(missing_ok=True)
             removed += 1
             continue
-        if not hold.alive and hold.age_s > 60:
+        if not hold.alive and hold.age_s > DEAD_GRACE_S:
             path.unlink(missing_ok=True)
             removed += 1
     return removed
