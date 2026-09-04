@@ -17,6 +17,20 @@ for configuration, and a doc there is a doc no index knows about.
 | Research / feasibility                 | `docs/research/`           |
 | Business planning                      | `docs/business-planning/`  |
 
+Note that several of those folders are **not shipped** — the first doc you drop into one
+creates it. That used to be a silent hole: the registration check only ever looked at
+`docs/*.md`, so a doc one level down was outside every gate, which is precisely the "doc no
+index knows about" this rule warns you about, arriving through the door the rule recommends.
+
+**A subfolder gets one routing row, and that row covers everything below it.** The row is
+either the folder's `README.md` or the folder path itself — `docs/TODO/README.md` has always
+been one, and `docs/rules/` is routed as a directory because naming each convention file
+individually would go stale every time a tier adds one. Adding a doc to a routed folder means
+a line in that folder's README, not a new row in two tables.
+
+`{{CLI}} check docs` enforces both halves and reports what it enumerated, because the version
+that did not said *"4 doc(s), all registered"* in a tree holding fifteen.
+
 ## TODO vs Implementations — Two Halves of One Lifecycle
 
 - **`docs/TODO/`** is the **holding tank**: every plan that is _not finished_ — shelved, in
