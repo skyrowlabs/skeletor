@@ -52,6 +52,22 @@ def test_only_comments_are_masked(line: str, is_comment: bool):
     assert masked == is_comment, f"{line!r} -> {uncommented(line)!r}"
 
 
+def test_a_shell_comment_inside_a_run_block_is_stripped():
+    """Deliberate, and not what a YAML parser would do — so it needs a test.
+
+    In a `|` block scalar, `#` is literal content: `yaml.safe_load` keeps this
+    line and this function removes it. That is the behaviour the enrollment
+    predicate depends on — a commented-out command must not enroll a job — and
+    it is exactly the kind of intentional divergence somebody later "corrects"
+    toward parser fidelity. A documented decision with nothing asserting it is a
+    decision that gets reverted by the next careful reader.
+    """
+    block = "jobs:\n  a:\n    steps:\n      - run: |\n          # docker compose up -d\n          ./go.sh\n"
+
+    assert "docker compose up" not in uncommented(block)
+    assert "./go.sh" in uncommented(block)
+
+
 def test_line_structure_survives():
     """Blanked, not deleted — line numbers have to keep meaning something."""
     text = "a: 1\n# gone\nb: 2\n"

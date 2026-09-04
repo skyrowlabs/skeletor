@@ -39,7 +39,29 @@ from pathlib import Path
 
 
 def uncommented(text: str) -> str:
-    """`text` with YAML comments removed, one line per line.
+    """`text` with comments removed **as a reader sees them**, one line per line.
+
+    Not a YAML-preserving transformation, and the difference is deliberate. In a
+    block scalar — `run: |` — YAML treats `#` as literal content, so a shell
+    comment inside a script is *data* to a parser and *prose* to a person. This
+    strips it, which changes what `yaml.safe_load` returns for two of the four
+    workflows this template ships.
+
+    That is the behaviour both consumers need. A job carrying
+
+        - run: |
+            # docker compose up -d   <- commented out
+            ./run-tests.sh
+
+    must not be enrolled by `check_workflow_drift.py` on the strength of a line
+    that does not run. Enrollment asks what a job *runs*, and a parser-faithful
+    mask would answer with what it *contains*.
+
+    Worth stating because the obvious validation is a trap: comparing
+    `safe_load(raw)` to `safe_load(uncommented(raw))` is ground truth against
+    the wrong ground. It fails on this template today, correctly, and "fixing"
+    it would break the enrollment predicate. A future consumer that genuinely
+    needs YAML fidelity wants a parser, not this.
 
     Blanked rather than deleted so line numbers keep meaning something, and a
     `#` inside quotes is left alone so `run: echo "# heading"` stays code.
