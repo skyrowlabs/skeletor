@@ -3,18 +3,31 @@
 ## First-Time Setup
 
 ```bash
-./{{CLI}} setup          # .env from .env.example, git hooks, merge drivers
-./{{CLI}} check health   # is everything answering?
+{{SETUP_COMMANDS}}
+cp .env.example .env
+./{{CLI}} check pre-push   # green on a fresh tree
 ```
 
-`{{CLI}} setup` installs two things that are easy to miss because they live outside
-version control:
+**There is no `{{CLI}} setup`, and there cannot be.** The CLI needs `click`, which
+lives in the virtualenv the setup would be creating — so a `setup` subcommand
+could not run until after the work it exists to do. This section opened with one
+anyway, for long enough that it shipped: the developer guide's very first command
+did not exist, in a repository whose `AGENTS.md` explained on the same page that it
+never had. Nothing could see the disagreement, because the two files were separate
+copies of one instruction.
 
-- **Git hooks** (`pre-commit install --install-hooks`) — the commit-msg format
-  check and the lint gates.
-- **The `regen-docs` merge driver** — its definition lives in `.git/config`,
-  which is not tracked, so a fresh clone has `.gitattributes` pointing at a
-  driver that does not exist. Verify with `{{CLI}} check merge-drivers`.
+They are not separate any more. The block above is rendered from `setup_commands()`
+in the scaffolder — the same source as the README's — so there is exactly one place
+these steps are written down, and `bin/skeletor-verify` runs it.
+
+Two things it installs are easy to miss, because they live outside version control:
+
+- **Git hooks** (`pre-commit install --install-hooks`, above) — the commit-msg
+  format check and the lint gates.
+- **The `regen-docs` merge driver** — its definition lives in `.git/config`, which
+  is not tracked, so a fresh clone has `.gitattributes` pointing at a driver that
+  does not exist. The scaffolder installs it; verify with
+  `{{CLI}} check merge-drivers`.
 
 ## Configuration
 
