@@ -252,6 +252,12 @@ def base_checkout(ref: str, workdir: Path, *, fatal: bool = True) -> Tuple[Optio
         ref = ref[: -len("-dirty")]
         say("⚠️ ", f"the tree was scaffolded from a dirty checkout — using the committed part ({ref})")
         detail("Uncommitted template edits at that time will read as template changes now.")
+        # Said explicitly because this line and the manifest-drift refusal often
+        # appear together and have opposite lifetimes: one is fixable and this
+        # one is not. A reader who repairs the manifest and sees this survive
+        # would reasonably wonder what they failed to fix.
+        detail("This is a fact about that scaffold and does not clear — nothing can recover a")
+        detail("render that was never committed, and --repair-manifest does not touch the ref.")
     tree = workdir / "base-checkout"
     result = subprocess.run(
         ["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(tree), ref],
