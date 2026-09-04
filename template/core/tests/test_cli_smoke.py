@@ -39,6 +39,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from cli import cli as root  # noqa: E402
+from scanning import scanned  # noqa: E402
 from scripts import allowlist  # noqa: E402
 from scripts.paths import CLI_DIR  # noqa: E402
 
@@ -60,7 +61,9 @@ def _walk(command: click.Command, path: Tuple[str, ...] = ()) -> List[Tuple[Tupl
     return [(path, command)]
 
 
-COMMANDS = _walk(root)
+# `least=5`: with one or two commands the exemption filter below is
+# unobservable, since "every command" and "the runnable ones" are the same set.
+COMMANDS = scanned(_walk(root), "commands in the CLI tree", least=5)
 
 
 def _needs_arguments(command: click.Command) -> bool:
@@ -114,11 +117,6 @@ def _run(args: List[str], timeout: int = 90) -> subprocess.CompletedProcess:
         timeout=timeout,
         env=env,
     )
-
-
-def test_the_walk_found_commands():
-    """A discovery that silently matches nothing is a test that always passes."""
-    assert len(COMMANDS) >= 5, [p for p, _ in COMMANDS]
 
 
 @pytest.mark.parametrize("path", [p for p, _ in COMMANDS], ids=lambda p: " ".join(p))
@@ -193,7 +191,7 @@ def _forwarded_flags() -> List[Tuple[str, str, str]]:
                 if isinstance(extra, ast.Constant) and isinstance(extra.value, str):
                     if extra.value.startswith("--"):
                         found.append((module.name, target.value, extra.value.split("=")[0]))
-    return sorted(set(found))
+    return scanned(sorted(set(found)), "flag(s) the CLI forwards to a repo script")
 
 
 def _accepted_flags(script_path: Path) -> set:
@@ -212,17 +210,10 @@ def _accepted_flags(script_path: Path) -> set:
     return flags
 
 
-def test_the_flag_scan_found_something():
-    """A scan that silently matches nothing is a test that always passes.
-
-    Not hypothetical: the first version of the check below compared the flag
-    against the script's `--help` text, and passed against a deliberately
-    reintroduced bug — because the script's *docstring* mentions the flag, and
-    argparse prints the docstring as the description.
-    """
-    assert _forwarded_flags(), "no forwarded flags found — the scan is wrong, not the CLI"
-
-
+# Guarded by `scanned` inside `_forwarded_flags`. Not hypothetical: the first
+# version of the check below compared the flag against the script's `--help`
+# text and passed against a deliberately reintroduced bug, because the script's
+# *docstring* mentions the flag and argparse prints it as the description.
 @pytest.mark.parametrize("case", _forwarded_flags(), ids=lambda c: f"{c[0]}:{Path(c[1]).name} {c[2]}")
 def test_forwarded_flags_are_accepted(case: Tuple[str, str, str]):
     """A flag the CLI forwards must be one the receiving script defines.

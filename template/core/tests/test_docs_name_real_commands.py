@@ -64,6 +64,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import click  # noqa: E402
 
 from cli import cli as ROOT  # noqa: E402
+from scanning import scanned  # noqa: E402
 from scripts.paths import PROJECT_ROOT, TODO_DIR  # noqa: E402
 
 CLI_NAME = "{{CLI}}"
@@ -104,16 +105,7 @@ def invocations() -> dict:
                 if match:
                     parts = tuple(group for group in match.groups() if group)
                     found.setdefault(parts, set()).add(str(path.relative_to(PROJECT_ROOT)))
-    return found
-
-
-def test_the_scan_finds_the_docs():
-    """A scan over zero blocks is green and worth nothing.
-
-    The `filesAnalyzed` lesson: this check cannot tell "every command resolves"
-    from "no command was looked at", so it is asserted rather than assumed.
-    """
-    assert invocations(), f"no `{CLI_NAME} ...` invocation found in any shell block — the scan matched nothing"
+    return scanned(found, f"`{CLI_NAME} ...` invocation(s) in shell blocks")
 
 
 def test_every_documented_command_exists():

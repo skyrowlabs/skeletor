@@ -673,6 +673,17 @@ interlock, and which you cannot understand from one file:
    *does a guard exist* but *does the suite still pass with the enumeration
    emptied* — which is the same plant-and-require-red the gates use.
 
+   The guard is now the enumeration, not a companion beside it:
+   `tests/scanning.py`'s `scanned(items, what, least=1)` refuses a scan too small
+   to prove anything, and cannot be omitted without deleting the loop. That is
+   proto.pilot's shape and their argument beats the helper — **a convention you
+   must remember to apply is a registry with no enforcement**, which is what Rule
+   2 is about. Their evidence: running this sweep on their tree found *seven*
+   unguarded sites, one written the day before. `least` above 1 is the fixture
+   rule made cheap to express — a filter tested against one item is unobservable,
+   because "everything" and "the one match" are the same set — and it was already
+   here as a hand-written `len(COMMANDS) >= 5` in exactly one place.
+
    **A plant that did not land is indistinguishable from a gate that works.**
    Both print green. proto.pilot lost an hour to a `sed` whose pattern silently
    matched nothing; the same afternoon here, a plant passed because the gate

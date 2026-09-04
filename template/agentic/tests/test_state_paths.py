@@ -25,6 +25,7 @@ pytestmark = [pytest.mark.unit]
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scanning import scanned  # noqa: E402
 from scripts.paths import CLI_DIR, PROJECT_ROOT, SCRIPTS_DIR, STATE_SLUG, state_dir  # noqa: E402
 from scripts.reporting.run_ledger import ledger_path  # noqa: E402
 
@@ -37,24 +38,10 @@ ROOT_TOKENS = re.compile(r"sl-agent-logs|SL_AGENT_LOGS")
 
 
 def _sources():
-    for base in (CLI_DIR, SCRIPTS_DIR):
-        for path in sorted(base.rglob("*.py")):
-            if path != RESOLVER:
-                yield path
-
-
-def test_the_scan_found_the_sources():
-    """A second-definition scan over zero files is green and worth nothing.
-
-    Every assertion below is a negative — *no source outside the resolver names
-    the state root* — and a negative over an empty set is a tautology. Move
-    `cli/` or `scripts/`, and this file goes on passing while checking nothing.
-
-    Confirmed by forcing the enumeration empty: 5/5 passed before this existed.
-    The class is proto.pilot's: a green negative is the weakest evidence in the
-    building and it looks identical to the strongest.
-    """
-    assert list(_sources()), f"no .py found under {CLI_DIR} or {SCRIPTS_DIR} — the scan matched nothing"
+    return scanned(
+        [p for base in (CLI_DIR, SCRIPTS_DIR) for p in sorted(base.rglob("*.py")) if p != RESOLVER],
+        f".py under {CLI_DIR.name}/ or {SCRIPTS_DIR.name}/, excluding the resolver",
+    )
 
 
 def test_state_lives_outside_the_checkout():

@@ -29,9 +29,15 @@ def tank():
     return [p for p in plans.scan(TODO_DIR) if not p.auto_generated]
 
 
-#: Every path here is one this template really ships. An invented example reads
-#: as a dead reference to `check_source_doc_refs.py`, and the alternative is an
-#: allowlist entry for a test fixture — which is a list where a real path does.
+#: Every path here is one this template really ships, and — the second half,
+#: which proto.pilot paid for — one that structurally *cannot leave*. An invented
+#: example reads as a dead reference to `check_source_doc_refs.py`, and the
+#: alternative is an allowlist entry for a test fixture, a list where a real path
+#: does. But a real path is not enough on its own: they replaced a dead upstream
+#: path with a live one of their own, and it broke again the next time they filed
+#: a plan, because the path they picked was a plan in `docs/TODO/` — the one
+#: directory whose contents are *supposed* to go. `_TEMPLATE.md` and `README.md`
+#: are the two things in there that never move, by `plans.NOT_A_PLAN`.
 #:
 #: `(row text, what it should vouch for)`. The `None` row is the point: a
 #: folder routed by something that is not a claim about the folder is a folder
@@ -40,7 +46,7 @@ DOC_TABLE_ROWS = [
     ("- **Rules** (`docs/rules/`)", "docs/rules"),
     ("- **Backlog** (`docs/TODO/README.md`)", "docs/TODO"),
     ("- **Deep** (`docs/reports/regular/README.md`)", "docs/reports/regular"),
-    ("- **One rule** (`docs/rules/commits.md`)", None),
+    ("- **A plan template** (`docs/TODO/_TEMPLATE.md`)", None),
 ]
 
 
