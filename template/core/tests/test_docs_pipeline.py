@@ -18,6 +18,7 @@ pytestmark = [pytest.mark.unit]
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts import check_doc_tables as tables  # noqa: E402
 from scripts.docs import plans  # noqa: E402
 from scripts.docs.queue_order import UNORDERED, queue_position, run_order  # noqa: E402
 from scripts.paths import IMPL_DIR, PROJECT_ROOT, TODO_DIR  # noqa: E402
@@ -26,6 +27,55 @@ from scripts.paths import IMPL_DIR, PROJECT_ROOT, TODO_DIR  # noqa: E402
 @pytest.fixture(scope="module")
 def tank():
     return [p for p in plans.scan(TODO_DIR) if not p.auto_generated]
+
+
+#: Every path here is one this template really ships. An invented example reads
+#: as a dead reference to `check_source_doc_refs.py`, and the alternative is an
+#: allowlist entry for a test fixture — which is a list where a real path does.
+#:
+#: `(row text, what it should vouch for)`. The `None` row is the point: a
+#: folder routed by something that is not a claim about the folder is a folder
+#: nobody has actually indexed, and the gate stays green over it.
+DOC_TABLE_ROWS = [
+    ("- **Rules** (`docs/rules/`)", "docs/rules"),
+    ("- **Backlog** (`docs/TODO/README.md`)", "docs/TODO"),
+    ("- **Deep** (`docs/reports/regular/README.md`)", "docs/reports/regular"),
+    ("- **One rule** (`docs/rules/commits.md`)", None),
+]
+
+
+@pytest.mark.parametrize("row,folder", DOC_TABLE_ROWS, ids=[r[0][:40] for r in DOC_TABLE_ROWS])
+def test_only_a_claim_about_a_folder_routes_it(row, folder, tmp_path, monkeypatch):
+    """Naming a file inside a folder is not naming the folder.
+
+    `_DOC_DIR` matched the directory portion of any file path, so a row for one
+    of seven files in `docs/rules/` routed the whole folder. The comment beside
+    it asserted the opposite — the exact property the regex lacked — which is
+    the worst place for a gap, because a reviewer checks the code against the
+    comment and the comment launders it. Reported by proto.pilot, measured.
+
+    A folder's **own** README still routes it, deliberately: the shipped index
+    routes three folders that way and no other, so the pattern could not simply
+    be tightened. A deeper README routes its own folder and never a parent.
+
+    The failure was permissive, which is why nothing caught it: `stranded()`
+    under-reported and the gate stayed green over a folder nothing points at —
+    the thing this check exists to remove, one door along.
+    """
+    table = tmp_path / "DOCS_INDEX.md"
+    table.write_text(row + "\n", encoding="utf-8")
+    monkeypatch.setattr(tables, "TABLES", [table])
+
+    routed = tables.referenced()
+
+    # Folders only — a row naming a file legitimately registers that file, and
+    # the question here is which folders it vouches for.
+    folders = {ref for ref in routed if not ref.endswith(".md")}
+
+    if folder is None:
+        assert not folders, f"{row!r} names a file and should route no folder, got {sorted(folders)}"
+    else:
+        assert folders == {folder}, f"{row!r} should route exactly {folder!r}, got {sorted(folders)}"
 
 
 def test_every_gated_plan_names_its_gate(tank):

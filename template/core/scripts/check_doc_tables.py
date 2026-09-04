@@ -74,12 +74,33 @@ EXEMPT = {"README.md"}
 #: harder half of this bug, because nothing about it looks wrong.
 _DOC_PATH = re.compile(r"docs/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.md")
 
-#: A folder named as a folder — `docs/rules/` — which routes it just as well as
-#: naming its README, and is how a flat shelf of per-domain conventions is
-#: better described. Kept separate from `_DOC_PATH` so that naming one *file*
-#: inside a folder never silently routes the folder: a row for
-#: `docs/reports/regular/README.md` must not vouch for `docs/reports/`.
-_DOC_DIR = re.compile(r"docs/(?:[A-Za-z0-9_.-]+/)+")
+#: A folder named as a folder — `docs/rules/` — which is how a flat shelf of
+#: per-domain conventions is better described than by naming each file.
+#:
+#: The trailing lookahead is load-bearing and its absence is what this comment
+#: used to describe rather than enforce. Without it the pattern matches the
+#: *directory portion of a file path*, so a row naming `docs/rules/commits.md` —
+#: one file among several — routed the whole folder. The old comment asserted
+#: exactly the property the regex lacked, which is the worst place for a gap to
+#: sit: a reviewer checks the code against the comment, so the comment launders
+#: it. Reported by proto.pilot, who measured it rather than reading it.
+#:
+#: The consequence is permissive, not loud. `stranded()` under-reports, so the
+#: gate stays green over a folder nothing actually points at — which is the
+#: failure this check exists to remove, one door along.
+_DOC_DIR = re.compile(r"docs/(?:[A-Za-z0-9_.-]+/)+(?![A-Za-z0-9_.-])")
+
+#: A folder's OWN README routes it, and only its own. `docs/TODO/README.md`
+#: vouches for `docs/TODO`; `docs/reports/regular/README.md` vouches for
+#: `docs/reports/regular` and NOT for `docs/reports`. This is deliberate and the
+#: shipped index depends on it — three folders here are routed this way and no
+#: other — so the lookahead above could not simply be tightened without it.
+#:
+#: The old comment named the parent-vouching hazard, which never happened: the
+#: pattern is greedy, so it matched the longest prefix and only that. The hazard
+#: it missed is the one above. A comment can be wrong about the danger *and*
+#: wrong about the mechanism while sounding careful about both.
+_FOLDER_INDEX = "/README.md"
 
 
 def referenced() -> Set[str]:
@@ -87,8 +108,10 @@ def referenced() -> Set[str]:
     for table in TABLES:
         if table.exists():
             text = table.read_text(encoding="utf-8")
-            seen |= set(_DOC_PATH.findall(text))
+            paths = _DOC_PATH.findall(text)
+            seen |= set(paths)
             seen |= {ref.rstrip("/") for ref in _DOC_DIR.findall(text)}
+            seen |= {p[: -len(_FOLDER_INDEX)] for p in paths if p.endswith(_FOLDER_INDEX)}
     return seen
 
 
