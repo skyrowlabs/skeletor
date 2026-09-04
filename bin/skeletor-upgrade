@@ -318,17 +318,30 @@ def base_checkout(ref: str, workdir: Path, *, fatal: bool = True) -> Tuple[Optio
         ref = ref[: -len("-dirty")]
         say("⚠️ ", f"the tree was scaffolded from a dirty checkout — using the committed part ({ref})")
         detail("Uncommitted template edits at that time will read as template changes now.")
-        # Said explicitly because this line and the manifest-drift refusal often
-        # appear together and have opposite lifetimes: one is fixable and this
-        # one is not. A reader who repairs the manifest and sees this survive
-        # would reasonably wonder what they failed to fix.
-        detail("This is a fact about that scaffold and does not clear — nothing can recover a")
-        detail("render that was never committed, and --repair-manifest does not touch the ref.")
-        # Not clearing it and not sizing it are different problems, and only the
-        # first is permanent. A reader told their numbers may be contaminated,
-        # with no way to find out how much, cannot budget a hand-merge.
-        detail("It can still be *bounded*: if the recorded hashes match this base render, the")
-        detail("edits touched nothing this scaffold ships. Watch for the line that says so.")
+        # This said "does not clear", flatly, and that was wrong. proto.pilot
+        # measured a tree going `v0.2.0-dirty` → a clean tag across one upgrade
+        # and told me. The claim had been written from the one case that had
+        # been tested — a refusal, where nothing is written and so nothing
+        # clears — and generalised to every case, which is the shape of mistake
+        # this repository is mostly about.
+        #
+        # Three outcomes, and only the first is permanent:
+        #   * the edit touched a file this scaffold SHIPS — `cross_check`
+        #     refuses below, no manifest is written, and the ref stays. Correct:
+        #     the recorded base genuinely is unreproducible.
+        #   * the upgrade APPLIES something — the manifest is rewritten from the
+        #     head render, which exists in a commit, and the ref is clean from
+        #     then on.
+        #   * the upgrade applies nothing — already current, or only conflicts
+        #     and declines — the manifest is untouched and this returns next run.
+        detail("Whether it clears depends on what happens next, and only one outcome is")
+        detail("permanent: if those edits touched a file this scaffold ships, the refusal")
+        detail("below is that, and the recorded base really is unreproducible. Otherwise the")
+        detail("first upgrade that APPLIES anything rewrites the manifest from a render that")
+        detail("does exist in a commit, and the ref is clean from then on.")
+        detail("--repair-manifest does not do it — it rewrites the hashes, never the ref.")
+        detail("It can also be *bounded* right now: if the recorded hashes match this base")
+        detail("render, the edits touched nothing this scaffold ships. Watch for that line.")
     tree = workdir / "base-checkout"
     result = subprocess.run(
         ["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(tree), ref],
@@ -555,6 +568,20 @@ def main() -> int:
                 say("→", f"base: skeletor @ {ref}")
 
         head_tree = workdir / "head"
+        # `ours` is rendered from the LIVE checkout, not from a committed ref —
+        # which is the point, since an upgrade exists to carry today's template
+        # in. But that makes a dirty skeletor a source of exactly the defect
+        # `--from-dir` has refused since 5230a7c, on the path everybody actually
+        # uses: uncommitted template edits get written into somebody's tree, and
+        # the manifest records `vX.Y.Z-dirty`, naming a render nobody can
+        # resolve. The next upgrade of that tree then renders its base from the
+        # committed part and reports the difference as template changes.
+        #
+        # Found by the gate written to pin a *different* corrected claim: it
+        # scaffolded dirty, upgraded, and got `-dirty` back — refreshed, and
+        # still unresolvable, because verify runs from a working checkout.
+        if not args.dry_run:
+            refuse_a_dirty_base(SKELETOR, "The upgrade")
         render_with(SKELETOR, recorded, head_tree)
         head_files = files_under(head_tree)
 

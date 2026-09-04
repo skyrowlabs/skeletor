@@ -363,9 +363,19 @@ The **dirty-scaffold warning can now be sized**, which is a different thing from
 clearing it. A tree scaffolded from a dirty checkout records a `-dirty` ref; the
 upgrade strips it, renders the base from the committed part, and warns that
 uncommitted template edits will read as template changes now. That warning is
-permanent and unconditional — it is printed before anything can know better —
-and proto.pilot asked the right question of it: *is my conflict count partly an
-artefact, and how much?* Unanswerable from their side, and answerable from here.
+unconditional — it is printed before anything can know better — and proto.pilot
+asked the right question of it: *is my conflict count partly an artefact, and
+how much?* Unanswerable from their side, and answerable from here.
+
+It is **not** permanent, which this file claimed for a while on the strength of
+the one case that had been tested. The claim came from watching a refusal, where
+nothing is written and so nothing clears, and generalising to every case.
+proto.pilot measured a tree going `v0.2.0-dirty` → a clean tag across a single
+upgrade and said so. Three outcomes: the edit touched a shipped file, so
+`cross_check` refuses and the ref stays, correctly, because that base really is
+unreproducible; the upgrade applies something, so the manifest is rewritten from
+a render that exists in a commit and the ref is clean from then on; or the
+upgrade applies nothing, and it returns next run. Only the first is permanent.
 
 A `cross_check` pass settles it. That check is a bijection with equal hashes in
 both directions, so it holds exactly when the base render reproduces what was
