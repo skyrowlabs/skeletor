@@ -131,6 +131,13 @@ Do not hand-copy setup between them. Enrollment in the drift check is **automati
 matching the pattern is checked); it is deliberately not a registry, because forgetting to
 update a registry is the same bug the check exists to catch.
 
+**An allowlist entry expires, and the check says so.** Every allowlist here is re-read against
+the thing it exempts on every run: an entry whose target was fixed has outlived its reason, and
+one whose target left the tree is worse — the name can come back for something else and arrive
+pre-exempted, which is an exemption nobody made. When a check reports a stale entry, **delete
+it**; do not rewrite the reason to keep it alive. Every allowlist in this repository is read by
+`scripts/allowlist.py`, which is also where that rule is written down.
+
 ### 12. Found an Unrelated Bug? Capture It — Don't Widen Your Scope
 
 A bug you hit that is **not** what you were asked to work on goes to the capture command, not
@@ -159,7 +166,8 @@ a machine-readable flag is one extra emit rather than a second code path. Every
 `scripts/check_*.py` supports `--json` and answers on every path, including the
 ones that pass. `{{CLI}} check output` enrols every file under `cli/` and
 `scripts/` by pattern; exceptions go in `scripts/output_allowlist.yaml` with a
-reason. Full rules in `docs/rules/output.md`.
+reason, and are dropped when they stop exempting anything (see Rule 11). Full
+rules in `docs/rules/output.md`.
 
 ### 14. Agent State Goes Through the Resolver
 

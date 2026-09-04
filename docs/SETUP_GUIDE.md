@@ -14,6 +14,33 @@ something is shaped this way, or when you are deciding whether to drop it.
 > pattern; do not maintain a list. Exemptions go in an allowlist **with a written
 > reason** — that reason is what turns a divergence from a failure into a
 > decision.
+>
+> **And the exemption is checked against the thing it exempts, on every run.** A
+> reason makes an entry a decision; nothing keeps the decision *true*. An entry
+> whose file was fixed has outlived its reason. An entry whose file left the tree
+> is worse — the path can come back for something else and arrive **pre-exempted**,
+> which is an exemption nobody made. A stale entry is deleted, not re-justified.
+
+That last paragraph is newer than the rest of this guide and it was learned the
+expensive way, so it is worth knowing what it cost before you treat an allowlist
+as a safe place to put something.
+
+`check_workflow_drift.py` shipped for months with an allowlist its own reader
+could not parse: the keys are `<workflow>.yml:<job-id>` and the reader split each
+line on the first colon, so **no entry could ever exempt any job**. Nothing could
+see it. A fresh tree enrols no jobs and ships an empty allowlist, so the check is
+green and stays green — the bug waits for the first person with a real divergence
+to record, who finds the check will not go quiet and reasonably deletes the check.
+An escape hatch that cannot be used is worse than none, because it looks like one.
+
+Four allowlists ship, and they shipped four copies of that reader. That is how a
+shared format actually fails: each copy is correct about the keys its own caller
+happens to use, and nothing compares them. `scripts/allowlist.py` owns the
+reading now, and `bin/skeletor-verify` **discovers** `*_allowlist.yaml` rather
+than listing them — planting a meaningless entry in each and requiring the tree's
+own gates to go red. That gate exists because the first attempt at this rule was
+itself a list: two allowlists got a staleness check because they were the two in
+front of the author, and the two missed were the two nothing would complain about.
 
 ---
 
@@ -314,6 +341,13 @@ Do it in this order, one commit each:
    python scripts/check_coverage_budget.py --suite unit --update
    ```
    A ratchet that starts red is a ratchet that gets switched off.
+
+   **Allowlists are not baselined the same way.** An adoption is where most of a
+   repo's allowlist entries get written, in a hurry, to make an inherited tree go
+   green — and each one is checked against what it exempts from then on. That is
+   the point: an entry added today to get past an inherited mess reports itself
+   the day somebody fixes the mess, and is then deleted rather than re-justified.
+   Write the reason for a reader who will meet it once, at that moment.
 3. **Backfill the docs lifecycle**: move existing plan-shaped documents into
    `docs/TODO/` or `docs/implementations/`, run `./mp docs index`, then classify
    the gates by hand. Expect the `blocked_on` pass to be the slow part — that is
