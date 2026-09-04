@@ -354,6 +354,40 @@ Worth stating as a general shape rather than a courtesy: a producer that adopts
 consumer ideas will hand back duplicates of them, and only the producer knows
 which of its files came from whom.
 
+### The loop's own failure mode: a number with a story attached
+
+The exchange that produced most of this document also produced the way it goes
+wrong, and it is not disagreement. It is **agreement neither side checked**.
+
+jam.sense offered a `tree_lock.py` backport as "185 lines against 896", listing
+five behaviours their version had. Four of the five were already here. They had
+reasoned from their own shape — *they lack our machinery, so they lack the
+property* — and I accepted the capability gap without challenging it, with
+`Hold.alive`, `sweep()` and the fail-closed `would_strand` open in front of me.
+Refuting it took two minutes and neither of us spent them.
+
+The tell is worth naming because it is cheap to check and neither party sees it
+from inside: **a measurement that arrives with a narrative attached gets
+believed.** 185-against-896 is a real number, the five behaviours were real
+behaviours, and the story joining them — *a mature repo has learned things a
+seed has not* — is true often enough to pass. What broke it was not more
+reasoning on either side. It was a third kind of act: sitting down to write the
+patch, which forces a read of the thing being patched.
+
+Two corollaries this repository already half-held, now stated together:
+
+* **A fix in a mature repo is a repair to that repo's choices at least as often
+  as it is an improvement.** jam.sense's `Hold.root` field claws back an
+  over-reach they chose — one lock directory per repository rather than per
+  checkout — and is dead weight for a design that never took the over-reach.
+  Offering it as an improvement inverts the burden of proof; the honest form is
+  *"here is the choice we made and the bill it came with"*.
+* **A withdrawn offer is not wasted.** The one that was withdrawn found a live
+  defect in both repos — `worktree drop` deciding the fate of a checkout it
+  never asked about — three functions from anything either side was looking at,
+  reachable only because checking the offer meant checking what a second
+  checkout actually does. The offers are the mechanism, not the overhead.
+
 The part worth stealing is how the manifest handles its one derived value. The
 base is reproduced by re-rendering, which needs the generator's git history —
 and there are ordinary reasons that is absent: a `--depth 1` clone, a tarball, a
