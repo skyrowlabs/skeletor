@@ -110,21 +110,65 @@ def die(message: str) -> "NoReturn":  # type: ignore[valid-type]
     raise SystemExit(1)
 
 
-def uncommitted(target: Path) -> Optional[List[str]]:
-    """Tracked paths with uncommitted changes — or None if git cannot say.
+def uncommitted(target: Path, *, untracked: bool = False) -> Optional[List[str]]:
+    """Paths with uncommitted changes — or None if git cannot say.
 
-    `--untracked-files=no` on purpose. An untracked file is not something an
-    upgrade can make unreadable: it does not appear in `git diff`, and nothing
-    here will remove it. What matters is tracked work that would interleave.
+    The `untracked` flag is not a preference, it is the difference between two
+    questions. For the **target**, untracked files do not matter: one does not
+    appear in `git diff` and nothing here will remove it, so it cannot make the
+    result unreadable — only tracked work interleaves. For the **base**, they
+    matter most of all: `copy_overlay` walks the template directory, so an
+    untracked file under `template/` is rendered into the base as readily as a
+    committed one, and is exactly as absent from history.
     """
     result = subprocess.run(
-        ["git", "-C", str(target), "status", "--porcelain", "--untracked-files=no"],
+        ["git", "-C", str(target), "status", "--porcelain", f"--untracked-files={'all' if untracked else 'no'}"],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         return None
     return sorted(line[3:] for line in result.stdout.splitlines() if line.strip())
+
+
+def refuse_a_dirty_base(base: Path, writing: str) -> None:
+    """A base render nobody can reproduce must not be written into a manifest.
+
+    Everything the `files` map promises rests on the base being re-renderable.
+    `cross_check` re-derives those hashes on every ordinary run precisely so the
+    fallback cannot rot — a cache validated every time it is bypassed. Render
+    the base from a checkout carrying uncommitted edits and the hashes describe
+    a state that exists on one machine, at one moment, and in no commit. The
+    next run resolves the recorded ref, renders something different, and
+    refuses. The manifest is then permanently unusable, and the file it
+    disagrees about is whichever one you happened to have open.
+
+    This is not hypothetical. It is how proto.pilot's tree ended up blocked on
+    `ci.yml`: their manifest was repaired on a day skeletor had uncommitted
+    changes to exactly that file, so the recorded hash is of a render that has
+    never existed in this history.
+
+    Untracked files count here, unlike on the target. `copy_overlay` walks
+    `template/`, so an untracked file there is rendered into the base and is
+    just as unreachable from a ref.
+
+    `--dry-run` writes nothing and is never refused, which is also what keeps
+    `bin/skeletor-verify` running `--from-dir .` against this checkout while it
+    is being edited.
+    """
+    dirty = uncommitted(base, untracked=True)
+    if not dirty:
+        return
+    say("❌", f"the base checkout has {len(dirty)} uncommitted change(s):")
+    for path in dirty[:10]:
+        item(path)
+    if len(dirty) > 10:
+        item(f"... and {len(dirty) - 10} more")
+    detail()
+    detail(f"{writing} would record hashes of a render that exists in no commit, so the")
+    detail("next run resolves the recorded ref, renders something else, and refuses —")
+    detail("permanently. Commit the base checkout first, or use --dry-run to look.")
+    raise SystemExit(1)
 
 
 def refuse_a_dirty_tree(target: Path) -> None:
@@ -411,6 +455,10 @@ def main() -> int:
             say("⏸️ ", "no base render — classifying from the recorded hashes, and not merging")
         elif args.from_dir:
             base_src = Path(args.from_dir).expanduser().resolve()
+            if not args.dry_run:
+                refuse_a_dirty_base(
+                    base_src, "--repair-manifest" if args.repair_manifest else "The upgrade"
+                )
             say("→", f"base: {base_src}")
         elif not ref:
             die(f"{MANIFEST_NAME} records no skeletor_ref — pass --from-dir or --no-base")
