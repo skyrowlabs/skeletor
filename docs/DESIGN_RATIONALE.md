@@ -273,7 +273,35 @@ Two rules do the work:
   nobody is watching.
 * **Nothing is deleted.** A file the template stopped shipping is reported. The
   same posture as `skeletor-check-pins`, which reports a bump and never makes
-  one.
+  one. The single exception proves the rule: a real run clears the sidecars it
+  wrote into `tmp/upgrade/` on a previous run, because *not* clearing them is
+  what broke the sentence that sends a reader there. That deletion is bounded to
+  the two suffixes this tool writes, so a file of the user's in that directory
+  survives, and its count is printed.
+
+### A correct sentence and a correct directory, disagreeing
+
+The conflict and collision reports are the only place this tool tells a reader
+to go **open a file**, and both sentences shipped unconditional. Under
+`--dry-run` the tool printed "what the template changed in each is in
+`tmp/upgrade/<path>.patch`" and wrote nothing there. Separately, a real run
+wrote today's sidecars beside every earlier run's and cleared nothing. Each
+behaviour is defensible alone — a dry run *should* write nothing, and deleting
+from somebody's tree is what this whole tool refuses. Together they produce a
+directory that is a superset of a plan that no longer exists, described by a
+sentence asserting it is the plan just printed. A stale patch and a fresh one
+look identical at the moment somebody is trusting one.
+
+Nothing inside this repository could see it. Both halves are correct to their
+writer; the defect is entirely in what a *reader* does with them, and it took an
+outside consumer standing in front of a four-day-old `ci.yml.patch` to notice.
+That is the same class the workspace guide states for cross-repo seams — a
+writer and a reader inside one head agree with each other by construction.
+
+The general form is worth more than the fix: **an instruction naming a path is a
+claim about that path's contents, and the two are maintained in different
+places.** Wherever output says "look in X", something has to keep X true — which
+here means the tool either writes X, or says it did not.
 
 ### The category with no evidence behind it
 

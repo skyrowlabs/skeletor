@@ -32,6 +32,16 @@ own base→ours diff is written to `tmp/upgrade/`, because a conflict marker
 inside somebody's `CLAUDE.md` is a broken file that looks like a merge, and the
 tree it lands in is one nobody is watching.
 
+`tmp/upgrade/` describes **one** run: a real run clears its own sidecars before
+writing, and `--dry-run` writes none and says so. Both halves are the same bug,
+which proto.pilot reported from the reader's side. The instruction "port what is
+in `tmp/upgrade/<path>.patch`" is only true if that file belongs to the plan
+just printed, and by default it did not — a dry run printed the instruction
+while writing nothing, and a real run left every earlier run's sidecars beside
+today's, against a template HEAD that had since moved. Neither is visible from
+the directory. A patch that is stale and a patch that is fresh look identical at
+exactly the moment somebody is trusting one.
+
 Nothing is committed, nothing is deleted, and a file the template dropped is
 reported rather than removed — the same posture as `bin/skeletor-check-pins`,
 which reports a bump and never makes one.
@@ -103,6 +113,52 @@ def item(message: str) -> None:
 
 def detail(message: str = "") -> None:
     print(f"   {message}" if message else "", file=sys.stderr)
+
+
+#: What this tool writes into `tmp/upgrade/`, and the only thing it will remove
+#: from there. Anything else in that directory is somebody's, not ours.
+SIDECAR_SUFFIXES = (".patch", ".new")
+
+
+def sidecars(patches: Path) -> List[Path]:
+    """Every sidecar a previous run left behind, by our own suffixes."""
+    if not patches.is_dir():
+        return []
+    return sorted(
+        p for p in patches.rglob("*") if p.is_file() and p.suffix in SIDECAR_SUFFIXES
+    )
+
+
+def clear_sidecars(patches: Path) -> int:
+    """Remove the previous run's sidecars, so the directory describes this run.
+
+    The reader is told to go open `tmp/upgrade/<path>` and port what is in it.
+    That instruction is only true if the directory holds this run's plan — and
+    it does not, by default: a real run writes a sidecar per conflict *today*
+    and leaves every sidecar from every earlier run in place, so the directory
+    accumulates into a superset of a plan that no longer exists. A four-day-old
+    patch against a different template HEAD is indistinguishable from a fresh
+    one at the moment somebody is trusting it.
+
+    So each real run clears what it wrote before writing again. A conflict that
+    is still a conflict gets its sidecar back in the same breath; one that is
+    gone had a sidecar describing work that is done. Deleting is the thing this
+    tool refuses everywhere else, which is why the suffixes are ours alone, why
+    nothing outside `tmp/upgrade/` is touched, and why the count is reported.
+    """
+    removed = 0
+    for path in sidecars(patches):
+        path.unlink()
+        removed += 1
+    # Leave no empty scaffolding behind either; `rmdir` refuses a non-empty one,
+    # so anything of the user's keeps its directory.
+    for path in sorted(patches.rglob("*"), reverse=True) if patches.is_dir() else []:
+        if path.is_dir():
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+    return removed
 
 
 def die(message: str) -> "NoReturn":  # type: ignore[valid-type]
@@ -268,6 +324,11 @@ def base_checkout(ref: str, workdir: Path, *, fatal: bool = True) -> Tuple[Optio
         # would reasonably wonder what they failed to fix.
         detail("This is a fact about that scaffold and does not clear — nothing can recover a")
         detail("render that was never committed, and --repair-manifest does not touch the ref.")
+        # Not clearing it and not sizing it are different problems, and only the
+        # first is permanent. A reader told their numbers may be contaminated,
+        # with no way to find out how much, cannot budget a hand-merge.
+        detail("It can still be *bounded*: if the recorded hashes match this base render, the")
+        detail("edits touched nothing this scaffold ships. Watch for the line that says so.")
     tree = workdir / "base-checkout"
     result = subprocess.run(
         ["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(tree), ref],
@@ -459,6 +520,7 @@ def main() -> int:
     cleanup_worktree: Optional[Path] = None
     try:
         base_src: Optional[Path] = None
+        scaffolded_dirty = False
         if args.no_base and args.repair_manifest:
             # The correct hashes ARE the base render's. Without one there is
             # nothing to derive them from, and the alternative — keeping what is
@@ -479,6 +541,7 @@ def main() -> int:
         elif not ref:
             die(f"{MANIFEST_NAME} records no skeletor_ref — pass --from-dir or --no-base")
         else:
+            scaffolded_dirty = ref.endswith("-dirty")
             reachable, cleanup_worktree, ref = base_checkout(ref, workdir, fatal=not hashes)
             if reachable is None:
                 # The history is gone, but the hashes can still say what is
@@ -539,9 +602,36 @@ def main() -> int:
                     if args.json:
                         print(json.dumps({"ok": False, "error": "manifest-drift", "drift": drift}, indent=2))
                     return 1
+                if scaffolded_dirty:
+                    # The dirty-scaffold warning above is unconditional, because
+                    # it is printed before anything can know better. Here we know
+                    # better, and it is worth saying, because that warning tells
+                    # a reader their conflict count may be partly an artefact and
+                    # gives them no way to size it.
+                    #
+                    # A pass here settles it. `cross_check` is a bijection with
+                    # equal hashes in both directions, so it holds exactly when
+                    # the base render reproduces what was scaffolded, file for
+                    # file — an uncommitted edit that changed a shipped file
+                    # would move a hash, one that added a file would be recorded
+                    # and unrendered, one that removed a file would be rendered
+                    # and unrecorded. All three are refusals above. What is left
+                    # is an uncommitted edit to something the scaffold does not
+                    # ship, which by definition changes no classification below.
+                    #
+                    # So the number is real. This is the only run that can say
+                    # so: in the `--no-base` fallback the hashes came from the
+                    # dirty render and there is nothing to check them against.
+                    say("✅", "…and the manifest matches that base exactly, so those edits touched")
+                    detail("no file this scaffold ships. Nothing below is an artefact of them.")
 
         added, updated, merged, conflicted, collided, kept, dropped = [], [], [], [], [], [], []
         patches = target / "tmp" / "upgrade"
+        # A dry run writes nothing, `tmp/upgrade/` included — so it must not be
+        # allowed to imply otherwise. It reads what is there instead, and says
+        # whose plan it is; the real run makes the directory true by clearing it.
+        stale = sidecars(patches) if args.dry_run else []
+        cleared = 0 if args.dry_run else clear_sidecars(patches)
 
         for rel in sorted(set(base_files) | set(head_files)):
             if rel in GENERATED or rel == MANIFEST_NAME:
@@ -660,6 +750,11 @@ def main() -> int:
                         "target": str(target),
                         "base_ref": ref,
                         "dry_run": args.dry_run,
+                        # What is on disk in tmp/upgrade/, so a machine consumer
+                        # is not left inferring it from `dry_run` the way a human
+                        # reader was left inferring it from prose.
+                        "sidecars_cleared": cleared,
+                        "sidecars_stale": [str(pth.relative_to(target)) for pth in stale],
                         "added": added,
                         "updated": updated,
                         "merged": merged,
@@ -672,11 +767,15 @@ def main() -> int:
                 )
             )
 
-        verb = "would be" if args.dry_run else ""
+        if cleared:
+            say("→", f"cleared {cleared} sidecar(s) an earlier run left in tmp/upgrade/")
+            detail("What is there when this finishes describes this run and nothing else.")
+
+        verb = " would be" if args.dry_run else ""
         for label, group, symbol in (
-            (f"new file(s) {verb} added".strip(), added, "✅"),
-            (f"file(s) you never touched {verb} updated".strip(), updated, "✅"),
-            (f"file(s) you edited {verb} merged cleanly".strip(), merged, "✅"),
+            (f"new file(s){verb} added", added, "✅"),
+            (f"file(s) you never touched{verb} updated", updated, "✅"),
+            (f"file(s) you edited{verb} merged cleanly", merged, "✅"),
         ):
             if group:
                 say(symbol, f"{len(group)} {label}")
@@ -690,7 +789,11 @@ def main() -> int:
             for rel in conflicted:
                 item(rel)
             detail()
-            detail("Nothing was written to these. What the template changed in each is in")
+            detail("Nothing was written to these.")
+            if args.dry_run:
+                detail("A real run would put what the template changed in each in")
+            else:
+                detail("What the template changed in each is in")
             if args.no_base:
                 detail("tmp/upgrade/<path>.new — today's template file, to diff against yours.")
                 detail("A real base→ours patch needs the base text, which this run had no way to get.")
@@ -704,8 +807,12 @@ def main() -> int:
             detail()
             detail("Not an edit — these were never in your manifest, so skeletor never wrote")
             detail("them. Two files written for the same purpose now want the same path, and")
-            detail("which one survives is a judgement only you can make. The template's is in")
-            detail("tmp/upgrade/<path>.new; yours is untouched where it has always been.")
+            detail("which one survives is a judgement only you can make. Yours is untouched")
+            if args.dry_run:
+                detail("where it has always been, and a real run would put the template's in")
+                detail("tmp/upgrade/<path>.new.")
+            else:
+                detail("where it has always been; the template's is in tmp/upgrade/<path>.new.")
 
         if dropped:
             say("⚠️ ", f"{len(dropped)} file(s) the template no longer ships — NOT deleted")
@@ -719,7 +826,15 @@ def main() -> int:
 
         detail()
         if args.dry_run:
-            say("⏸️ ", "dry run — nothing was written")
+            say("⏸️ ", "dry run — nothing was written, tmp/upgrade/ included")
+            if stale:
+                detail(f"{len(stale)} file(s) are already in tmp/upgrade/ from an earlier run.")
+                detail("They describe that run's plan against that template, not this one — a real")
+                detail("run clears them before writing. Nothing above refers to them.")
+                for path in stale[:10]:
+                    item(str(path.relative_to(target)))
+                if len(stale) > 10:
+                    detail(f"… and {len(stale) - 10} more")
         else:
             say("✅", "nothing was committed. Read the diff, then commit as one `chore(skeletor):` change")
         return 1 if (conflicted or collided) else 0

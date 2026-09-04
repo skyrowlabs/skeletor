@@ -320,12 +320,65 @@ exactly as it was and writes the template's own diff to `tmp/upgrade/`. A
 conflict marker is never written into somebody's tree, nothing is committed,
 and a file the template stopped shipping is reported rather than deleted.
 
+`tmp/upgrade/` describes **one** run. That took a bug report to arrive at, from
+proto.pilot, who could see it and this repository could not: the conflict and
+collision reports are the only place this tool tells a reader to go *open a
+file*, and both sentences shipped unconditional. A `--dry-run` printed "what the
+template changed in each is in `tmp/upgrade/<path>.patch`" and wrote nothing
+there — while the directory sat holding a four-day-old patch from a real run
+against a template HEAD that had since moved. The two facts were each true and
+the output contained no way to hold them together.
+
+Both halves are now fixed, because they are the same bug: a dry run says
+"nothing was written, `tmp/upgrade/` included" and lists what is already there
+as somebody else's plan, and a real run clears its own sidecars before writing
+so what is there afterwards is this run and nothing else. Clearing is the only
+deletion this tool performs, so it is bounded to the two suffixes it writes —
+a file of the user's in that directory survives — and the count is reported
+rather than silent.
+
+`bin/skeletor-verify`'s `sidecar_gate` is what would have caught it, and it is
+the first thing here to execute the conflict and collision branches at all:
+every other upgrade gate runs against a fresh tree, where the answer is "already
+current" and neither branch is reached. It manufactures the skew through
+`--no-base`, which classifies from the recorded hashes alone — tamper one
+recorded hash for a conflict, delete one entry for a collision — so it needs no
+second checkout and no version skew to arrange. The prose assertion is by
+**pattern**: a block naming the placeholder form `tmp/upgrade/<path>` is a
+direction to open a file, and must be hypothetical under a dry run and
+indicative under a real one. The bare directory in the footer and in the stale
+listing is a statement about the run, not an instruction, and is out of scope by
+construction rather than by allowlist. That predicate is on its second draft —
+the first was per-line, and flagged the continuation line of a correct sentence,
+because these sentences wrap and the tense sits on whichever line it fell on.
+
 The **arguments** are the primary record; the `files` hashes are a fallback for
 when the base render is out of reach — a `--depth 1` clone, a tarball, a
 collected ref. They answer only "has anybody touched this file?", which is
 enough to update the ~103 of 111 files that are machinery, and not enough to
 merge, which needs the base *text*. `--no-base` takes that path deliberately and
 answers "what have I edited?" without git at all.
+
+The **dirty-scaffold warning can now be sized**, which is a different thing from
+clearing it. A tree scaffolded from a dirty checkout records a `-dirty` ref; the
+upgrade strips it, renders the base from the committed part, and warns that
+uncommitted template edits will read as template changes now. That warning is
+permanent and unconditional — it is printed before anything can know better —
+and proto.pilot asked the right question of it: *is my conflict count partly an
+artefact, and how much?* Unanswerable from their side, and answerable from here.
+
+A `cross_check` pass settles it. That check is a bijection with equal hashes in
+both directions, so it holds exactly when the base render reproduces what was
+scaffolded, file for file: an uncommitted edit that changed a shipped file moves
+a hash, one that added a file is recorded and unrendered, one that removed a
+file is rendered and unrecorded. All three are refusals. What survives a pass is
+an uncommitted edit to something the scaffold does not ship, which changes no
+classification at all. So the run says so, and the warning above points forward
+to that line. It is the only run that can: in the `--no-base` fallback the
+hashes came from the dirty render and there is nothing to check them against.
+
+Verified in both directions by planting the edit — inside `template/` it is a
+manifest-drift refusal, outside it the bounding line prints.
 
 A hash is a derived value with a second home, which is normally the thing this
 project refuses. It earns its place by being **checked against its source on

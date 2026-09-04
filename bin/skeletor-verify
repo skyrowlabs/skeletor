@@ -23,9 +23,10 @@ from __future__ import annotations
 
 import argparse
 import ast
-import json
+import hashlib
 import importlib.machinery
 import importlib.util
+import json
 import re
 import shutil
 import subprocess
@@ -1040,6 +1041,128 @@ def populated_tree_gate(tier: str, workdir: Path) -> List[Result]:
     return results
 
 
+def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
+    """`tmp/upgrade/` describes one run, and `--dry-run` says it wrote nothing.
+
+    The conflict and collision reports are the only place this tool tells a
+    reader to go **open a file**, and nothing here had ever executed them: every
+    other upgrade gate runs against a fresh tree, where the answer is "already
+    current" and neither branch is reached. So both of their sentences shipped
+    unconditional. Under `--dry-run` the tool printed "what the template changed
+    in each is in `tmp/upgrade/<path>.patch`" and then wrote nothing there — and
+    the directory is not empty, because a real run never cleared it either. A
+    reader following the instruction opened a four-day-old patch against a
+    template HEAD that had since moved, with nothing in the output to say so.
+    Reported by proto.pilot, from the reader's side, which is the only side it is
+    visible from.
+
+    Two halves, and they are the same bug. The prose half is asserted **by
+    pattern, not by sentence**: every output line naming `tmp/upgrade/` must be
+    hypothetical under a dry run and indicative under a real one. A list of the
+    two sentences would pin the two and stay green for the third somebody adds.
+
+    The skew is manufactured through `--no-base`, which classifies from the
+    recorded hashes alone: tamper one recorded hash and the tool sees a file the
+    template moved *and* the user edited (a conflict), delete another entry and
+    it sees a path the user held before the template claimed it (a collision).
+    That reaches both branches with no second checkout and no version skew to
+    arrange — and `--no-base` skips `cross_check`, which is what makes tampering
+    a legitimate way in rather than an immediate refusal.
+    """
+    results: List[Result] = []
+    started = time.time()
+    manifest_name = load_scaffolder().MANIFEST_NAME
+
+    result, tree = scaffold(tier, "python", workdir, name="sidecars")
+    results.append(Result(f"sidecars: {result.label}", result.ok, result.seconds, result.output))
+    if not result.ok:
+        return results
+
+    manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
+    files = manifest["files"]
+    conflict, collision = sorted(files)[:2]
+    files[conflict] = "0" * 64  # the template moved it — and so did the user, below
+    del files[collision]  # never recorded, so it reads as a file they already had
+    (tree / manifest_name).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    for rel in (conflict, collision):
+        (tree / rel).write_text("theirs, edited\n", encoding="utf-8")
+
+    # A previous run's sidecars, and one file that is not ours. The foreign file
+    # is the point of the suffix rule: this deletes what it wrote and nothing else.
+    patches = tree / "tmp" / "upgrade"
+    (patches / "sub").mkdir(parents=True, exist_ok=True)
+    (patches / "stale.patch").write_text("from a run four days ago\n", encoding="utf-8")
+    (patches / "sub" / "gone.new").write_text("for a file not in today's plan\n", encoding="utf-8")
+    (patches / "notes.md").write_text("mine, not skeletor's\n", encoding="utf-8")
+
+    def snapshot() -> dict:
+        return {
+            str(f.relative_to(tree)): hashlib.sha256(f.read_bytes()).hexdigest()
+            for f in sorted(tree.rglob("*"))
+            if f.is_file() and ".git/" not in str(f.relative_to(tree))
+        }
+
+    def directions(output: str) -> List[str]:
+        """Blank-line-separated blocks that direct the reader at a sidecar.
+
+        `tmp/upgrade/<path>` — the *placeholder* form — is what a direction is:
+        the bare directory appears in the footer and in the stale listing, which
+        are statements about the run rather than instructions to open anything,
+        and only a sentence sending somebody to a file of their own has to spell
+        the file as a variable. That is the discriminator, and it holds by
+        construction rather than by enumerating the two sentences that exist
+        today, which would stay green for the third somebody adds.
+
+        Blocks, not lines: these sentences wrap, and the tense sits on whichever
+        line it fell on. A per-line rule flags the continuation of a correct
+        sentence — which is how this predicate was found to be wrong.
+        """
+        return [b for b in output.split("\n\n") if "tmp/upgrade/<path>" in b]
+
+    upgrade = [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--no-base"]
+
+    before = snapshot()
+    code, output = run([*upgrade, "--dry-run"], cwd=tree)
+    said = directions(output)
+    reached = "merge conflicts" in output and "you already had" in output
+    unwritten = snapshot() == before
+    hypothetical = bool(said) and all("would" in block for block in said)
+    results.append(
+        Result(
+            f"sidecars: --dry-run wrote nothing and said so ({len(said)} direction(s))",
+            code == 1 and reached and unwritten and hypothetical,
+            time.time() - started,
+            f"reached both branches: {reached}\ntree unchanged: {unwritten}\n"
+            f"all hypothetical: {hypothetical}\n{output}",
+        )
+    )
+
+    # Committed, because an upgrade refuses a dirty tree — and rightly: the
+    # tampering above is exactly the "in-progress edits" that refusal protects.
+    run(["git", "add", "-A"], cwd=tree)
+    run(["git", "commit", "-m", "tamper"], cwd=tree)
+
+    started = time.time()
+    code, output = run(upgrade, cwd=tree)
+    said = directions(output)
+    left = sorted(str(f.relative_to(patches)) for f in patches.rglob("*") if f.is_file())
+    results.append(
+        Result(
+            "sidecars: a real run clears its own and keeps yours",
+            code == 1
+            and bool(said)
+            and not any("would" in block for block in said)
+            and "stale.patch" not in left
+            and "sub/gone.new" not in left
+            and "notes.md" in left
+            and f"{collision}.new" in left,
+            time.time() - started,
+            "tmp/upgrade/ holds:\n  " + "\n  ".join(left) + "\n" + output,
+        )
+    )
+    return results
+
+
 def hook_args_for_tree(workdir: Path, tier: str) -> List[str]:
     """black's args from any already-generated tree of this tier."""
     for candidate in (workdir / f"{tier}-python", workdir / f"{tier}-both"):
@@ -1102,6 +1225,10 @@ def main() -> int:
             results.append(gate)
 
         for gate in populated_tree_gate(fullest, workdir):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        for gate in sidecar_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 
