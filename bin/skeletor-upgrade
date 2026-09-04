@@ -76,6 +76,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import shutil
@@ -373,6 +374,67 @@ def files_under(root: Path) -> Dict[str, Path]:
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def importers_of(needs_review: List[str], written: List[str], head_files: Dict[str, Path]) -> Dict[str, List[str]]:
+    """Files that were written cleanly but import one that was not.
+
+    A merge status describes **one file**. It says nothing about what that file
+    depends on — so the single most reassuring line this tool prints, *"file(s)
+    you never touched updated"*, is exactly wrong for a clean file whose
+    behaviour is decided by a conflicted one.
+
+    proto.pilot hit it on the run that proves it is not theoretical.
+    `check_doc_tables.py` conflicted, they kept their own, and
+    `tests/test_docs_pipeline.py` merged clean — listed as untouched, nothing
+    asking them to look — carrying a test written against a `referenced()` that
+    exists only here. Three of its four cases failed on arrival. Every step was
+    correct: the conflict was in one file and the breakage was one import away,
+    in a file with no conflict *because they had never edited it*.
+
+    Their point about the quiet version is the sharper half: had that test been
+    permissive rather than strict, it would have merged clean, passed, and
+    asserted nothing about their tree forever.
+
+    This reports and never refuses. It cannot know whether an import actually
+    matters, only that the pair is worth one look — and the cost of a false
+    name in that list is ten seconds, against a silent failure that survives a
+    green suite.
+
+    Python only, deliberately: `scripts/`, `cli/` and `tests/` are where the
+    coupling is, and inventing a resolver for every language the template might
+    someday ship is how this would become wrong rather than incomplete.
+    """
+    review = set(needs_review)
+    out: Dict[str, List[str]] = {}
+    for rel in written:
+        source = head_files.get(rel)
+        if source is None or not rel.endswith(".py"):
+            continue
+        try:
+            tree = ast.parse(source.read_text(encoding="utf-8"))
+        except (SyntaxError, OSError, UnicodeDecodeError):
+            continue
+        modules = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                # `from scripts.docs import plans` reaches both `scripts/docs/plans.py`
+                # and a name inside `scripts/docs/__init__.py` — try each.
+                modules.add(node.module)
+                modules |= {f"{node.module}.{a.name}" for a in node.names}
+            elif isinstance(node, ast.Import):
+                modules |= {a.name for a in node.names}
+        hits = sorted(
+            {
+                target
+                for module in modules
+                for target in (module.replace(".", "/") + ".py", module.replace(".", "/") + "/__init__.py")
+                if target in review
+            }
+        )
+        if hits:
+            out[rel] = hits
+    return out
 
 
 def cross_check(base_files: Dict[str, Path], recorded: Dict[str, str]) -> List[str]:
@@ -802,6 +864,13 @@ def main() -> int:
             # Recording the render's hash makes it read as edited, which it is.
             shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
 
+        # One call, two renderings. It was computed separately for the JSON and
+        # for the human report — two call sites for one answer, which is the
+        # duplication this repository refuses everywhere else, and it hid a
+        # planted bug: the plant changed one site and the gate asserted on the
+        # other.
+        entangled = importers_of(conflicted + collided, added + updated + merged, head_files)
+
         if args.json:
             print(
                 json.dumps(
@@ -819,6 +888,7 @@ def main() -> int:
                         "merged": merged,
                         "conflicted": conflicted,
                         "collided": collided,
+                        "entangled": entangled,
                         "declined": declined,
                         "dropped": dropped,
                     },
@@ -893,6 +963,18 @@ def main() -> int:
                 detail("current version is in tmp/upgrade/<path>.new:")
                 for rel in fresh:
                     item(rel)
+
+        # After the two blocks that name files needing a decision, because this
+        # is about those files — and before `dropped`, which is unrelated.
+        if entangled:
+            say("⚠️ ", f"{len(entangled)} file(s) applied cleanly import one that did NOT")
+            for rel, targets in sorted(entangled.items()):
+                item(f"{rel} → {', '.join(targets)}")
+            detail()
+            detail("A merge status describes one file and says nothing about what it depends")
+            detail("on. These were written because you had never edited them — which is the")
+            detail("reassuring case, and the wrong one here: their behaviour is decided by a")
+            detail("file above that you kept or must resolve by hand. Check the pair.")
 
         if dropped:
             say("⚠️ ", f"{len(dropped)} file(s) the template no longer ships — NOT deleted")

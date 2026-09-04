@@ -654,6 +654,15 @@ interlock, and which you cannot understand from one file:
    for the word would not have helped either — the drift allowlist's docstring
    promised an escape hatch its reader could not parse.
 
+   **A plant that did not land is indistinguishable from a gate that works.**
+   Both print green. proto.pilot lost an hour to a `sed` whose pattern silently
+   matched nothing; the same afternoon here, a plant passed because the gate
+   cloned committed state and the plant was uncommitted, and another passed
+   because the value under test was computed at two call sites and the plant hit
+   the one the gate did not read. So a plant asserts its target exists before
+   writing, and a green result after planting is a claim about the plant first
+   and the gate second.
+
    **The example you reach for first cannot discriminate.** Picking a fixture is
    picking the simplest one, and simple means fewest ways to be wrong — so the
    convenient case passes under the real fix and the plausible one alike.

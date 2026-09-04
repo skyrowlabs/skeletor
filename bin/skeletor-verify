@@ -1242,9 +1242,27 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
     tag, which is read from git rather than written here so it cannot go stale.
     """
     started = time.time()
-    tag = run(["git", "-C", str(SKELETOR), "describe", "--tags", "--abbrev=0", "HEAD~1"], cwd=SKELETOR)[1].strip()
+    # The newest tag whose TEMPLATE differs from HEAD's — discovered, not
+    # guessed. This was `HEAD~1`, which is the convenient answer and not a
+    # discriminating one: the manifest is only rewritten when the upgrade
+    # applies something, so a tag that changed only `bin/` produces a no-op
+    # upgrade and the ref correctly does not clear. The gate then fails on a
+    # true statement about the wrong scenario — which it did, twice, because
+    # the first fix was lost to a `git reset --hard` during plant testing and
+    # the gate passed anyway on that day's tag.
+    tags = run(["git", "-C", str(SKELETOR), "tag", "--sort=-creatordate"], cwd=SKELETOR)[1].split()
+    tag = next(
+        (
+            t
+            for t in tags
+            if run(["git", "-C", str(SKELETOR), "diff", "--quiet", t, "HEAD", "--", "template/"], cwd=SKELETOR)[0] != 0
+        ),
+        "",
+    )
     if not tag:
-        return [Result("dirty ref: no previous tag to scaffold from", False, time.time() - started, "")]
+        # Loudly, never silently: no tag differs from HEAD under `template/`, so
+        # there is no version gap to upgrade across and this gate cannot run.
+        return [Result("dirty ref: no tag differs from HEAD under template/", False, time.time() - started, "")]
 
     old_checkout = workdir / "dirty-base"
     code, output = run(["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(old_checkout), tag], cwd=SKELETOR)
@@ -1321,6 +1339,91 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
             )
         )
         return results
+    finally:
+        run(["git", "-C", str(SKELETOR), "worktree", "remove", "--force", str(old_checkout)], cwd=SKELETOR)
+
+
+def entangled_gate(workdir: Path) -> List[Result]:
+    """A clean file that imports a conflicted one is named, not left quiet.
+
+    The one reassuring line this tool prints — *"file(s) you never touched
+    updated"* — is exactly wrong when the untouched file's behaviour is decided
+    by one that conflicted. proto.pilot hit it: `check_doc_tables.py` conflicted,
+    they kept theirs, and `tests/test_docs_pipeline.py` merged clean carrying a
+    test written against a function that exists only here. Every step correct;
+    the breakage one import away, in a file with no conflict *because they had
+    never edited it*.
+
+    Reproduced rather than simulated: scaffold at the newest tag whose template
+    differs, rewrite the importee hard enough that the three-way merge cannot
+    resolve it, and leave the importer alone so it takes the clean-update path.
+    A hash-tampered version of this cannot exist — `updated` requires the live
+    file to match the recorded hash while the head render does not, which no
+    amount of manifest editing produces on a single HEAD.
+    """
+    started = time.time()
+    tags = run(["git", "-C", str(SKELETOR), "tag", "--sort=-creatordate"], cwd=SKELETOR)[1].split()
+    importer, importee = "tests/test_docs_pipeline.py", "scripts/check_doc_tables.py"
+    def changed_py(t: str) -> List[str]:
+        out = run(["git", "-C", str(SKELETOR), "diff", "--name-only", t, "HEAD", "--", "template/"], cwd=SKELETOR)[1]
+        return [line for line in out.split() if line.endswith(".py")]
+
+    # The pair must both have moved, AND at least one other Python file must
+    # have moved with them. The `if hits:` filter — report only files that
+    # actually import something conflicted — is unobservable when the upgrade
+    # writes exactly one `.py`, because then "every written file" and "the
+    # importer" are the same set. jam.sense's rule, met here as a fixture that
+    # agrees with the real fix and the noisy one alike: the newest qualifying
+    # tag is the convenient one, and it is the one that cannot discriminate.
+    tag = next(
+        (
+            t
+            for t in tags
+            if run(["git", "-C", str(SKELETOR), "diff", "--quiet", t, "HEAD", "--",
+                    f"template/core/{importer}", f"template/core/{importee}"], cwd=SKELETOR)[0] != 0
+            and len(changed_py(t)) > 2
+        ),
+        "",
+    )
+    if not tag:
+        return [Result(f"entangled: no tag moves {importer}, {importee} and another .py", False, time.time() - started, "")]
+
+    old_checkout = workdir / "entangled-base"
+    run(["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(old_checkout), tag], cwd=SKELETOR)
+    try:
+        target = workdir / "entangled-tree"
+        run(
+            [sys.executable, str(old_checkout / "bin" / "skeletor-new"), str(target),
+             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--force"],
+            cwd=SKELETOR,
+        )
+        # Rewritten, not edited: a small change merges cleanly, and a clean merge
+        # is not the case under test.
+        clobber = target / importee
+        clobber.write_text(
+            "\n".join("### OURS ###" for _ in clobber.read_text(encoding="utf-8").splitlines()) + "\n",
+            encoding="utf-8",
+        )
+        run(["git", "add", "-A"], cwd=target)
+        run(["git", "commit", "-m", "ours"], cwd=target)
+
+        code, output = run(
+            [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(target), "--dry-run", "--json"],
+            cwd=target,
+        )
+        payload = json.loads(output[output.index("{") : output.rindex("}") + 1]) if "{" in output else {}
+        entangled = payload.get("entangled", {})
+        return [
+            Result(
+                "entangled: a clean file importing a conflicted one is named",
+                importee in payload.get("conflicted", [])
+                and importer in payload.get("updated", [])
+                and entangled == {importer: [importee]},
+                time.time() - started,
+                f"conflicted={payload.get('conflicted')}\nupdated={payload.get('updated')}\n"
+                f"entangled={entangled}\n{output}",
+            )
+        ]
     finally:
         run(["git", "-C", str(SKELETOR), "worktree", "remove", "--force", str(old_checkout)], cwd=SKELETOR)
 
@@ -1682,6 +1785,9 @@ def main() -> int:
             results.append(gate)
 
         for gate in dirty_ref_gate(workdir):
+            results.append(gate)
+
+        for gate in entangled_gate(workdir):
             results.append(gate)
 
         for gate in components_gate(workdir):
