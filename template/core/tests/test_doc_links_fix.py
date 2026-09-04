@@ -34,7 +34,6 @@ def tree(tmp_path, monkeypatch):
     monkeypatch.setattr(links, "DOCS_DIR", tmp_path / "docs")
     monkeypatch.setattr(links, "IGNORE_FILE", tmp_path / ".validate-ignore")
     monkeypatch.setattr(links, "SCAN_ROOTS", ["docs"])
-    monkeypatch.setattr(links, "EXTRA_FILES", [])
 
     def write(name: str, body: str) -> Path:
         path = tmp_path / "docs" / name
@@ -42,6 +41,48 @@ def tree(tmp_path, monkeypatch):
         return path
 
     return write
+
+
+def test_a_new_root_document_is_enrolled_by_existing(tmp_path, monkeypatch):
+    """A fourth root `.md` is checked without anybody adding it to anything.
+
+    This was a hand-written list of the three the template ships, so a fresh
+    tree was complete and every real tree diverged from there — most reliably
+    through `CHANGELOG.md`, which Release Please writes at the root and which is
+    the document most made of links. The checker printed `0 broken links` over
+    it: a clean report on a file it had never opened.
+
+    The assertion is on the **set**, not on four names. Naming the fourth would
+    reproduce the bug one entry later.
+    """
+    monkeypatch.setattr(links, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(links, "SCAN_ROOTS", [])
+    for name in ("README.md", "CHANGELOG.md", "NOTES.md"):
+        (tmp_path / name).write_text("# x\n", encoding="utf-8")
+    (tmp_path / "not-markdown.txt").write_text("x\n", encoding="utf-8")
+
+    found = {p.name for p in links.markdown_files()}
+
+    assert found == {"README.md", "CHANGELOG.md", "NOTES.md"}, found
+
+
+def test_a_broken_link_in_a_root_document_is_reported(tmp_path, monkeypatch):
+    """Planted, because a green run after a widening proves nothing.
+
+    The widening above makes the checker *look* at a root document. Only a
+    deliberately broken link proves it also *reports* on one — which is the half
+    that failed before, and the half a passing suite cannot distinguish from a
+    file nobody read.
+    """
+    monkeypatch.setattr(links, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(links, "DOCS_DIR", tmp_path / "docs")
+    monkeypatch.setattr(links, "IGNORE_FILE", tmp_path / ".validate-ignore")
+    monkeypatch.setattr(links, "SCAN_ROOTS", [])
+    (tmp_path / "NOTES.md").write_text("# N\n\nSee [gone](does-not-exist.md).\n", encoding="utf-8")
+
+    dead_paths, _ = links.scan()
+
+    assert any("NOTES.md" in entry for entry in dead_paths), dead_paths
 
 
 def test_repoints_a_heading_that_grew(tree):

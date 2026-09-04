@@ -44,7 +44,6 @@ BASELINE = SCRIPTS_DIR / "doc_links_baseline.json"
 IGNORE_FILE = GITHUB_DIR / "scripts" / ".validate-ignore"
 
 SCAN_ROOTS = ["docs", ".claude", ".github"]
-EXTRA_FILES = ["AGENTS.md", "CLAUDE.md", "README.md"]
 
 _LINK = re.compile(r"(?<!!)\[(?P<text>[^\]]*)\]\((?P<href>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
 _HEADING = re.compile(r"^(#{1,6})\s+(?P<text>.+?)\s*$", re.MULTILINE)
@@ -75,10 +74,34 @@ def _ignored() -> set:
 
 
 def markdown_files() -> List[Path]:
+    """Every markdown file this checker is responsible for.
+
+    The scan roots, plus **every `.md` at the top level** — discovered, not
+    listed. It used to be `EXTRA_FILES = ["AGENTS.md", "CLAUDE.md", "README.md"]`,
+    which is the three the template happens to ship, so a fresh tree was complete
+    and every tree diverged from there the moment anybody added a fourth. The
+    check then printed `0 broken links` over a document it had never opened,
+    which is the worst available failure: a clean report on an unread file.
+
+    Not hypothetical, and not only a user problem — **`CHANGELOG.md` is written
+    at the repository root by Release Please**, which this template ships and
+    configures. Every tree that has cut a release has had an unchecked root
+    document, and it is the document most made of links.
+
+    Reported by proto.pilot, who hit it on a `NOTES.md` their own README tells a
+    reader to open first, an hour after filing a plan broke two links in it.
+
+    The glob lives **inside this function on purpose**. Bound at module scope it
+    would be evaluated at import and could not follow a patched `PROJECT_ROOT` —
+    so the test fixture would need a new constant to stub, and a listed thing
+    would have been replaced by a derived thing that still needed hand
+    maintenance at the seam. proto.pilot found that edge too; it is the same
+    lesson `scripts/paths.py` records about redirecting a tree.
+    """
     out = []
     for root in SCAN_ROOTS:
         out.extend(sorted((PROJECT_ROOT / root).rglob("*.md")))
-    out.extend(PROJECT_ROOT / name for name in EXTRA_FILES if (PROJECT_ROOT / name).exists())
+    out.extend(sorted(PROJECT_ROOT.glob("*.md")))
     return [p for p in out if "node_modules" not in p.parts]
 
 
