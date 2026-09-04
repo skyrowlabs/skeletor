@@ -291,6 +291,35 @@ def evaluate() -> List[Finding]:
 MARKS = {"current": "✅", "behind": "⬆️", "disagrees": "❌", "unknown": "❔", "allowlisted": "🅰️"}
 
 
+def stale_exemptions(findings: List[Finding]) -> List[str]:
+    """Allowlist entries that no longer exempt anything.
+
+    A reason makes an exemption a decision record; nothing keeps the decision
+    true. Two ways for one to expire, and only the second is obvious:
+
+    * **The pin caught up.** `evaluate()` marks it `current` and never consults
+      the allowlist, so the entry is silently inert — and stays, describing a
+      refusal nobody is making any more.
+    * **The pin is gone.** Worse, because the key can come back: `pypi:black`
+      removed and later reintroduced would arrive already exempt from the report
+      that exists to notice it is behind, on a reason written for a different
+      decision years earlier.
+
+    The same rule the generated tree now applies to its own four allowlists —
+    stated in the template's `scripts/allowlist.py`, and this is the tool that
+    ships it, so it should not be the one place still exempt from it.
+    """
+    exempt = allowlisted()
+    live = {f.pin.key: f.status for f in findings}
+    stale = []
+    for key in sorted(exempt):
+        if key not in live:
+            stale.append(f"{key}: allowlisted, but no pin by that name is discovered any more")
+        elif live[key] not in ("behind", "allowlisted", "disagrees"):
+            stale.append(f"{key}: allowlisted, but it is {live[key]} — the exemption did its job")
+    return stale
+
+
 def render(findings: List[Finding], markdown: bool) -> str:
     lines = []
     if markdown:
@@ -333,6 +362,7 @@ def main() -> int:
     args = parser.parse_args()
 
     findings = evaluate()
+    stale = stale_exemptions(findings)
 
     if args.json:
         print(json.dumps(
@@ -349,15 +379,29 @@ def main() -> int:
             ],
             indent=2,
         ))
+        if stale:
+            # A consumer reading only the findings array would see a clean
+            # report while the allowlist quietly exempts something that is gone.
+            print(json.dumps({"stale_exemptions": stale}, indent=2))
     else:
         print(render(findings, args.markdown))
+
+    if stale and not args.json:
+        print()
+        print(f"🅰️  {len(stale)} allowlist entry/entries no longer exempt anything:")
+        for line in stale:
+            print(f"   · {line}")
+        print("   Delete them from .github/pin-allowlist.yaml rather than re-justifying.")
 
     if args.fail_on_stale:
         # An unreachable registry is not evidence of staleness. Failing on it
         # turns a network blip into a red gate, and a gate that goes red for
         # reasons unrelated to the repo is a gate people start ignoring.
         blocking = [f for f in findings if f.status in ("behind", "disagrees")]
-        return 1 if blocking else 0
+        # A stale exemption blocks too. It is not a network condition and not a
+        # judgement call — the thing it described is gone, and leaving it is how
+        # a future pin arrives pre-exempted from this very report.
+        return 1 if (blocking or stale) else 0
     return 0
 
 

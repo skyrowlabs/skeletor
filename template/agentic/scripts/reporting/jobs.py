@@ -49,6 +49,7 @@ from zoneinfo import ZoneInfo
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from scripts import allowlist  # noqa: E402
 from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 
 #: Where every cron line appends its raw output. The structured per-run outcome
@@ -158,17 +159,12 @@ JOBS_BY_KEY: Dict[str, Job] = {job.key: job for job in JOBS}
 
 
 def _allowlisted() -> Dict[str, str]:
-    """Jobs deliberately registered but NOT scheduled, with their reasons."""
-    if not SCHEDULE_ALLOWLIST.exists():
-        return {}
-    out = {}
-    for line in SCHEDULE_ALLOWLIST.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or ":" not in line:
-            continue
-        key, _, reason = line.partition(":")
-        out[key.strip()] = reason.strip().strip("\"'")
-    return out
+    """Jobs deliberately registered but NOT scheduled, with their reasons.
+
+    Read through `scripts/allowlist.py`, the one reader every allowlist in this
+    repository shares. There were four copies of this parsing and they drifted.
+    """
+    return allowlist.read(SCHEDULE_ALLOWLIST)
 
 
 def crontab_block() -> str:

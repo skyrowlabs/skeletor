@@ -106,6 +106,14 @@ def test_allowlisted_jobs_give_a_reason():
 
 
 def test_allowlist_names_real_jobs():
+    """An entry naming a job that does not exist is a stale exemption.
+
+    The direction with teeth: a job key that leaves the registry and later comes
+    back for something else would arrive **pre-exempted from the crontab**, and
+    nobody chose that. The job would be registered, documented, and silently
+    never scheduled — which is the failure `test_allowlisted_jobs_give_a_reason`
+    exists to prevent, arriving through the allowlist instead of past it.
+    """
     unknown = set(_allowlisted()) - set(JOBS_BY_KEY)
     assert not unknown, f"Allowlist names jobs that do not exist: {sorted(unknown)} — a stale exemption"
 

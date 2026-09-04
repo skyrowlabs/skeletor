@@ -39,23 +39,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from cli import cli as root  # noqa: E402
+from scripts import allowlist  # noqa: E402
 from scripts.paths import CLI_DIR  # noqa: E402
 
 ALLOWLIST = Path(__file__).resolve().parent / "cli_smoke_allowlist.yaml"
 
 
 def _allowlist() -> Dict[str, str]:
-    """Minimal reader for the flat `key: reason` shape this file uses."""
-    if not ALLOWLIST.exists():
-        return {}
-    out: Dict[str, str] = {}
-    for raw in ALLOWLIST.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or ":" not in line:
-            continue
-        key, _, reason = line.partition(":")
-        out[key.strip()] = reason.strip()
-    return out
+    """Exemptions, read through the one reader every allowlist here shares."""
+    return allowlist.read(ALLOWLIST)
 
 
 def _walk(command: click.Command, path: Tuple[str, ...] = ()) -> List[Tuple[Tuple[str, ...], click.Command]]:
@@ -149,6 +141,24 @@ def test_every_command_is_either_runnable_or_has_a_reason():
         if not _needs_arguments(c) and not _exempt(p) and " ".join(p) not in [" ".join(r) for r in RUNNABLE]
     ]
     assert not unaccounted, unaccounted
+
+
+def test_the_allowlist_names_commands_that_exist():
+    """An entry naming no command is a stale exemption, and this one has teeth.
+
+    The allowlist here does not soften a check — it says *do not run this
+    command at all*. So an entry that outlives its command is not clutter: the
+    name can come back for something else, and the new command arrives exempt
+    from ever being executed. It would have `--help` proven and nothing else,
+    which is the exact gap `test_read_only_commands_succeed` exists to close.
+
+    A group exempts its children, so a key is live if it prefixes any command —
+    matched the same way `_exempt` matches, from `COMMANDS`, so the two cannot
+    disagree about what an entry covers.
+    """
+    live = {" ".join(path[:depth]) for path, _ in COMMANDS for depth in range(1, len(path) + 1)}
+    stale = allowlist.stale(_allowlist(), lambda key: None if key in live else "no such command")
+    assert not stale, "\n".join([*stale, allowlist.STALE_ADVICE])
 
 
 @pytest.mark.parametrize("path", RUNNABLE, ids=lambda p: " ".join(p))

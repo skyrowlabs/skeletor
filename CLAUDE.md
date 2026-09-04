@@ -631,6 +631,19 @@ interlock, and which you cannot understand from one file:
    rule in another costume: a cache validated on every run that does not need it
    cannot rot unnoticed.
 
+   **One reader, discovered coverage.** The tree ships four allowlists, and for
+   a while they shipped four copies of the same parsing — which is how a shared
+   format actually fails: each copy is right about the keys its own caller uses,
+   and nothing compares them. `scripts/allowlist.py` owns the reading now.
+   `bin/skeletor-verify`'s `allowlist_gate` owns the coverage, and it
+   **discovers** `*_allowlist.yaml` rather than listing them, planting a
+   meaningless entry in each and requiring the tree's own gates to go red. That
+   gate exists because the first pass at this rule was itself a list: two
+   allowlists got a staleness check because they were the two in front of me,
+   and the two missed were the two nothing would have complained about. A grep
+   for the word would not have helped either — the drift allowlist's docstring
+   promised an escape hatch its reader could not parse.
+
    **The tell that a predicate is wrong is not the number of exemptions — it is
    what they are about.** This repository has stated the rule twice with two
    different numbers ("four things", "five things"), which is itself the

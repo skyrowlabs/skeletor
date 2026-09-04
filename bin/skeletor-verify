@@ -1163,6 +1163,73 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
     return results
 
 
+def allowlist_gate(tree: Path, venv_python: Path) -> Result:
+    """Every allowlist in the tree fails when it holds an entry nobody needs.
+
+    This is a sweep, and it exists because the first pass at this rule was not.
+    Two allowlists got a staleness check because they were the two in front of
+    me; the tree shipped four, and the two I missed were the two nothing would
+    have complained about — one with no check at all, one with a single
+    direction. That is the failure this repository's Invariant 2 is about,
+    committed while writing the sentence that states it.
+
+    So the set is **discovered**, not listed: any `*_allowlist.yaml` anywhere in
+    the generated tree is enrolled by existing. A fifth one added next year is
+    covered without anybody remembering, and one deleted stops being checked
+    without a stale entry here.
+
+    The method is to plant the bug rather than to inspect the source. A grep for
+    "does this file mention staleness" would pass on a check that mentions it
+    and does not do it — which is precisely the shape of the drift allowlist,
+    whose docstring promised an escape hatch its reader could not parse. So each
+    allowlist gets a deliberately meaningless entry and the tree's own gates must
+    go red. What turns red is not this gate's business; that a consumer notices
+    is the whole assertion.
+
+    Cost is one suite run per allowlist, which is why it runs on one tier.
+    """
+    started = time.time()
+    found = sorted(tree.rglob("*_allowlist.yaml"))
+    checks = sorted((tree / "scripts").glob("check_*.py"))
+    failures: List[str] = []
+
+    def gates_are_red() -> bool:
+        """Any consumer objecting is enough. None of them objecting is the bug."""
+        code, _ = run([str(venv_python), "-m", "pytest", "-m", "unit", "-q", "-x"], cwd=tree)
+        if code != 0:
+            return True
+        return any(run([str(venv_python), str(check)], cwd=tree)[0] != 0 for check in checks)
+
+    for path in found:
+        original = path.read_text(encoding="utf-8")
+        rel = path.relative_to(tree).as_posix()
+        try:
+            # A key nothing in the tree can possibly resolve, with a reason — so
+            # the only thing wrong with it is that it exempts nothing. An entry
+            # without a reason would be caught by a different rule and would
+            # make this gate pass for the wrong cause.
+            path.write_text(
+                original + "\n__skeletor_verify_planted__: a deliberately meaningless exemption\n",
+                encoding="utf-8",
+            )
+            if not gates_are_red():
+                failures.append(f"{rel}: a meaningless entry was accepted — nothing checks this allowlist")
+        finally:
+            path.write_text(original, encoding="utf-8")
+
+    # A sweep over zero files is green and worth nothing — the same reason the
+    # lint gates assert they found the tree.
+    if not found:
+        failures.append("no *_allowlist.yaml found — the discovery is broken, not the tree")
+
+    return Result(
+        f"every allowlist rejects a stale entry ({len(found)} found)",
+        not failures,
+        time.time() - started,
+        "\n".join(failures),
+    )
+
+
 def declined_gate(tier: str, workdir: Path) -> List[Result]:
     """A file skeletor wrote and the user deleted is not put back.
 
@@ -1318,6 +1385,12 @@ def main() -> int:
             results.append(gate)
 
         for gate in populated_tree_gate(fullest, workdir):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        allow_tree = workdir / f"{fullest}-python"
+        if allow_tree.exists():
+            gate = allowlist_gate(allow_tree, venv_python)
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 

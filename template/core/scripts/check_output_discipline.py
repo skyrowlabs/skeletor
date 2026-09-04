@@ -34,12 +34,13 @@ import ast
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts import allowlist  # noqa: E402
 from scripts.output import STATE_SYMBOLS, detail, emit, fail, item, ok  # noqa: E402
 from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 
@@ -64,21 +65,8 @@ _GLYPHS = tuple(sorted({symbol.strip() for symbol in STATE_SYMBOLS.values()}))
 
 
 def _allowlist() -> Dict[str, str]:
-    """Minimal reader for the flat `path: reason` shape this file uses.
-
-    A YAML parser would be more correct and would add a dependency to a check
-    that must run on any host, including one with nothing installed yet.
-    """
-    if not ALLOWLIST.exists():
-        return {}
-    out: Dict[str, str] = {}
-    for raw in ALLOWLIST.read_text(encoding="utf-8").splitlines():
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#") or ":" not in stripped:
-            continue
-        key, _, reason = stripped.partition(":")
-        out[key.strip()] = reason.strip().strip("\"'")
-    return out
+    """Exemptions, read through the one reader every allowlist here shares."""
+    return allowlist.read(ALLOWLIST)
 
 
 def _prose_lines(text: str) -> set:
@@ -139,7 +127,7 @@ def _findings_for(path: Path) -> Dict[str, List[str]]:
     return {"spelled": spelled, "streams": streams, "unflagged": unflagged}
 
 
-def _stale(allowlist: Dict[str, str]) -> List[str]:
+def _stale(entries: Dict[str, str]) -> List[str]:
     """Allowlist entries that no longer need to exist.
 
     A written reason makes an exemption a decision record. It does not make the
@@ -156,29 +144,33 @@ def _stale(allowlist: Dict[str, str]) -> List[str]:
     is an exemption outliving its reason; an entry naming nothing is an
     exemption looking for a file to attach itself to.
     """
-    stale = []
-    for rel in sorted(allowlist):
+
+    def why(rel: str) -> Optional[str]:
         path = PROJECT_ROOT / rel
         if not path.exists():
-            stale.append(f"{rel}: allowlisted, but there is no such file")
-        elif not any(_findings_for(path).values()):
-            stale.append(f"{rel}: allowlisted, but it passes the check now")
-    return stale
+            return "there is no such file"
+        if not any(_findings_for(path).values()):
+            return "it passes the check now"
+        return None
+
+    return allowlist.stale(entries, why)
 
 
 def scan() -> Dict[str, List[str]]:
     """Every place a symbol is spelled, a stream is picked, or `--json` is absent."""
-    allowlist = _allowlist()
+    # `exempt`, not `allowlist` — the module of that name is imported above, and
+    # a local shadowing it inside the one function that also calls it is a trap.
+    exempt = _allowlist()
     found: Dict[str, List[str]] = {"spelled": [], "streams": [], "unflagged": []}
 
     for path in _sources():
         rel = path.relative_to(PROJECT_ROOT).as_posix()
-        if rel == OWNER or rel in allowlist:
+        if rel == OWNER or rel in exempt:
             continue
         for group, findings in _findings_for(path).items():
             found[group].extend(findings)
 
-    found["stale"] = _stale(allowlist)
+    found["stale"] = _stale(exempt)
     return found
 
 
@@ -204,8 +196,7 @@ def main() -> int:
         detail("Status lines come from scripts/output.py — see docs/rules/output.md.")
         detail("A deliberate exception goes in scripts/output_allowlist.yaml WITH A REASON.")
         if findings["stale"]:
-            detail("A stale entry is deleted, not re-justified: the divergence it recorded is")
-            detail("gone, so the entry now exempts a file nobody decided to exempt.")
+            detail(allowlist.STALE_ADVICE)
         return 1
 
     ok(f"{checked} file(s) route output through scripts/output.py ({len(exempt)} exempt by allowlist)")

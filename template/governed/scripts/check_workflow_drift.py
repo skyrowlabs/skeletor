@@ -31,12 +31,13 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts import allowlist  # noqa: E402
 from scripts.output import detail, emit, fail, item, ok  # noqa: E402
 from scripts.paths import GITHUB_DIR, SCRIPTS_DIR  # noqa: E402
 
@@ -74,23 +75,8 @@ def key_for(workflow: str, job_id: str) -> str:
 
 
 def _allowlist() -> dict:
-    """Minimal reader for the flat `key: reason` shape this file uses.
-
-    Split on the first colon **followed by whitespace**, because the key itself
-    contains a colon (see `key_for`) and the reason may contain several.
-    """
-    if not ALLOWLIST.exists():
-        return {}
-    out = {}
-    for line in ALLOWLIST.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        match = re.match(r"^(.*?):\s+(.*)$", line)
-        if not match:
-            continue
-        out[match.group(1).strip()] = match.group(2).strip().strip("\"'")
-    return out
+    """Exemptions, read through the one reader every allowlist here shares."""
+    return allowlist.read(ALLOWLIST)
 
 
 def _jobs(path: Path) -> Dict[str, str]:
@@ -126,7 +112,8 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    allowlist = _allowlist()
+    # `exempt`, not `allowlist` — the module of that name is imported above.
+    exempt = _allowlist()
     enrolled, findings = [], []
     # What each exempt job is actually missing, so an entry can be asked whether
     # it is still describing something. Collected for every enrolled job rather
@@ -141,22 +128,25 @@ def main() -> int:
             enrolled.append(key)
             missing = [f"{key}: missing '{step}' — {why}" for step, why in REQUIRED_STEPS.items() if step not in body]
             divergence[key] = missing
-            if key not in allowlist:
+            if key not in exempt:
                 findings.extend(missing)
 
     # An exemption is a decision record, and nothing kept the decision current.
     # An entry whose job was fixed has outlived its reason; one whose job is
     # gone is worse — the job name can come back for something else and arrive
     # already exempt, which is an exemption nobody chose.
-    stale = [
-        f"{key}: allowlisted, but {'no enrolled job by that name' if key not in divergence else 'it no longer diverges'}"
-        for key in sorted(allowlist)
-        if key not in divergence or not divergence[key]
-    ]
+    def why(key: str) -> Optional[str]:
+        if key not in divergence:
+            return "no enrolled job by that name"
+        if not divergence[key]:
+            return "it no longer diverges"
+        return None
+
+    stale = allowlist.stale(exempt, why)
     findings.extend(stale)
 
     if args.json:
-        emit({"enrolled": enrolled, "findings": findings, "exempt": sorted(allowlist), "stale": stale})
+        emit({"enrolled": enrolled, "findings": findings, "exempt": sorted(exempt), "stale": stale})
 
     if findings:
         fail(f"{len(findings)} drift finding(s) across {len(enrolled)} enrolled job(s):")
@@ -166,11 +156,10 @@ def main() -> int:
         detail("Fix the job, or record the divergence in scripts/workflow_drift_allowlist.yaml")
         detail("WITH A REASON. An intended divergence is fine; one nobody decided is the bug.")
         if stale:
-            detail("A stale entry is deleted, not re-justified: what it recorded is gone, so it")
-            detail("now exempts a job nobody decided to exempt.")
+            detail(allowlist.STALE_ADVICE)
         return 1
 
-    ok(f"{len(enrolled)} enrolled job(s) consistent ({len(allowlist)} exempt by allowlist)")
+    ok(f"{len(enrolled)} enrolled job(s) consistent ({len(exempt)} exempt by allowlist)")
     return 0
 
 
