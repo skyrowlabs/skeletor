@@ -451,8 +451,24 @@ def main() -> int:
                     detail("so a manifest that cannot describe its own base would silently classify")
                     detail("an edited file as untouched. Refusing rather than guessing.")
                     detail()
-                    detail("If the manifest was written by an older skeletor rather than edited by")
-                    detail("hand, --repair-manifest rewrites it from this base render.")
+                    if args.from_dir and ref:
+                        # The likeliest cause here is not a stale manifest at
+                        # all: --from-dir overrides the base, so naming a
+                        # checkout that is not this tree's ref makes every
+                        # entry disagree by construction. Recommending
+                        # --repair-manifest in that state is actively harmful —
+                        # it would write hashes of the wrong base while leaving
+                        # `skeletor_ref` naming the right one, so the two halves
+                        # of the manifest would describe different skeletors and
+                        # only --no-base would ever act on the lie.
+                        detail(f"--from-dir overrode the base, and this tree records {ref}.")
+                        detail("If that checkout is not at that ref, the base is wrong rather than the")
+                        detail("manifest — drop --from-dir and let the recorded ref be resolved.")
+                        detail("Do NOT --repair-manifest to silence this: it rewrites the hashes from")
+                        detail("whatever base you named and leaves the ref alone.")
+                    else:
+                        detail("If the manifest was written by an older skeletor rather than edited by")
+                        detail("hand, --repair-manifest rewrites it from this base render.")
                     # The full list on stdout when something is parsing this. A
                     # consumer that reads the truncated human list sees a fifth
                     # of the problem and believes it has all of it.
