@@ -19,6 +19,10 @@ import click
 
 from cli.helpers import PROJECT_ROOT, detail, fail, git, item, line, ok, run
 
+# Bootstrap only: `scripts/` is not a package on the path for a CLI module.
+sys.path.insert(0, str(PROJECT_ROOT))
+from scripts import tree_lock  # noqa: E402
+
 
 @click.group()
 def worktree() -> None:
@@ -80,6 +84,24 @@ def drop(path: str, force: bool) -> None:
     if dirty and not force:
         fail(f"{target} has {len(dirty.splitlines())} uncommitted change(s) — refusing")
         detail("That work belongs to somebody. Commit it, or pass --force if you are sure.")
+        sys.exit(1)
+
+    # The third guard, and the one that was missing. `git status` and unpushed
+    # commits both describe the tree's *contents*; neither says whether somebody
+    # is using it right now. A suite run does not dirty a tree and does not
+    # create commits, so a checkout with a live `suite` hold is clean, pushed,
+    # and was removed here with a green tick — out from under a running job.
+    #
+    # `root=target`, not a bare `holders()`. Holds are per-checkout, so the
+    # module constant answers about *this* tree: the obvious fix would have
+    # returned an empty list and reported "nothing holding it" about a tree it
+    # never looked at. Naming the tree is the whole point of the guard.
+    held = tree_lock.holders(root=target)
+    if held and not force:
+        fail(f"{target} has {len(held)} live hold(s):")
+        for hold in held:
+            item(f"{hold.owner} (pid {hold.pid}, {hold.kind} hold)")
+        detail("Something is working in there now. Wait for it, or pass --force if you are sure.")
         sys.exit(1)
 
     unpushed = subprocess.run(

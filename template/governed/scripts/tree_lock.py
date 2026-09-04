@@ -116,11 +116,39 @@ def sweep() -> int:
     return removed
 
 
-def holders() -> List[Hold]:
-    """Every live hold on this tree, newest first."""
-    sweep()
+def lock_dir_for(root: Optional[Path] = None) -> Path:
+    """The lock directory belonging to a checkout — this one by default.
+
+    Holds are **per-checkout**, structurally rather than by a recorded field:
+    `PROJECT_ROOT` resolves from `scripts/paths.py`'s own location, and a git
+    worktree has its own copy of that file, so each checkout gets its own
+    `tmp/tree-locks/`. A hold in one tree therefore cannot strand another, with
+    no root field and no compatibility rule to maintain.
+
+    jam.sense reached the same outcome by the opposite route — one lock
+    directory per *repository*, plus a `root` field on each hold to claw back
+    the over-reach — because they need to answer "who is holding **any** tree of
+    this repo". That question is not free, and this design deliberately cannot
+    ask it.
+
+    What it must be able to ask is "is somebody working in **that** tree", and
+    that is what this function is for. A caller reasoning about a checkout other
+    than its own has to *name* it — the module constant is this tree's answer,
+    and using it about another tree returns an empty list rather than an error.
+    `{{CLI}} worktree drop` shipped exactly that way: it decided the fate of a
+    checkout it never asked about, and would have kept doing so if somebody had
+    "fixed" it by calling `holders()` with no argument.
+    """
+    return (Path(root) if root else PROJECT_ROOT) / "tmp" / "tree-locks"
+
+
+def holders(root: Optional[Path] = None) -> List[Hold]:
+    """Every live hold on a tree, newest first. This tree unless told otherwise."""
+    lock_dir = lock_dir_for(root)
+    if root is None:
+        sweep()
     out = []
-    for path in LOCK_DIR.glob("*.json"):
+    for path in lock_dir.glob("*.json"):
         try:
             out.append(Hold(**json.loads(path.read_text(encoding="utf-8"))))
         except (json.JSONDecodeError, TypeError, OSError):
