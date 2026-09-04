@@ -1010,6 +1010,28 @@ def populated_tree_gate(tier: str, workdir: Path) -> List[Result]:
     if not result.ok:
         return results
 
+    # `--force` writes over whatever is in its way and every loss is silent: a
+    # file that is gone raises nothing. The guidance used to be "review the diff
+    # file by file", which on a real repository points at ~100 files of which a
+    # handful matter — sky.boss measured twelve overwrites, four of them
+    # load-bearing, including a CLI wrapper that lost `PYTHONSAFEPATH` and a
+    # conftest that lost the redirect keeping the suite out of the operator's
+    # real state directory. Naming them is the fix, so the naming is asserted.
+    #
+    # Both directions. `README.md` is a decoy this gate plants *and* a file the
+    # template ships, so it must be named; `src/app.py` is a decoy the template
+    # never touches, so naming it would mean the report is reporting the tree
+    # rather than the overwrites.
+    overwrite_report = result.output[result.output.find("OVERWRITTEN") :] if "OVERWRITTEN" in result.output else ""
+    results.append(
+        Result(
+            "populated: --force names the files it overwrote",
+            "README.md" in overwrite_report and "src/app.py" not in overwrite_report,
+            0.0,
+            result.output,
+        )
+    )
+
     reference, clean = scaffold(tier, "python", workdir, name="populated-reference")
     results.append(Result(f"populated: reference {reference.label}", reference.ok, reference.seconds, reference.output))
     if not reference.ok:

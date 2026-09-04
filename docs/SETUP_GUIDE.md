@@ -331,9 +331,34 @@ and the adoption has made things worse.
 
 Do it in this order, one commit each:
 
-1. **Scaffold into the existing tree** with `--force`, then review the
-   diff file by file. Keep your own `README.md`, `.gitignore` and CI if they are
-   better; take the rules, the docs pipeline and the CLI.
+0. **Scaffold from a tagged skeletor, never a dirty working copy.** The scaffold
+   records `git describe --tags --dirty`, and an upgrade renders its base from
+   the committed part — so uncommitted template edits are baked into your tree
+   and reproducible by nothing. `cross_check` catches it and refuses on the
+   *next* upgrade rather than this one, which is a late place to find out. The
+   person most likely to hit this is somebody adopting from a checkout they are
+   also working in. sky.boss hit it on the first attempt.
+
+1. **Scaffold into the existing tree** with `--force`, then review **the files it
+   says it overwrote** — it prints them by name, and that list is the review.
+   Keep your own `README.md`, `.gitignore` and CI if they are better; take the
+   rules, the docs pipeline and the CLI.
+
+   Two things about that list, both measured on a real repository rather than
+   assumed. **Every loss is silent**: `--force` writes over whatever is in its
+   way, and a line that is gone raises nothing. sky.boss lost `PYTHONSAFEPATH`
+   from its CLI wrapper — which is what stops `python -m cli` importing whatever
+   `cli/` is in the current directory, and whose absence had already generated a
+   full set of systemd units with the wrong `WorkingDirectory`, successfully —
+   and a `conftest.py` redirect that kept the suite out of the operator's real
+   state directory. Neither would have failed a test.
+
+   And **a file you keep is a standing merge point, not a one-off.** Whatever
+   survives is recorded as skeletor's, so every future upgrade three-way merges
+   it against a file where you have deliberately diverged. On sky.boss that was
+   twelve permanent merge points against seventeen one-line declines — the
+   larger cost, and the one that is invisible until you run this on a repository
+   that already exists. Budget for it before adopting, not after.
 2. **Baseline every ratchet at what you inherited**, not at zero:
    ```bash
    python scripts/check_doc_links.py --update-baseline

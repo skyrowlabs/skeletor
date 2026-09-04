@@ -495,6 +495,14 @@ def main() -> int:
             overlays.append(f"{agent_root}/{name}")
 
     target.mkdir(parents=True, exist_ok=True)
+    # What was here before skeletor touched anything. Not "before this overlay":
+    # a later overlay overwriting an earlier one is the composition working, and
+    # only a file predating the whole scaffold is somebody's own.
+    pre_existing = {
+        path.relative_to(target).as_posix()
+        for path in target.rglob("*")
+        if path.is_file() and ".git/" not in path.relative_to(target).as_posix()
+    } if populated else set()
     written: List[str] = []
     for overlay in overlays:
         source = TEMPLATE / overlay
@@ -521,6 +529,31 @@ def main() -> int:
     # and `final` is what this tree ended up with. They differ only for a file a
     # post-copy step derived from something that was already here.
     write_manifest(target, args, overlays, {rel: pristine.get(rel, final[rel]) for rel in sorted(produced)})
+
+    overwritten = sorted(pre_existing.intersection(written))
+    if overwritten:
+        # Loudly, and by name. `--force` writes over whatever is in its way and
+        # the losses are silent by construction: a file that is gone raises
+        # nothing, and the guidance ("review the diff file by file") points at a
+        # 97-file diff in which these twelve are the only ones that matter.
+        #
+        # sky.boss measured what that costs on a real repository. Four of the
+        # twelve were load-bearing and every one failed quietly: PYTHONSAFEPATH
+        # in the CLI wrapper, whose absence let `python -m cli` import whatever
+        # `cli/` happened to be in the cwd and generate a full set of systemd
+        # units with the wrong WorkingDirectory, successfully; and a conftest
+        # redirect whose loss pointed the suite at the operator's real state
+        # directory. Neither announces itself. Naming the files is the whole fix
+        # — it turns reviewing the scaffold into reviewing this list.
+        print()
+        print(f"⚠️  {len(overwritten)} file(s) you already had were OVERWRITTEN:")
+        for rel in overwritten:
+            print(f"   · {rel}")
+        print()
+        print("   `git diff` them before anything else, and restore what you meant to keep.")
+        print("   Whatever survives here is now recorded as skeletor's, so every future")
+        print("   `skeletor-upgrade` three-way merges it — a file you kept is a standing")
+        print("   merge point, not a one-off.")
 
     committed = False
     if not args.no_git and not (target / ".git").exists():
