@@ -740,6 +740,37 @@ observation. Same discipline as separating a perishable reason from a durable
 one, and it resists being made into a rule for the same reason — telling the two
 apart is a judgement about what the claim is *for*.
 
+**And "in the file that states it" is a clause with a condition on it.** The
+invariant reads as universal and is not. Co-location assumes a reader arrives at
+the artifact and reads outward, which holds when a reason explains exactly one
+thing — one gate, one guard, one function. It inverts when the reason explains
+*several*, and the workspace this shell came from says so in almost opposite
+words: **a rule that exists only as a comment in the producing repo is
+unreachable from where the mistake gets made.** The mistake happens in the
+consuming repo, so the reason belongs at the seam. And a reason for an
+**absence** — why something is deliberately not done — has nothing to sit beside
+at all, which is what a plan's `## Dropped, and why` section exists to hold.
+
+So: co-location beats a home-of-its-own when the reason has exactly one owner.
+When it has several, or none, it needs its own home and a route to it. That is
+why this document exists rather than being distributed into the files it
+describes.
+
+The failure to watch for is not misplacement, and it would be found late. It is
+that "it belongs beside the code" becomes a reason not to write the reason down
+**at all** when no single file obviously owns it — the seam doc that nothing owns
+never gets written, and the symptom is an absence. Nothing goes red on an
+absence, which is this document's other recurring sentence arriving from a third
+direction.
+
+Worth recording how that narrowing was reached, because the method is the
+transferable part: the co-location rule was applied three times in one day and
+won three times, and the two of us then asked whether three-for-three was a rule
+or a shared blind spot. All three cases were 1:1 — the regime where it is
+easiest — so the streak was evidence for one clause and no evidence at all about
+the other. **A rule tested only where it is easy has a boundary you have not
+found yet**, and the way to find it is to ask what regime the tests were all in.
+
 The other half of what made all three findable is not a rule at all, and cannot
 be turned into one here: a second person naming the shape while somebody happened
 to be looking at the right file. A rule on the wall is not a check. It is a thing
