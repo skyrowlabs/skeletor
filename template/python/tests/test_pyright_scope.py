@@ -25,6 +25,23 @@ package, which is where a hook is most likely to be skipped.
 Reported by proto.pilot, who found the hole in a tree scaffolded from this
 template. It was the third instance of that shape in that repo in one day, and
 this one had been shipped to them.
+
+## If you already have this gate, you are the one who reported it
+
+An upgrade classifies from the manifest: a different hash is an edit, no entry is
+a collision, and **neither** is a genuinely new file — so a file that is new here
+and old in your tree arrives as a clean addition, backed by nothing. That is not
+a rare accident; the report-and-adopt loop manufactures it. You write a gate in
+your tree, report the idea, and it ships back at whatever path this repository
+would have picked anyway. Both halves are right and the paths differ for no
+reason at all.
+
+No manifest can catch it — it needs a diff of *purposes*, not of bytes. What it
+needs instead is the one fact only the producer has, which is that this file came
+from a report, so here it is in the file rather than in a message that has to be
+remembered: if your tree holds a gate asserting that pyright's ``include`` paths
+resolve and hold Python, this is that gate under a new name. Keep one. Which one
+does not matter; running both under two names does, because they will drift.
 """
 
 from __future__ import annotations

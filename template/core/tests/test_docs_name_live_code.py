@@ -41,6 +41,21 @@ it, which is the same reason the suites are marker-based rather than listed.
 Nothing on a fresh tree: a scaffold has one commit, so a symbol that was ever
 defined is still defined and this finds zero. It is a ratchet at 0, and it starts
 paying the first time you delete something.
+
+## Its neighbour is not a copy of it
+
+``test_docs_name_real_commands.py`` sits beside this and the two names differ by
+one word, which is a shape somebody eventually "de-duplicates" by reading the
+filenames. They share a scoping rule and nothing else. That one asks whether a
+command inside a fenced ``bash`` block resolves to a subcommand the CLI has
+**now**; this one asks whether a doc names a *callable* this repository once
+defined and has since removed. Different inputs, different oracles — a click
+group versus ``git log`` — and neither subsumes the other. Delete one and the
+gate it was holding is simply gone.
+
+This one arrived here from a consumer's tree, at the path they had picked; the
+neighbour was written here afterwards. That is why they are adjacent and why
+they look related, and it is not a reason to merge them.
 """
 
 from __future__ import annotations

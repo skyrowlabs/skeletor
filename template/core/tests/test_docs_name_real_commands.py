@@ -30,6 +30,16 @@ Measured rather than assumed, on a freshly generated tree: 24 invocations inside
 bash blocks, 0 false positives. The prose two paragraphs above names `setup`
 three times and is correctly ignored.
 
+## Its neighbour is not a copy of it
+
+``test_docs_name_live_code.py`` sits beside this one and the two names differ by
+one word. They share the by-role exclusion above and nothing else: that one asks
+git whether a doc names a *callable* this repository once defined and removed;
+this one asks the click registry whether a *command* somebody is being told to
+run exists. Different inputs, different oracles, neither subsuming the other.
+Whoever tidies this directory later should merge neither into the other — the
+survivor would silently stop asking one of the two questions.
+
 ## Why it introspects click instead of running anything
 
 Walking the group tree is exact and costs nothing. Shelling out `--help` per

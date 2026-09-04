@@ -331,6 +331,25 @@ one line in a message being sent anyway. Then they delete theirs before
 upgrading, or keep theirs and skip ours, and either way it is a decision instead
 of a silent accretion.
 
+That version depended on a message being remembered, and it was not: the same
+duplicate arrived on proto.pilot's next dry run, unchanged, and they had to
+report it a second time. So the line now lives **in the file that ships**, under
+a heading addressed to the reporter — `tests/test_pyright_scope.py` says what to
+do if you already hold this gate. A file carries itself into every tree that
+takes it, including trees whose owner never saw the message; a message is a copy
+of the fact in a place nothing revalidates, which is the failure this repository
+names everywhere else and had reintroduced as a courtesy.
+
+The adjacent hazard is the same fact one step later. `test_docs_name_live_code.py`
+came from proto.pilot and `test_docs_name_real_commands.py` was written here
+afterwards; they now sit side by side with names one word apart, sharing a
+scoping rule and nothing else — one asks git about a removed *callable*, the
+other asks the click registry about a *command* somebody is told to run. That is
+the shape somebody eventually de-duplicates by reading the filenames, and the
+survivor silently stops asking one of the two questions. Each docstring now says
+the other is not a copy of it, in both directions, because whoever is tidying is
+reading whichever one they opened.
+
 Worth stating as a general shape rather than a courtesy: a producer that adopts
 consumer ideas will hand back duplicates of them, and only the producer knows
 which of its files came from whom.
