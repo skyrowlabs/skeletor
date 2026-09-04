@@ -44,6 +44,17 @@ def uncommented(text: str) -> str:
     Blanked rather than deleted so line numbers keep meaning something, and a
     `#` inside quotes is left alone so `run: echo "# heading"` stays code.
 
+    A `#` only opens a comment **at the start of a line or after whitespace**,
+    which is YAML's actual rule and not a refinement of it. Without that test
+    this over-masks: `run: curl https://host/page#frag` became
+    `run: curl https://host/page`, and `sed -i s#a#b#g` loses its delimiters.
+    Over-masking breaks the gate in the opposite direction — a silent pass
+    becomes a noisy false failure — and a shared masker that eats real content
+    is worse than the bug it fixes, because every future consumer inherits it.
+    jam.sense named that direction before it had cost anything here; their
+    labels are short words that appear legitimately inside strings and dict
+    values, so they would have met it first.
+
     Deliberately not a YAML parser. This runs on any host with no dependency,
     it is checking text that a parser would have already normalised past, and a
     mis-strip fails loudly — the required step goes missing — rather than
@@ -59,7 +70,7 @@ def uncommented(text: str) -> str:
                     quote = ""
             elif char in "\"'":
                 quote = char
-            elif char == "#":
+            elif char == "#" and (i == 0 or line[i - 1] in " \t"):
                 cut = i
                 break
         out.append(line if cut is None else line[:cut])
