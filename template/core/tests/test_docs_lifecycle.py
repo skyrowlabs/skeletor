@@ -127,6 +127,51 @@ def test_filing_moves_the_plan_and_never_copies_it(tree):
     assert archived == ["widget-cache"]
 
 
+def test_filing_strips_the_tank_fields_from_the_document(tree):
+    """A filed plan stops claiming a shelf — in **both** places it could.
+
+    The bug this pins shipped in every tree scaffolded from this shell, and the
+    test that should have caught it is the one directly above: it files a plan
+    whose fixture carries `shelf_status` in the frontmatter *and* a
+    `> **Shelf-Status**:` header, then asserts on the index slugs and never
+    looks at the document. The archive index pops the three fields when it
+    builds, so it rendered clean while the plan it described went on saying
+    `in-progress` with every phase ticked. Everything downstream was green.
+
+    Both forms are asserted because either alone is a pass that proves nothing:
+    the frontmatter is what the backfill strips, the header is what beats the
+    frontmatter, and a document is only actually filed when both are gone.
+    """
+    plan = tree / "docs" / "TODO" / "widget-cache.md"
+    plan.write_text(
+        PLAN.replace(
+            "> **Shelf-Status**: ready",
+            "> **Shelf-Status**: ready\n> **Queue-Order**: 30\n> **Blocked-On**: owner-ops",
+        ).replace(
+            "shelf_status: ready",
+            "shelf_status: ready\nqueue_order: 30\nblocked_on: owner-ops",
+        ),
+        encoding="utf-8",
+    )
+    assert run(tree, "docs", "index").returncode == 0
+    result = run(tree, "docs", "file", "widget-cache", "--category", "backend")
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+
+    # Read back through the real parser rather than by grepping: `headers` is
+    # the dict every consumer classifies from, so this asks the question the
+    # way the pipeline asks it.
+    from scripts.docs import plans
+
+    archived = plans.load(tree / "docs" / "implementations" / "backend" / "widget-cache.md")
+    left = [key for key in plans.TANK_ONLY if key in archived.frontmatter]
+    assert not left, f"tank fields still in the filed doc's frontmatter: {left}"
+
+    headers = [key for key in plans.TANK_ONLY_HEADERS if key in archived.headers]
+    assert not headers, f"tank header lines survived the filing: {headers}"
+
+    assert archived.frontmatter.get("category") == "backend", "the archive branch never ran"
+
+
 def test_filing_refuses_a_plan_with_open_tasks(tree):
     """A plan with work left is not finished, whatever the status line says."""
     plan = tree / "docs" / "TODO" / "widget-cache.md"

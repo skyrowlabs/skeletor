@@ -108,6 +108,29 @@ def test_generated_docs_are_current():
     assert result.returncode == 0, f"Generated docs are stale — run `{{CLI}} docs index`:\n{result.stdout}"
 
 
+def test_no_filed_plan_still_claims_a_shelf():
+    """Nothing in the archive carries a tank-only field, in either form.
+
+    `{{CLI}} docs file` removes both, so this is a ratchet at 0 — an empty
+    archive passes it vacuously, which is right for a fresh tree and is not a
+    hole, because `tests/test_docs_lifecycle.py` proves the check has teeth
+    against a document it files itself. What this catches is the other route
+    in: a plan moved by hand with `git mv`, which skips the one step that knows
+    the plan has left the tank.
+
+    Both forms, for the reason the whole taxonomy has two: the frontmatter is
+    machine state and the header outranks it, so a doc with a clean frontmatter
+    and a surviving `> **Shelf-Status**:` line still reports the old shelf to
+    every reader.
+    """
+    stale = []
+    for plan in plans.scan(IMPL_DIR, recursive=True):
+        where = plan.path.relative_to(PROJECT_ROOT)
+        stale += [f"{where}: {key} (frontmatter)" for key in plans.TANK_ONLY if key in plan.frontmatter]
+        stale += [f"{where}: > **{key}**: (header)" for key in plans.TANK_ONLY_HEADERS if key in plan.headers]
+    assert not stale, "Filed plans still carrying tank-only fields — delete the lines:\n  " + "\n  ".join(stale)
+
+
 def test_no_plan_exists_in_both_trees():
     """A plan moves; it never copies. Two copies makes 'what is left to do'
     unanswerable, and the archive copy is the one people read."""

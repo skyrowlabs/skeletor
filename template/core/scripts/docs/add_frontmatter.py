@@ -41,7 +41,7 @@ def _derive(plan: plans.Plan, archive: bool) -> dict:
         data["category"] = data.get("category") or (rel.parts[0] if len(rel.parts) > 1 else "uncategorized")
         data.setdefault("agent_value", 1)
         data.setdefault("completed", plan.updated or "")
-        for key in ("shelf_status", "blocked_on", "queue_order"):
+        for key in plans.TANK_ONLY:
             data.pop(key, None)
         return data
 
@@ -76,7 +76,18 @@ def main() -> int:
 
     written = 0
     for plan, archive in targets:
-        if plan.frontmatter and not args.force:
+        # The tank branch is a **backfill**: it fills in what is missing and
+        # then leaves the doc alone, so a maintainer's frontmatter survives.
+        #
+        # The archive branch is not a backfill. It is the normalisation a filing
+        # performs — strip the tank-only fields, add `category`/`completed` —
+        # and it has to run on a doc that *already has* frontmatter, because
+        # every doc being filed does. Sharing this guard made it unreachable in
+        # the only case it exists for: the archive branch had never once run
+        # during a real filing, and every plan filed by every tree scaffolded
+        # from this shell kept its old `shelf_status` forever. It is idempotent,
+        # so always running it costs a comparison.
+        if plan.frontmatter and not args.force and not archive:
             continue
         derived = _derive(plan, archive)
         if derived == plan.frontmatter:

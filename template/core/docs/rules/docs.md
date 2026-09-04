@@ -193,6 +193,16 @@ After adding or changing any plan under `docs/TODO/` or `docs/implementations/`:
 
 It refuses a plan that still has unchecked tasks, and it commits nothing — read the diff.
 
+**Filing removes the tank-only fields — `shelf_status`, `blocked_on`, `queue_order` — in both
+forms**, the frontmatter and the `> **Shelf-Status**:` header lines. They answer questions
+about a shelf the plan has left, and a finished plan that still says `in-progress` reads as a
+claim about work that is done. The header half is why the move does it rather than the
+backfill: a header beats frontmatter everywhere in this lifecycle, so cleaning the frontmatter
+alone leaves the plan reporting its old status forever. The free-form `> **Status**:` line is
+left alone — "Shipped 2026-04-01" is a good thing for an archived plan to say.
+
+If you move a plan by hand instead, `{{CLI}} test unit` will tell you which lines to delete.
+
 **Then repoint what cited it.** The move breaks links in two directions, and both are
 load-bearing prose that records *why* the docs say what they say:
 

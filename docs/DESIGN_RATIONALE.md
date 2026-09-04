@@ -102,6 +102,49 @@ the plan's dropped-options section, or an `occasional/` report) and explicitly
 **refuses to add a central investigations log**, on the grounds that a log is a
 registry updated at the end of a hunt when attention is lowest.
 
+### The archive strip: a fix that went into the derived artifact
+
+proto.pilot filed its first plan and watched it sit in `docs/implementations/`
+for two days saying `shelf_status: in-progress` with all six phases and every
+acceptance box ticked. Every gate was green the whole time, in both repos.
+
+Three separate things had to be true for that, and each is worth keeping:
+
+**The branch that fixes it was unreachable.** `add_frontmatter.py` skipped any
+doc that already had frontmatter — correct for a backfill — and shared that
+guard with the archive branch, which is not a backfill but the normalisation a
+filing performs. A doc being filed *always* has frontmatter, so the archive
+branch had never run once, in any tree ever scaffolded from this shell. The tell
+was visible in every archived document: the fields that branch *adds* —
+`category`, `completed`, `agent_value` — were missing too, and nobody read that
+absence as a symptom.
+
+**The fix had already been made, in the wrong place.** `gen_impl_index.py` pops
+the same three fields when it builds, with a comment saying exactly why: *"a
+stale `shelf_status: ready` in the archive is actively misleading."* So the
+problem was known, understood, and answered — in the **derived artifact**. The
+index rendered clean, `regen.py --check` stayed green, and the document went on
+lying. A generated file declining to publish a field is not a fix for the field
+being wrong; it is what stops anyone finding out. The gate can only go red on
+what it renders, so patching the renderer is the one repair guaranteed to be
+invisible.
+
+**And the value had two homes with an override between them.** Header lines beat
+frontmatter by design here — that is the whole point of them, so a human can
+correct a heuristic. Which means stripping the frontmatter alone fixes nothing:
+`Plan.shelf_status` reads the header first, and the plan goes on reporting its
+old shelf. **When a value has a precedence chain, a change to the lower copy is
+not a change.** Both forms go, and they go in `docs file` — the one
+deliberate moment that knows the plan has left the tank — rather than in the
+backfill, which runs on every `docs index` and has no business rewriting prose.
+
+What holds it now is two assertions rather than one, because either alone passes
+while the bug is live. The end-to-end sits in `test_docs_lifecycle.py`, which
+had been *driving this exact scenario since the day it was written* — its fixture
+carries both forms, it files the plan, and it then asserted on the index slugs
+and never looked at the document. The nearest test to a defect is not the same
+thing as a test for it.
+
 ### What does not transfer
 
 The sheer volume. `docs/API.md` is 430KB; the full docs tree is ~543K tokens.

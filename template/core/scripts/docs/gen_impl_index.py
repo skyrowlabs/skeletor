@@ -44,8 +44,13 @@ def build() -> dict:
         except (TypeError, ValueError):
             entry["agent_value"] = 1
         # Tank-only fields: meaningless once a plan is filed, and a stale
-        # `shelf_status: ready` in the archive is actively misleading.
-        for key in ("shelf_status", "blocked_on", "queue_order"):
+        # `shelf_status: ready` in the archive is actively misleading. The set
+        # is `plans.TANK_ONLY` rather than a copy of it — this used to be the
+        # copy, and popping here while the *document* kept the field is what let
+        # the defect hide: the index rendered clean, `regen.py --check` stayed
+        # green, and the doc went on lying. A derived artifact declining to
+        # publish a field is not a fix for the field being wrong.
+        for key in plans.TANK_ONLY:
             entry.pop(key, None)
         entries.append(entry)
 

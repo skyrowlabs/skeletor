@@ -496,6 +496,15 @@ interlock, and which you cannot understand from one file:
   `queue_order.py` is imported by every consumer of the ready queue so the
   published order is the real one. `frontmatter.py` is a deliberately
   non-general parser for a schema we also generate.
+
+  **Filing a plan strips the tank-only fields in both forms**, and the two halves
+  live apart on purpose: `add_frontmatter.py` clears the frontmatter (it runs on
+  every `docs index`, so it must not touch prose), while `cli/docs.py` removes
+  the `> **Shelf-Status**:` header lines during the move — the one deliberate
+  moment that knows the plan has left the tank. A header beats frontmatter by
+  design, so neither half is sufficient. `plans.TANK_ONLY` owns the set;
+  `test_docs_lifecycle.py` proves the strip end-to-end and
+  `test_docs_pipeline.py` ratchets the archive at 0 for a hand-moved plan.
 - **CLI command discovery.** `cli/__init__.py` discovers command groups by
   scanning the package — a module exporting a click Group named after itself is
   registered by existing. This is why the `governed` and `agentic` overlays can
