@@ -1390,12 +1390,23 @@ def declined_gate(tier: str, workdir: Path) -> List[Result]:
         return results
 
     manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
-    dropped, arriving = sorted(manifest["files"])[:2]
+    # Three files, and the third exists because jam.sense named the trap: the
+    # example you reach for first is the one that cannot discriminate. The first
+    # two here were `sorted(...)[:2]` — the most convenient files in the tree —
+    # and with them the "template moved since you declined it" branch could
+    # never fire, because this gate scaffolds and upgrades from one HEAD, so
+    # every recorded hash equals the head render's by construction. That branch
+    # had report text written for it and nothing exercising it.
+    dropped, arriving, moved = sorted(manifest["files"])[:3]
     # `arriving` is deleted AND unrecorded: the shape of a file the template has
     # only just started shipping, which must still be added.
     del manifest["files"][arriving]
+    # Falsified, not manufactured: a recorded hash that disagrees with the head
+    # render is exactly what "the template changed since you declined it" means,
+    # and it is the only way to reach that state without a second checkout.
+    manifest["files"][moved] = "0" * 64
     (tree / manifest_name).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    for rel in (dropped, arriving):
+    for rel in (dropped, arriving, moved):
         (tree / rel).unlink()
     run(["git", "add", "-A"], cwd=tree)
     run(["git", "commit", "-m", "decline"], cwd=tree)
@@ -1423,9 +1434,30 @@ def declined_gate(tier: str, workdir: Path) -> List[Result]:
             dropped in seen["declined"]
             and dropped not in seen["added"]
             and arriving in seen["added"]
-            and arriving not in seen["declined"],
+            and arriving not in seen["declined"]
+            and moved in seen["declined"],
             time.time() - started,
             json.dumps(seen, indent=2),
+        )
+    )
+
+    # The actionable subset, and the branch two convenient files could not reach.
+    # A decline the template has since changed gets a sidecar to look at; one it
+    # has not gets silence. Both directions, because writing a sidecar for every
+    # standing decline on every run is the noise this report is shaped to avoid.
+    started = time.time()
+    _, human = run([*upgrade[:-1], "--dry-run"], cwd=tree)
+    code, _ = run(upgrade[:-1], cwd=tree)
+    sidecars = tree / "tmp" / "upgrade"
+    results.append(
+        Result(
+            "declined: a decline the template has moved past is itemised, the rest are not",
+            "the template has changed since" in human
+            and moved in human.split("the template has changed since")[1]
+            and (sidecars / f"{moved}.new").exists()
+            and not (sidecars / f"{dropped}.new").exists(),
+            time.time() - started,
+            human + "\n" + "\n".join(str(p.relative_to(sidecars)) for p in sidecars.rglob("*") if p.is_file()),
         )
     )
 

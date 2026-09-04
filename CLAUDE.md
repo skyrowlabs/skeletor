@@ -644,6 +644,18 @@ interlock, and which you cannot understand from one file:
    for the word would not have helped either — the drift allowlist's docstring
    promised an escape hatch its reader could not parse.
 
+   **The example you reach for first cannot discriminate.** Picking a fixture is
+   picking the simplest one, and simple means fewest ways to be wrong — so the
+   convenient case passes under the real fix and the plausible one alike.
+   `declined_gate` took `sorted(manifest)[:2]`, the two most convenient files in
+   the tree, and with them the "the template has changed since you declined it"
+   branch could never fire: this gate scaffolds and upgrades from one HEAD, so
+   every recorded hash equals the head render's by construction. That branch had
+   report text written for it and nothing exercising it. jam.sense named the rule
+   from the other side — of five labels their gate matches, the one anybody would
+   reach for first is the only one with no prose mentions, so it is the only one
+   that cannot tell a comment-masking fix from a docstring-masking one.
+
    **A detector is validated by finding the site, not the file.** Asserting that
    a check found *something* is the version of this rule this repository already
    held — pyright's `filesAnalyzed`, the lint gates asserting they enumerated the
