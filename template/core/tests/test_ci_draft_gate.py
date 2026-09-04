@@ -31,13 +31,26 @@ pytestmark = [pytest.mark.unit]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.paths import GITHUB_DIR  # noqa: E402
+from scripts.yaml_text import read_uncommented  # noqa: E402
 
 CI = GITHUB_DIR / "workflows" / "ci.yml"
 GATE_MODULE = GITHUB_DIR / "scripts" / "docs-only.cjs"
 
 
+def ci_text() -> str:
+    """ci.yml as code — comments blanked.
+
+    Every assertion below is a substring or regex over this file, and a comment
+    is a substring. Deleting the `ready_for_review` trigger and leaving
+    `# note: ready_for_review used to be here` kept all of these green, which is
+    the precise failure this file exists to prevent, wearing the file's own
+    clothes. See `scripts/yaml_text.py`.
+    """
+    return read_uncommented(CI)
+
+
 def test_ready_for_review_is_a_trigger():
-    assert "ready_for_review" in CI.read_text(encoding="utf-8"), (
+    assert "ready_for_review" in ci_text(), (
         "ci.yml no longer triggers on `ready_for_review`. Gated jobs will never re-run when a PR "
         "leaves draft — they stay `skipped`, which branch protection accepts, and the PR merges "
         "having proven nothing."
@@ -45,13 +58,13 @@ def test_ready_for_review_is_a_trigger():
 
 
 def test_gate_definition_is_shared_not_inlined():
-    text = CI.read_text(encoding="utf-8")
+    text = ci_text()
     assert GATE_MODULE.exists(), "the shared docs-only definition is missing"
     assert "docs-only.cjs" in text, "ci.yml must require the shared definition, never re-inline the pattern"
 
 
 def test_expensive_jobs_are_gated_on_the_gate_output():
-    text = CI.read_text(encoding="utf-8")
+    text = ci_text()
     assert "needs.gate.outputs.full_suite" in text, "no job is gated on the gate's verdict — the gate buys nothing"
 
 
@@ -61,7 +74,7 @@ def test_skipping_is_at_job_level_not_paths_ignore():
     the job, never `paths-ignore` on the trigger."""
     # The KEY, not the word: this file's own comments explain why paths-ignore
     # is wrong, and a substring check would fail on the explanation.
-    text = CI.read_text(encoding="utf-8")
+    text = ci_text()
     assert not re.search(r"^\s+paths-ignore:", text, re.MULTILINE), (
         "ci.yml uses `paths-ignore`. A required check skipped by a trigger filter never reports at "
         "all, and a never-reported required context blocks the PR forever. Gate at the job level."
@@ -81,7 +94,7 @@ def test_push_gates_the_branch_work_lands_on():
     merge, which is not pure duplication either, since a squash merge is a
     commit no PR run ever saw.
     """
-    text = CI.read_text(encoding="utf-8")
+    text = ci_text()
     triggers = re.search(r"^on:\n(.*?)^\w", text, re.MULTILINE | re.DOTALL)
     assert triggers, "ci.yml has no `on:` block"
     push = re.search(r"^  push:\n(?:\s*#.*\n)*\s*branches:\s*\[(.*?)\]", triggers.group(1), re.MULTILINE)

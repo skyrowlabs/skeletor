@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts import allowlist  # noqa: E402
 from scripts.output import detail, emit, fail, item, ok  # noqa: E402
 from scripts.paths import GITHUB_DIR, SCRIPTS_DIR  # noqa: E402
+from scripts.yaml_text import uncommented  # noqa: E402
 
 WORKFLOWS = GITHUB_DIR / "workflows"
 ALLOWLIST = SCRIPTS_DIR / "workflow_drift_allowlist.yaml"
@@ -104,7 +105,9 @@ def _jobs(path: Path) -> Dict[str, str]:
             jobs[current].append(line)
         elif line.strip() and not line.startswith(" "):
             break
-    return {name: "\n".join(body) for name, body in jobs.items()}
+    # Comments stripped here, once, so every caller below matches against code.
+    # A masker each consumer has to remember to call is a masker somebody forgets.
+    return {name: uncommented("\n".join(body)) for name, body in jobs.items()}
 
 
 def main() -> int:

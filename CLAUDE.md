@@ -644,6 +644,26 @@ interlock, and which you cannot understand from one file:
    for the word would not have helped either — the drift allowlist's docstring
    promised an escape hatch its reader could not parse.
 
+   **A detector is validated by finding the site, not the file.** Asserting that
+   a check found *something* is the version of this rule this repository already
+   held — pyright's `filesAnalyzed`, the lint gates asserting they enumerated the
+   tree. It is necessary and it is not sufficient. jam.sense ran a naive grep for
+   `worktree remove` against their tree and got two hits in the right file, both
+   an error message and a docstring, while the call it was hunting — an argv list
+   — went unseen. A clean miss announces itself; a lucky hit gets signed off.
+
+   The corollary that cost the most here: **a check that greps source must mask
+   comments, and the ones that scan for a requirement are the ones that forget.**
+   `check_output_discipline.py` masks prose and `check_doc_links.py` blanks
+   fences, because both hunt for a *mistake* and a false positive gets reported.
+   `check_workflow_drift.py` and `test_ci_draft_gate.py` hunted for a
+   *requirement*, matched raw text, and both passed while the thing they guard
+   was absent — a job with no `actions/setup-python` but a TODO saying to add
+   one, and a `ready_for_review` trigger deleted with a comment left behind. The
+   string most likely to appear where the thing is missing is a comment saying it
+   should be there, so the false pass is perfectly correlated with the defect.
+   `scripts/yaml_text.py` is the one home for that masking.
+
    **The tell that a predicate is wrong is not the number of exemptions — it is
    what they are about.** This repository has stated the rule twice with two
    different numbers ("four things", "five things"), which is itself the
