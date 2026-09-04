@@ -654,6 +654,25 @@ interlock, and which you cannot understand from one file:
    for the word would not have helped either — the drift allowlist's docstring
    promised an escape hatch its reader could not parse.
 
+   **A negative assertion over a set that could be empty is a tautology**, and
+   a green negative looks identical whether the thing did not happen or nobody
+   looked. This repository states that for pyright's `filesAnalyzed` and for the
+   lint gates asserting they enumerated the tree, and had not applied it to two
+   of the suites it ships: `test_marker_coverage.py` passed 2/2 and
+   `test_state_paths.py` 5/5 with their enumerations forced empty. Neither is
+   empty today — the hazard is a rename of `tests/` or `cli/` disarming them in
+   silence, which is exactly what marker-based suites exist to prevent. Both now
+   assert the scan found something, the convention `test_cli_smoke.py` and
+   `test_docs_name_real_commands.py` already followed. Reported as a class by
+   proto.pilot, who found a `monkeypatch` aimed at the module a call had left,
+   turning a negative into a tautology with nothing in the output to say so.
+
+   Measured, not grepped: the heuristic that found these also produced two false
+   positives, and it missed `test_the_scan_finds_the_docs` because its name says
+   "finds" and the pattern said "found". The question that settles it is not
+   *does a guard exist* but *does the suite still pass with the enumeration
+   emptied* — which is the same plant-and-require-red the gates use.
+
    **A plant that did not land is indistinguishable from a gate that works.**
    Both print green. proto.pilot lost an hour to a `sed` whose pattern silently
    matched nothing; the same afternoon here, a plant passed because the gate

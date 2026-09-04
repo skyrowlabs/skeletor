@@ -43,6 +43,20 @@ def _sources():
                 yield path
 
 
+def test_the_scan_found_the_sources():
+    """A second-definition scan over zero files is green and worth nothing.
+
+    Every assertion below is a negative — *no source outside the resolver names
+    the state root* — and a negative over an empty set is a tautology. Move
+    `cli/` or `scripts/`, and this file goes on passing while checking nothing.
+
+    Confirmed by forcing the enumeration empty: 5/5 passed before this existed.
+    The class is proto.pilot's: a green negative is the weakest evidence in the
+    building and it looks identical to the strongest.
+    """
+    assert list(_sources()), f"no .py found under {CLI_DIR} or {SCRIPTS_DIR} — the scan matched nothing"
+
+
 def test_state_lives_outside_the_checkout():
     """The whole point. A path under the repo is not state, it is scratch."""
     resolved = state_dir()
