@@ -110,6 +110,64 @@ def die(message: str) -> "NoReturn":  # type: ignore[valid-type]
     raise SystemExit(1)
 
 
+def uncommitted(target: Path) -> Optional[List[str]]:
+    """Tracked paths with uncommitted changes — or None if git cannot say.
+
+    `--untracked-files=no` on purpose. An untracked file is not something an
+    upgrade can make unreadable: it does not appear in `git diff`, and nothing
+    here will remove it. What matters is tracked work that would interleave.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(target), "status", "--porcelain", "--untracked-files=no"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return sorted(line[3:] for line in result.stdout.splitlines() if line.strip())
+
+
+def refuse_a_dirty_tree(target: Path) -> None:
+    """An upgrade whose result cannot be read, or undone, must not start.
+
+    This is **not** protecting somebody from their own git. Everything is
+    committed or it is not, and this tool endangers neither.
+
+    It is that the whole safety model here is *you read the diff*. Nothing is
+    committed, conflicts go to `tmp/upgrade/`, and the user decides. On a dirty
+    tree `git diff` can no longer answer "what did the upgrade change", because
+    the template's changes and the user's are interleaved in one output — so the
+    tool would produce an answer nobody can read.
+
+    The undo is worse, and it is the half that decides this. A merged file is
+    neither the old render nor the new one, so the ordinary way back —
+    `git checkout -- .` — discards the user's uncommitted work along with the
+    upgrade. There is no gesture that reverts one and keeps the other.
+
+    Hence a refusal rather than a warning, and hence `--allow-dirty` named in
+    the message: "I am mid-edit and want the template's version to merge
+    against" is a real workflow, and refusing *with the escape hatch in the
+    sentence* is a different act from refusing.
+
+    `--dry-run` writes nothing and is never refused; `--repair-manifest` touches
+    only `.skeletor.json`, which stays legible in a diff and reverts on its own.
+    """
+    dirty = uncommitted(target)
+    if not dirty:
+        return
+    say("❌", f"{len(dirty)} tracked file(s) have uncommitted changes:")
+    for path in dirty[:10]:
+        item(path)
+    if len(dirty) > 10:
+        item(f"... and {len(dirty) - 10} more")
+    detail()
+    detail("An upgrade here would interleave with that work: `git diff` could no longer")
+    detail("say what the template changed, and `git checkout -- .` would discard both.")
+    detail("Commit or stash first — or pass --allow-dirty if merging into your")
+    detail("in-progress edits is what you actually want.")
+    raise SystemExit(1)
+
+
 def read_manifest(target: Path) -> dict:
     path = target / MANIFEST_NAME
     if not path.exists():
@@ -307,6 +365,12 @@ def main() -> int:
         help="skip the base render: classify from the recorded hashes alone. Answers "
         "'what have I edited?' without git, but cannot merge.",
     )
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="upgrade into a tree with uncommitted changes. The result will be interleaved "
+        "with your work in `git diff`, and reverting it discards both.",
+    )
     parser.add_argument("--json", action="store_true", help="emit the result on stdout as well")
     parser.add_argument(
         "--repair-manifest",
@@ -319,6 +383,9 @@ def main() -> int:
     target = Path(args.target).expanduser().resolve()
     if not target.is_dir():
         die(f"{target} is not a directory")
+
+    if not (args.dry_run or args.repair_manifest or args.allow_dirty):
+        refuse_a_dirty_tree(target)
 
     manifest = read_manifest(target)
     recorded = manifest.get("args") or []

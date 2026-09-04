@@ -48,6 +48,18 @@ than maintaining a list. Exemptions go in an allowlist **with a written reason**
 so an intended divergence is a decision record and an unintended one is a
 failure.
 
+The cleanest demonstration of the difference arrived by accident.
+`tests/test_docs_name_real_commands.py` was written from a bug report about one
+line in one file — a setup guide naming a command the CLI never had. Two
+commits later a new `docs/reports/README.md` landed, carrying three commands in
+a shell block, and **the gate covered it the moment it existed.** Nobody pointed
+it at the new file, and there was no list to add it to.
+
+A registry would have been correct on the day it was written and silent on that
+file, which is the failure mode exactly: not wrong, just not looking. The
+difference between a check and an allowlist is only visible on the input nobody
+anticipated, so it is worth recording the one time you get to watch it happen.
+
 ---
 
 ## Documentation as a lifecycle, not a folder
