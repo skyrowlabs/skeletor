@@ -14,8 +14,20 @@ for configuration, and a doc there is a doc no index knows about.
 | Periodic reports (live / in-flight)    | `docs/reports/regular/`    |
 | Frozen per-release report editions     | `docs/reports/releases/`   |
 | One-time deep-dive reports             | `docs/reports/occasional/` |
-| Research / feasibility                 | `docs/research/`           |
+| Ideas, and what came of looking       | `docs/research/`           |
 | Business planning                      | `docs/business-planning/`  |
+
+`docs/research/` is deliberately one folder and not two. An idea nobody has decided to look
+into, and the write-up of somebody having looked, are the same kind of document here: a thing
+that is **not a plan**. Splitting them would ask you to classify at the moment you know least,
+and the answer would be wrong as soon as anyone did the work. What matters is the boundary
+that folder shares with the tank — `docs/TODO/` is where somebody has decided to *build* it —
+and a doc crosses that once, in one direction.
+
+The reason to have it at all: without it there is nowhere for an unexamined idea to go except
+root `docs/`, where it sits beside `ARCHITECTURE.md` and reads as though it describes the
+system. Rejected ideas keep their memo rather than being deleted — the expensive half of an
+investigation is what it ruled out.
 
 Note that several of those folders are **not shipped** — the first doc you drop into one
 creates it. That used to be a silent hole: the registration check only ever looked at
