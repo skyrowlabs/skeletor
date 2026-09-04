@@ -17,6 +17,13 @@ gets the same treatment: enrol by pattern, exempt with a written reason.
 checked. Exemptions live in `scripts/output_allowlist.yaml` WITH A REASON — an
 intended divergence is a decision record; an unintended one is a failure.
 
+**And an exemption is checked against the thing it exempts.** A reason makes an
+entry a decision; it does not keep the decision true. An entry whose file was
+fixed, or whose file was deleted, is reported as stale and deleted rather than
+re-justified — the second case being the one with teeth, since a path that
+leaves the tree and later comes back for something else would arrive
+pre-exempted and nobody chose that.
+
 Usage:  python scripts/check_output_discipline.py [--json]
 """
 
@@ -102,33 +109,77 @@ def _sources() -> List[Path]:
     return found
 
 
-def scan() -> Dict[str, List[str]]:
-    """Every place a symbol is spelled, a stream is picked, or `--json` is absent."""
-    allowlist = _allowlist()
+def _findings_for(path: Path) -> Dict[str, List[str]]:
+    """One file's findings, ignoring the allowlist entirely.
+
+    Split out from `scan()` so `_stale()` below can ask the question the
+    allowlist exists to suppress. An exemption is only a decision while the
+    thing it exempts is still true.
+    """
+    rel = path.relative_to(PROJECT_ROOT).as_posix()
     spelled: List[str] = []
     streams: List[str] = []
     unflagged: List[str] = []
+
+    text = path.read_text(encoding="utf-8")
+    prose = _prose_lines(text)
+
+    for lineno, source_line in enumerate(text.splitlines(), 1):
+        if lineno in prose or source_line.lstrip().startswith("#"):
+            continue
+        if _EMIT.search(source_line) and any(glyph in source_line for glyph in _GLYPHS):
+            spelled.append(f"{rel}:{lineno}: status symbol inside an emission — use scripts/output.py")
+        if _STREAM.search(source_line):
+            streams.append(f"{rel}:{lineno}: picks a stream by hand — use `line`/`emit` or a status helper")
+
+    # A gate a dashboard cannot read is a gate nobody watches over time.
+    if path.name.startswith("check_") and 'add_argument("--json"' not in text:
+        unflagged.append(f"{rel}: a check script with no --json")
+
+    return {"spelled": spelled, "streams": streams, "unflagged": unflagged}
+
+
+def _stale(allowlist: Dict[str, str]) -> List[str]:
+    """Allowlist entries that no longer need to exist.
+
+    A written reason makes an exemption a decision record. It does not make the
+    decision *current*, and nothing here ever re-read one: an entry survived the
+    file being fixed, and survived the file being deleted. Both are silent, and
+    the second is the one with teeth — a path that leaves the tree and later
+    comes back for something else arrives pre-exempted, and nobody chose that.
+
+    So the allowlist is checked against the thing it describes, the same way
+    `skeletor-upgrade` re-hashes a manifest against the base render: a cache
+    validated on every run that does not need it cannot rot unnoticed.
+
+    Both directions, because they fail differently. An entry that starts passing
+    is an exemption outliving its reason; an entry naming nothing is an
+    exemption looking for a file to attach itself to.
+    """
+    stale = []
+    for rel in sorted(allowlist):
+        path = PROJECT_ROOT / rel
+        if not path.exists():
+            stale.append(f"{rel}: allowlisted, but there is no such file")
+        elif not any(_findings_for(path).values()):
+            stale.append(f"{rel}: allowlisted, but it passes the check now")
+    return stale
+
+
+def scan() -> Dict[str, List[str]]:
+    """Every place a symbol is spelled, a stream is picked, or `--json` is absent."""
+    allowlist = _allowlist()
+    found: Dict[str, List[str]] = {"spelled": [], "streams": [], "unflagged": []}
 
     for path in _sources():
         rel = path.relative_to(PROJECT_ROOT).as_posix()
         if rel == OWNER or rel in allowlist:
             continue
-        text = path.read_text(encoding="utf-8")
-        prose = _prose_lines(text)
+        for group, findings in _findings_for(path).items():
+            found[group].extend(findings)
 
-        for lineno, source_line in enumerate(text.splitlines(), 1):
-            if lineno in prose or source_line.lstrip().startswith("#"):
-                continue
-            if _EMIT.search(source_line) and any(glyph in source_line for glyph in _GLYPHS):
-                spelled.append(f"{rel}:{lineno}: status symbol inside an emission — use scripts/output.py")
-            if _STREAM.search(source_line):
-                streams.append(f"{rel}:{lineno}: picks a stream by hand — use `line`/`emit` or a status helper")
-
-        # A gate a dashboard cannot read is a gate nobody watches over time.
-        if path.name.startswith("check_") and 'add_argument("--json"' not in text:
-            unflagged.append(f"{rel}: a check script with no --json")
-
-    return {"spelled": spelled, "streams": streams, "unflagged": unflagged}
+    found["stale"] = _stale(allowlist)
+    return found
 
 
 def main() -> int:
@@ -146,12 +197,15 @@ def main() -> int:
     total = sum(len(v) for v in findings.values())
     if total:
         fail(f"{total} output-discipline finding(s) across {checked} file(s):")
-        for group in ("spelled", "streams", "unflagged"):
+        for group in ("spelled", "streams", "unflagged", "stale"):
             for finding in findings[group]:
                 item(finding)
         detail()
         detail("Status lines come from scripts/output.py — see docs/rules/output.md.")
         detail("A deliberate exception goes in scripts/output_allowlist.yaml WITH A REASON.")
+        if findings["stale"]:
+            detail("A stale entry is deleted, not re-justified: the divergence it recorded is")
+            detail("gone, so the entry now exempts a file nobody decided to exempt.")
         return 1
 
     ok(f"{checked} file(s) route output through scripts/output.py ({len(exempt)} exempt by allowlist)")

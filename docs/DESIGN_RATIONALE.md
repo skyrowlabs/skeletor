@@ -762,6 +762,34 @@ gate needing four exemptions on its first run is describing the wrong shape.
 Asking git instead — did this repository ever define that name — has no
 exemptions at all.
 
+That rule is stated elsewhere in this repository as *five* things, and the
+discrepancy is the point: **the count was never the load-bearing part.** sky.boss
+supplied the discriminator, from a doc-link gate of its own. What an exemption is
+*about* is the tell:
+
+* An entry about **code the predicate mis-shaped** means the predicate is wrong.
+  Four correct references flagged out of five is a matcher describing the wrong
+  shape, and the fix is a tighter predicate. jam.sense's ledger detector took the
+  same correction — five false positives, answered by requiring the `try` to sit
+  in a loop over `.splitlines()` *and* its function to call `read_text`, which
+  left its `ALLOWED` map empty.
+* An entry about **the convention's own vocabulary** cannot be predicated away,
+  because what is excluded is prose *about* the notation: the sentence that
+  defines `[[slug]]` cannot resolve a slug, and a dated record of a rename names
+  the dead name on purpose — resolving it would mean the rename had not happened.
+  Two of those are not four of the first kind.
+
+Where a structural marker separates the two, it beats both. This template hit the
+vocabulary problem head-on in `test_docs_name_real_commands.py`: prose names
+commands that do not exist in three distinct ways, all indistinguishable to a
+matcher. Scoping to fenced ```bash blocks removed all three at once, because a
+fence is the difference between *describing* a command and *telling you to run
+it*. Zero exemptions, measured on a real tree rather than assumed.
+
+And whatever the kind, the entry is checked against what it describes on every
+run — see the allowlist staleness rule in `CLAUDE.md`. A reason makes an
+exemption a decision; only a check keeps the decision true.
+
 ### The cost of the rule that every rule carries its reason
 
 This document's first principle manufactures the artifact class that is hardest

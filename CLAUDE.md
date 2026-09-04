@@ -622,6 +622,34 @@ interlock, and which you cannot understand from one file:
    Forgetting to update a registry is the bug most of this shell exists to
    prevent — do not add one.
 
+   **An exemption is checked against the thing it exempts, on every run.** A
+   reason makes an entry a decision record; nothing keeps the decision true. An
+   entry whose file was fixed has outlived its reason, and one whose file left
+   the tree is worse — the path can come back for something else and arrive
+   pre-exempted, which is an exemption nobody chose. Both are stale, both fail,
+   and a stale entry is deleted rather than re-justified. This is the manifest
+   rule in another costume: a cache validated on every run that does not need it
+   cannot rot unnoticed.
+
+   **The tell that a predicate is wrong is not the number of exemptions — it is
+   what they are about.** This repository has stated the rule twice with two
+   different numbers ("four things", "five things"), which is itself the
+   evidence: the count was never the load-bearing part. Entries about *code the
+   predicate mis-shaped* mean the predicate is wrong, and the fix is a tighter
+   predicate rather than a longer list. Entries about *the convention's own
+   vocabulary* — the sentence defining a notation, a dated record naming the old
+   name deliberately — are a different animal, because the thing excluded is
+   prose about the notation and no predicate over the notation can see out of
+   it. sky.boss drew that line, from a doc-link gate whose two entries are both
+   of the second kind and whose staleness assertion runs in both directions.
+
+   Where a structural marker separates the two, prefer it to either:
+   `test_docs_name_real_commands.py` faced exactly the vocabulary problem —
+   prose legitimately names commands that do not exist, in three distinct ways —
+   and scoping to fenced ```bash blocks removed all three at once, because a
+   fence is the difference between describing a command and telling you to run
+   it. Zero exemptions, measured on a real tree.
+
 3. **Fields that are guessed wrong must not be inferred.** `blocked_on`,
    `queue_order` and `review_pr` are read only from explicit lines. A malformed
    value sorts last rather than raising or silently winning.

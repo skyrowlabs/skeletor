@@ -17,6 +17,11 @@ exactly the same class of bug this check exists to catch.
 fine; a divergence nobody decided is the failure. The allowlist entry is the
 decision record.
 
+An entry is also checked against the job it names. A reason makes an exemption a
+decision; it does not keep the decision true. One whose job no longer diverges
+has outlived its reason, and one whose job is gone is worse — the name can come
+back for something else and arrive already exempt.
+
 Usage:  python scripts/check_workflow_drift.py [--json]
 """
 
@@ -53,17 +58,38 @@ REQUIRED_STEPS: Dict[str, str] = {
 }
 
 
+def key_for(workflow: str, job_id: str) -> str:
+    """The name a job is known by, here and in the allowlist.
+
+    One function so the checker and the reader cannot disagree about it. They
+    did: the key contains a colon and the reader split on the first one, so
+    `ci.yml:integration: reason` parsed to the key `ci.yml` and matched nothing
+    the checker ever asked about. **The documented escape hatch could not exempt
+    a single job**, and a fresh tree could not show it — no enrolled jobs, an
+    empty allowlist, green. It surfaces only the day somebody needs to record a
+    deliberate divergence, discovers the check will not be quiet, and deletes
+    the check.
+    """
+    return f"{workflow}:{job_id}"
+
+
 def _allowlist() -> dict:
-    """Minimal reader for the flat `job: reason` shape this file uses."""
+    """Minimal reader for the flat `key: reason` shape this file uses.
+
+    Split on the first colon **followed by whitespace**, because the key itself
+    contains a colon (see `key_for`) and the reason may contain several.
+    """
     if not ALLOWLIST.exists():
         return {}
     out = {}
     for line in ALLOWLIST.read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if not line or line.startswith("#") or ":" not in line:
+        if not line or line.startswith("#"):
             continue
-        key, _, reason = line.partition(":")
-        out[key.strip()] = reason.strip().strip("\"'")
+        match = re.match(r"^(.*?):\s+(.*)$", line)
+        if not match:
+            continue
+        out[match.group(1).strip()] = match.group(2).strip().strip("\"'")
     return out
 
 
@@ -102,21 +128,35 @@ def main() -> int:
 
     allowlist = _allowlist()
     enrolled, findings = [], []
+    # What each exempt job is actually missing, so an entry can be asked whether
+    # it is still describing something. Collected for every enrolled job rather
+    # than only the unexempt ones — the exempt ones are the whole question.
+    divergence: Dict[str, List[str]] = {}
 
     for workflow in sorted(WORKFLOWS.glob("*.yml")):
         for job_id, body in _jobs(workflow).items():
             if not any(pattern.search(body) for pattern in ENROLMENT_PATTERNS):
                 continue
-            key = f"{workflow.name}:{job_id}"
+            key = key_for(workflow.name, job_id)
             enrolled.append(key)
-            if key in allowlist:
-                continue
-            for step, why in REQUIRED_STEPS.items():
-                if step not in body:
-                    findings.append(f"{key}: missing '{step}' — {why}")
+            missing = [f"{key}: missing '{step}' — {why}" for step, why in REQUIRED_STEPS.items() if step not in body]
+            divergence[key] = missing
+            if key not in allowlist:
+                findings.extend(missing)
+
+    # An exemption is a decision record, and nothing kept the decision current.
+    # An entry whose job was fixed has outlived its reason; one whose job is
+    # gone is worse — the job name can come back for something else and arrive
+    # already exempt, which is an exemption nobody chose.
+    stale = [
+        f"{key}: allowlisted, but {'no enrolled job by that name' if key not in divergence else 'it no longer diverges'}"
+        for key in sorted(allowlist)
+        if key not in divergence or not divergence[key]
+    ]
+    findings.extend(stale)
 
     if args.json:
-        emit({"enrolled": enrolled, "findings": findings, "exempt": sorted(allowlist)})
+        emit({"enrolled": enrolled, "findings": findings, "exempt": sorted(allowlist), "stale": stale})
 
     if findings:
         fail(f"{len(findings)} drift finding(s) across {len(enrolled)} enrolled job(s):")
@@ -125,6 +165,9 @@ def main() -> int:
         detail()
         detail("Fix the job, or record the divergence in scripts/workflow_drift_allowlist.yaml")
         detail("WITH A REASON. An intended divergence is fine; one nobody decided is the bug.")
+        if stale:
+            detail("A stale entry is deleted, not re-justified: what it recorded is gone, so it")
+            detail("now exempts a job nobody decided to exempt.")
         return 1
 
     ok(f"{len(enrolled)} enrolled job(s) consistent ({len(allowlist)} exempt by allowlist)")
