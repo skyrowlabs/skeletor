@@ -18,9 +18,7 @@ and makes the relevant part harder to find, not easier.
 | **CLI commands**           | CLI.md                       | `docs/CLI.md`                       |
 | **Shelved / parked work**  | TODO/README.md               | `docs/TODO/README.md`               |
 | **Was this built before?** | todo_index.json              | `docs/todo_index.json`              |
-| **Reports, in flight**     | reports/regular/README.md    | `docs/reports/regular/README.md`    |
-| **Reports, frozen**        | reports/releases/README.md   | `docs/reports/releases/README.md`   |
-| **One-off deep dives**     | reports/occasional/README.md | `docs/reports/occasional/README.md` |
+| **Reports of any kind**    | reports/README.md            | `docs/reports/README.md`            |
 
 <!-- SCAFFOLD: extend as docs are added. `{{CLI}} check docs` fails on an unregistered doc. -->
 
