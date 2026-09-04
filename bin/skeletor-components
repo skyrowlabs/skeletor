@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""What did this tree take from skeletor, and has any of it moved since?
+
+A **provenance** contract, not an acquisition one — and that distinction is the
+whole reason this exists beside `bin/skeletor-upgrade`.
+
+`skeletor-upgrade` answers "carry the template's changes into a tree skeletor
+generated". It needs `.skeletor.json`, which records the *arguments*, so the base
+can be re-rendered and three-way merged. That contract is exact and it is also
+all-or-nothing: it claims the tree reproduces a render.
+
+Three consumers wanted something weaker in the same week. proto.pilot adopted and
+pays for it in standing merge points; sky.boss measured twelve overwrites against
+seventeen declines and declined adoption; jam.sense is skeletor's **ancestor**,
+shares 89 paths, and has zero files byte-identical to any render. None of them
+can honestly say "this tree is a skeletor scaffold". All of them can say "I
+copied these files, from here, at this ref" — and want to know when the original
+moves.
+
+## Why a synthesised `.skeletor.json` is not the answer
+
+It is the obvious shortcut and it is worse than nothing. `cross_check` compares
+the manifest against the base **render**, never against the tree — so a manifest
+synthesised from any render passes trivially, and the upgrade then three-way
+merges with an ancestor that never existed. `git merge-file` does not refuse a
+fictional base; it merges what it can. The conflicts would be harmless. **The
+clean merges are the damage**, written silently under `✅ merged cleanly`.
+
+So this tool never merges and never writes into the tree. It reports. Same
+posture as `bin/skeletor-check-pins`, which reports a bump and never makes one.
+
+## Why two hashes per file, and not one
+
+The tempting design records one hash and compares it to the template. That is
+meaningless: `template/core/scripts/paths.py` contains `{{...}}` placeholders and
+the copy in somebody's tree does not — and it would be *silently* meaningless for
+a file with no placeholders today, matching by luck until the day one is added.
+
+So each file records both:
+
+* `source_sha` — the template file at the ref it was taken from. Compared against
+  the template today, this answers **has upstream moved?** Both sides are raw
+  template, so rendering never enters it.
+* `local_sha` — the file in the tree at the moment it was taken. Compared against
+  that file today, this answers **have we edited ours?**
+
+Two independent comparisons, four states, and the two questions never contaminate
+each other. jam.sense asked for the second and offered to drop it if it were
+expensive; it costs one extra hash, and without it a report cannot tell their
+adaptation from skeletor's improvement — which is a report people learn to skim.
+
+## Why the unit is a component and not a file
+
+jam.sense's argument, taken whole: the thing you take is a *contract*, and
+`output.py`, `allowlist.py`, `check_output_discipline.py` and
+`test_output_contract.py` only mean anything together. **A change to the checker
+with no change to the module is exactly the drift worth flagging loudest**, and
+per-file granularity renders it as one quiet line among four.
+
+Per-file is recoverable from per-component — the set names its paths. The reverse
+needs somebody to re-derive the grouping by hand, at which point the grouping
+lives in a person's head and rots. Take the lossless direction.
+
+A ref is recorded **per file**, not per component, because components are
+assembled over time: taking `paths.py` today and the output contract next week
+under one ref would either backdate the second or falsely advance the first.
+
+Usage:
+    bin/skeletor-components report <tree> [--json]
+    bin/skeletor-components record <tree> --component <name> \\
+        --file <template-path>[:<tree-path>] [--file ...]
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+SKELETOR = Path(__file__).resolve().parent.parent
+COMPONENTS_NAME = ".skeletor-components.json"
+
+#: What a file can be, and the mark it prints under. `both` is the one that
+#: needs a person: upstream moved *and* the local copy was adapted, so neither
+#: "take theirs" nor "keep ours" is automatically right.
+MARKS = {"current": "✅", "upstream": "⬆️", "local": "✏️ ", "both": "❗", "gone": "❔"}
+
+
+def say(symbol: str, message: str) -> None:
+    print(f"{symbol} {message}", file=sys.stderr)
+
+
+def item(message: str) -> None:
+    print(f"   · {message}", file=sys.stderr)
+
+
+def detail(message: str = "") -> None:
+    print(f"   {message}" if message else "", file=sys.stderr)
+
+
+def die(message: str) -> "NoReturn":  # type: ignore[valid-type]
+    say("❌", message)
+    raise SystemExit(1)
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha256_file(path: Path) -> Optional[str]:
+    return sha256_bytes(path.read_bytes()) if path.is_file() else None
+
+
+def template_at(ref: str, source: str) -> Optional[bytes]:
+    """A template file's bytes at a skeletor ref, or None if it is not there.
+
+    `git show` rather than a checkout: this reads one file per entry and a
+    worktree would cost a full tree for each ref somebody has taken from.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(SKELETOR), "show", f"{ref}:{source}"],
+        capture_output=True,
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
+def current_ref() -> str:
+    """What `record` stamps. Tagged where possible, because a bare sha is
+    strippable by a rebase and unreadable to the person reading the report."""
+    result = subprocess.run(
+        ["git", "-C", str(SKELETOR), "describe", "--tags", "--always", "--dirty"],
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() or "unknown"
+
+
+def load(tree: Path) -> dict:
+    path = tree / COMPONENTS_NAME
+    if not path.exists():
+        return {"components": {}}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        die(f"{path} is not valid JSON: {exc}")
+
+
+def save(tree: Path, data: dict) -> Path:
+    data["_comment"] = (
+        "Written by skeletor-components; read by skeletor-components report. It records what "
+        "this tree COPIED from skeletor and when — it does NOT claim this tree was scaffolded "
+        "by skeletor. Nothing here is ever merged or written back; see bin/skeletor-components."
+    )
+    path = tree / COMPONENTS_NAME
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def classify(tree: Path, entry: dict) -> Tuple[str, str]:
+    """One file's state, and the sentence explaining it.
+
+    Two comparisons that never touch each other — see the module docstring on
+    why one hash cannot serve both.
+    """
+    ref = entry["ref"]
+    source = entry["source"]
+
+    upstream_then = entry.get("source_sha")
+    upstream_now_bytes = template_at("HEAD", source)
+    if upstream_now_bytes is None:
+        return "gone", f"skeletor no longer ships {source}"
+    moved = sha256_bytes(upstream_now_bytes) != upstream_then
+
+    local_now = sha256_file(tree / entry["path"])
+    if local_now is None:
+        return "gone", f"not in this tree any more (was {entry['path']})"
+    edited = local_now != entry.get("local_sha")
+
+    if moved and edited:
+        return "both", f"upstream moved since {ref}, and this copy was edited"
+    if moved:
+        return "upstream", f"upstream moved since {ref}; this copy is untouched"
+    if edited:
+        return "local", f"this copy was edited; upstream unchanged since {ref}"
+    return "current", f"unchanged since {ref}"
+
+
+def report(tree: Path, as_json: bool) -> int:
+    data = load(tree)
+    components = data.get("components", {})
+    if not components:
+        die(f"{tree / COMPONENTS_NAME} records no components — nothing to report on")
+
+    payload: Dict[str, list] = {}
+    interesting = 0
+    for name in sorted(components):
+        rows = []
+        for path in sorted(components[name].get("files", {})):
+            entry = dict(components[name]["files"][path], path=path)
+            state, why = classify(tree, entry)
+            rows.append({"path": path, "source": entry["source"], "ref": entry["ref"], "state": state, "note": why})
+            if state != "current":
+                interesting += 1
+        payload[name] = rows
+
+    if as_json:
+        print(json.dumps({"tree": str(tree), "components": payload}, indent=2, sort_keys=True))
+
+    for name, rows in payload.items():
+        moved = sum(1 for r in rows if r["state"] in ("upstream", "both"))
+        # The component headline first, because the component is the unit: a
+        # checker that moved while its module did not is the drift worth seeing,
+        # and it is invisible in a flat list of files.
+        summary = f"{len(rows)} file(s)"
+        if moved:
+            summary += f", {moved} moved upstream"
+        say(MARKS["upstream"] if moved else MARKS["current"], f"{name} — {summary}")
+        for row in rows:
+            item(f"{MARKS[row['state']]} {row['path']} — {row['note']}")
+
+    if interesting:
+        detail()
+        detail("Nothing here was changed and nothing will be: this reports, it never merges.")
+        detail("`git -C <skeletor> diff <ref> HEAD -- <source>` shows what moved. Take what you")
+        detail("want by hand, then re-record that file so the next report starts from there.")
+        detail(f"{MARKS['both']} is the one needing a person — both sides moved.")
+    return 0
+
+
+def record(tree: Path, component: str, files: List[str]) -> int:
+    ref = current_ref()
+    if ref.endswith("-dirty"):
+        # The same refusal skeletor-upgrade makes, for the same reason: a ref
+        # that names uncommitted work describes a source nobody else can read,
+        # so every later report would compare against a fiction.
+        die(f"skeletor is at {ref} — commit first, or the recorded ref names a source nobody can resolve")
+
+    data = load(tree)
+    entry = data.setdefault("components", {}).setdefault(component, {}).setdefault("files", {})
+    for spec in files:
+        source, _, dest = spec.partition(":")
+        dest = dest or source.split("/", 2)[-1]  # template/<overlay>/<path> → <path>
+        blob = template_at(ref, source)
+        if blob is None:
+            die(f"skeletor at {ref} has no {source}")
+        local = sha256_file(tree / dest)
+        if local is None:
+            die(f"{tree / dest} does not exist — copy it before recording it")
+        entry[dest] = {"source": source, "ref": ref, "source_sha": sha256_bytes(blob), "local_sha": local}
+        say("✅", f"{component}: {dest} ← {source} @ {ref}")
+
+    path = save(tree, data)
+    detail(f"recorded in {path.relative_to(tree)}")
+    detail("Re-record a file after you take an upstream change, so the next report starts there.")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0], formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    sub = parser.add_subparsers(dest="action")
+
+    rep = sub.add_parser("report", help="what has moved since it was taken (the default)")
+    rep.add_argument("tree")
+    rep.add_argument("--json", action="store_true")
+
+    rec = sub.add_parser("record", help="record files copied out of skeletor")
+    rec.add_argument("tree")
+    rec.add_argument("--component", required=True, help="the named set these files belong to")
+    rec.add_argument(
+        "--file",
+        action="append",
+        required=True,
+        dest="files",
+        metavar="TEMPLATE_PATH[:TREE_PATH]",
+        help="e.g. template/core/scripts/output.py, or ...:lib/output.py if you renamed it",
+    )
+
+    args = parser.parse_args()
+    if args.action is None:
+        parser.print_help()
+        return 0
+
+    tree = Path(args.tree).expanduser().resolve()
+    if not tree.is_dir():
+        die(f"{tree} is not a directory")
+
+    if args.action == "record":
+        return record(tree, args.component, args.files)
+    return report(tree, args.json)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

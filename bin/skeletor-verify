@@ -1185,6 +1185,105 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
     return results
 
 
+def components_gate(workdir: Path) -> List[Result]:
+    """`skeletor-components` records what a tree copied, and reports what moved.
+
+    It is the provenance half of adoption — for a repository that took files by
+    hand and cannot honestly claim to be a skeletor scaffold. Nothing else here
+    exercises it, and this repository's own history is that a path nothing
+    generates ships broken: `--no-git`, `script()` taking a flag as a path, and a
+    README setup block that had never once been executed.
+
+    Two things are asserted and they need different setups.
+
+    **`record` runs against a clone**, not against this checkout. It refuses a
+    dirty skeletor — a recorded ref naming uncommitted work describes a source
+    nobody else can resolve — and this checkout is usually dirty while somebody
+    is working in it, so running it here would make the gate pass or fail on
+    whether the author had saved. A clone at HEAD is deterministic.
+
+    A consequence to know before it confuses you: because the clone is at HEAD,
+    **this gate tests the committed tool, not the working copy.** Editing
+    `bin/skeletor-components` and re-running verify checks the previous version,
+    and adding it as a new file fails this gate until it is committed. That is
+    the same trade the tool itself makes when it refuses a dirty ref, and it is
+    the right one here — but it is surprising once, so it is written down.
+
+    **`report`'s four states are asserted by editing the record**, not by
+    manufacturing history. The classification is two independent comparisons —
+    `source_sha` against the template today, `local_sha` against the tree today —
+    so falsifying either hash exercises exactly the branch it names, with no
+    dependence on which template files happen to differ between two tags.
+    """
+    results: List[Result] = []
+    started = time.time()
+
+    clone = workdir / "skeletor-clone"
+    code, output = run(["git", "clone", "--quiet", "--no-hardlinks", str(SKELETOR), str(clone)], cwd=workdir)
+    if code != 0:
+        return [Result("components: clone skeletor", False, time.time() - started, output)]
+    tool = clone / "bin" / "skeletor-components"
+
+    # A consumer's tree: not a scaffold, holding copies taken by hand.
+    consumer = workdir / "consumer"
+    (consumer / "scripts").mkdir(parents=True, exist_ok=True)
+    sources = ["template/core/scripts/output.py", "template/core/scripts/allowlist.py"]
+    for source in sources:
+        shutil.copy2(clone / source, consumer / "scripts" / Path(source).name)
+
+    cmd = [sys.executable, str(tool), "record", str(consumer), "--component", "output-contract"]
+    for source in sources:
+        cmd += ["--file", source]
+    code, output = run(cmd, cwd=workdir)
+    recorded = consumer / ".skeletor-components.json"
+    results.append(
+        Result(
+            "components: record writes a provenance file",
+            code == 0 and recorded.exists(),
+            time.time() - started,
+            output,
+        )
+    )
+    if not recorded.exists():
+        return results
+
+    def states() -> Dict[str, str]:
+        code, out = run([sys.executable, str(tool), "report", str(consumer), "--json"], cwd=workdir)
+        if code != 0 or "{" not in out:
+            return {}
+        payload = json.loads(out[out.index("{") : out.rindex("}") + 1])
+        return {row["path"]: row["state"] for rows in payload["components"].values() for row in rows}
+
+    started = time.time()
+    fresh = states()
+
+    data = json.loads(recorded.read_text(encoding="utf-8"))
+    files = data["components"]["output-contract"]["files"]
+    # Falsify one hash each, and both on nothing — so every state below is
+    # produced by exactly the comparison it is named for.
+    files["scripts/output.py"]["source_sha"] = "0" * 64  # upstream moved
+    files["scripts/allowlist.py"]["local_sha"] = "0" * 64  # we edited ours
+    recorded.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    falsified = states()
+
+    data["components"]["output-contract"]["files"]["scripts/output.py"]["local_sha"] = "0" * 64
+    recorded.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    both = states()
+
+    results.append(
+        Result(
+            "components: report separates upstream movement from a local edit",
+            fresh == {"scripts/output.py": "current", "scripts/allowlist.py": "current"}
+            and falsified.get("scripts/output.py") == "upstream"
+            and falsified.get("scripts/allowlist.py") == "local"
+            and both.get("scripts/output.py") == "both",
+            time.time() - started,
+            f"fresh: {fresh}\nfalsified: {falsified}\nboth: {both}",
+        )
+    )
+    return results
+
+
 def allowlist_gate(tree: Path, venv_python: Path) -> Result:
     """Every allowlist in the tree fails when it holds an entry nobody needs.
 
@@ -1414,6 +1513,9 @@ def main() -> int:
         if allow_tree.exists():
             gate = allowlist_gate(allow_tree, venv_python)
             gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        for gate in components_gate(workdir):
             results.append(gate)
 
         for gate in declined_gate(fullest, workdir):
