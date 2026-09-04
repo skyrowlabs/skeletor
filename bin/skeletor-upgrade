@@ -625,7 +625,7 @@ def main() -> int:
                     say("✅", "…and the manifest matches that base exactly, so those edits touched")
                     detail("no file this scaffold ships. Nothing below is an artefact of them.")
 
-        added, updated, merged, conflicted, collided, kept, dropped = [], [], [], [], [], [], []
+        added, updated, merged, conflicted, collided, declined, dropped = [], [], [], [], [], [], []
         patches = target / "tmp" / "upgrade"
         # A dry run writes nothing, `tmp/upgrade/` included — so it must not be
         # allowed to imply otherwise. It reads what is there instead, and says
@@ -648,6 +648,38 @@ def main() -> int:
                 continue
 
             if theirs is None:
+                # Absent from the tree — but there are two ways to be absent, and
+                # they want opposite handling. The manifest tells them apart with
+                # no new bookkeeping: an entry means skeletor WROTE this file
+                # here, so its absence now is a deletion somebody performed on
+                # purpose. No entry means the template has only just started
+                # shipping it, and adding it is the whole point of an upgrade.
+                #
+                # Restoring both was the same mistake as overwriting an edit,
+                # wearing a friendlier symbol: a partial adoption — take the
+                # rules, drop Release Please — had every declined file returned
+                # on every upgrade, reported as a green "new file added" and
+                # written without asking. A decision that has to be re-made on a
+                # schedule is not a decision, and one auto-reverted with a tick
+                # beside it is worse than a conflict, which at least stops.
+                #
+                # The tree's own state is the record. A list of declines in the
+                # manifest would be a second home for a fact the filesystem
+                # already states, and would go stale the moment somebody changed
+                # their mind by restoring the file.
+                if hashes and rel in hashes:
+                    declined.append(rel)
+                    # Only worth a sidecar if there is something new to look at:
+                    # the template has moved since they declined it. Unchanged,
+                    # they already saw this file and said no.
+                    # `.get`, matching the report below: the two are the same
+                    # question and a subscript here would make them disagree if
+                    # the guard above ever loosened.
+                    if sha256(head_files[rel]) != hashes.get(rel) and not args.dry_run:
+                        sidecar = patches / f"{rel}.new"
+                        sidecar.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(head_files[rel], sidecar)
+                    continue
                 added.append(rel)
                 if not args.dry_run:
                     live_path.parent.mkdir(parents=True, exist_ok=True)
@@ -760,6 +792,7 @@ def main() -> int:
                         "merged": merged,
                         "conflicted": conflicted,
                         "collided": collided,
+                        "declined": declined,
                         "dropped": dropped,
                     },
                     indent=2,
@@ -814,13 +847,33 @@ def main() -> int:
             else:
                 detail("where it has always been; the template's is in tmp/upgrade/<path>.new.")
 
+        if declined:
+            # Deliberately a one-line standing state, not a roll-call. This is
+            # permanent — the manifest is re-copied from the head render every
+            # run, so a declined file stays recorded and stays declined — and a
+            # six-line block that can never be resolved is what teaches somebody
+            # to skim the whole report. The count keeps it honest; `--json`
+            # carries the names for anything that needs them.
+            say("⏭️ ", f"{len(declined)} file(s) skeletor wrote and you deleted — NOT restored")
+            detail("Recorded in the manifest, absent from the tree: a decision you made, which")
+            detail("an upgrade does not re-make for you. Standing state, reported every run.")
+            # The subset that is actually actionable: the template has moved
+            # since the decline, so there is something new to say no to.
+            fresh = [rel for rel in declined if sha256(head_files[rel]) != hashes.get(rel)]
+            if fresh:
+                detail()
+                detail(f"{len(fresh)} the template has changed since — worth a second look, and the")
+                detail("current version is in tmp/upgrade/<path>.new:")
+                for rel in fresh:
+                    item(rel)
+
         if dropped:
             say("⚠️ ", f"{len(dropped)} file(s) the template no longer ships — NOT deleted")
             for rel in dropped:
                 item(rel)
             detail("Delete them yourself if you agree. This never removes your files.")
 
-        if not any((added, updated, merged, conflicted, collided, dropped)):
+        if not any((added, updated, merged, conflicted, collided, declined, dropped)):
             say("✅", "already current — nothing to carry over")
             return 0
 

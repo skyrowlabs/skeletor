@@ -1163,6 +1163,99 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
     return results
 
 
+def declined_gate(tier: str, workdir: Path) -> List[Result]:
+    """A file skeletor wrote and the user deleted is not put back.
+
+    `AGENTS.md` calls a `--force` scaffold into a repo somebody already works in
+    *the usual case*, and the whole point of that path is partial adoption: take
+    the rules, keep your own CI, drop the parts that do not fit. Every one of
+    those drops is a deletion — and an absent file was classified purely on
+    being absent, so all of them came back on the next upgrade, reported as a
+    green "new file added" and written without asking. A decision that has to be
+    re-made on a schedule is not a decision, and one auto-reverted with a tick
+    beside it is worse than a conflict, which at least stops.
+
+    Reported by sky.boss, weighing a retrofit and asking whether six settled
+    declines would become six recurring merge conflicts. They would have become
+    something worse than conflicts.
+
+    The discriminator needs no new bookkeeping and no decline list: an entry in
+    the manifest means skeletor *wrote* that file here, so its absence is a
+    deletion; no entry means the template has only just started shipping it, and
+    adding it is what an upgrade is for. Both directions are asserted, because
+    the fix trades one silent wrong answer for the other if it over-applies —
+    a genuinely new file that stopped arriving would be invisible.
+
+    The fourth assertion is the one sky.boss actually asked for: run it twice.
+    The manifest is re-copied from the head render on every applying run, so a
+    decline persists — but only as long as that copy keeps recording the file,
+    which is a property of a different function and nothing here would notice it
+    changing.
+    """
+    results: List[Result] = []
+    started = time.time()
+    manifest_name = load_scaffolder().MANIFEST_NAME
+
+    result, tree = scaffold(tier, "python", workdir, name="declined")
+    results.append(Result(f"declined: {result.label}", result.ok, result.seconds, result.output))
+    if not result.ok:
+        return results
+
+    manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
+    dropped, arriving = sorted(manifest["files"])[:2]
+    # `arriving` is deleted AND unrecorded: the shape of a file the template has
+    # only just started shipping, which must still be added.
+    del manifest["files"][arriving]
+    (tree / manifest_name).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    for rel in (dropped, arriving):
+        (tree / rel).unlink()
+    run(["git", "add", "-A"], cwd=tree)
+    run(["git", "commit", "-m", "decline"], cwd=tree)
+
+    upgrade = [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--no-base", "--json"]
+
+    def report(extra: List[str]) -> dict:
+        """The envelope, or an empty one — never an exception.
+
+        A gate that raises takes the whole verifier down with it and loses the
+        forty checks after it, which is a worse failure than the one it was
+        looking for. An upgrade that printed no JSON has already failed every
+        assertion below on the merits.
+        """
+        _, output = run([*upgrade, *extra], cwd=tree)
+        try:
+            return json.loads(output[output.index("{") : output.rindex("}") + 1])
+        except (ValueError, json.JSONDecodeError):
+            return {"added": [], "declined": [], "no_json": output}
+
+    seen = report(["--dry-run"])
+    results.append(
+        Result(
+            "declined: a deleted file is declined, an unrecorded one still arrives",
+            dropped in seen["declined"]
+            and dropped not in seen["added"]
+            and arriving in seen["added"]
+            and arriving not in seen["declined"],
+            time.time() - started,
+            json.dumps(seen, indent=2),
+        )
+    )
+
+    started = time.time()
+    report([])
+    again = report(["--dry-run"])
+    results.append(
+        Result(
+            "declined: it stays declined across a real upgrade",
+            not (tree / dropped).exists() and dropped in again["declined"] and (tree / arriving).exists(),
+            time.time() - started,
+            f"{dropped} restored: {(tree / dropped).exists()}\n"
+            f"{arriving} arrived: {(tree / arriving).exists()}\n" + json.dumps(again, indent=2),
+        )
+    )
+    return results
+
+
 def hook_args_for_tree(workdir: Path, tier: str) -> List[str]:
     """black's args from any already-generated tree of this tier."""
     for candidate in (workdir / f"{tier}-python", workdir / f"{tier}-both"):
@@ -1225,6 +1318,10 @@ def main() -> int:
             results.append(gate)
 
         for gate in populated_tree_gate(fullest, workdir):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        for gate in declined_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 

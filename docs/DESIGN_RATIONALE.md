@@ -691,6 +691,31 @@ is the rule people are surprised by, and it is the one that matters: a message
 with three `feat:` lines is three commits wearing one hat, and the changelog
 generator takes only the first.
 
+### When a `VERSION` file is wrong, which is more often than this section implies
+
+The template ships one and **skeletor itself refuses one**, and until sky.boss
+asked, nothing wrote down what separates the two. The condition is narrow and it
+decides the whole question: *does anything install this?*
+
+A published artifact has a declared version — in a package index, a Docker tag,
+a wheel — and that declaration has to live in a tracked file, because the thing
+being installed is a tarball with no git history in it. `VERSION` is then not a
+copy of the tag; it is the primary, with a single writer (Release Please) that
+also moves the tag, which is what makes it a generated artifact rather than a
+second home.
+
+Nothing installs skeletor, and nothing installs a repository whose only entry
+point is a wrapper script beside the source. There the tag is the only version
+anybody can observe, `git describe` reads it, and a tracked `VERSION` is exactly
+the duplicate this project refuses everywhere else — with the worse property
+that a rebase or a hand-edit can make the two disagree while both look right.
+
+So: **take Release Please when the project is published, and `git describe` when
+it is run from a checkout.** A tree that guesses wrong is cheap to correct in
+either direction, and the badge section below is downstream of the same fact —
+it says "a third home for a number whose first two are the git tag and
+`VERSION`", and for an uninstalled project the second of those should not exist.
+
 ### Badges
 
 Two, and only when `--org` names a real owner. Neither one *stores* a value,

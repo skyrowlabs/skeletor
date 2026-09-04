@@ -419,6 +419,32 @@ The difference decides whether the next upgrade destroys work: a merged file is
 neither the old render nor the new one, so hashing the tree would record it as
 pristine and the following run would overwrite the merge.
 
+**A file skeletor wrote and the user deleted is not put back.** That is the
+fourth category, and it is what makes partial adoption survivable. `AGENTS.md`
+calls a `--force` scaffold into a working repository *the usual case*, and every
+partial adoption is a set of deletions — take the rules, keep your own CI, drop
+Release Please. An absent file was classified purely on being absent, so every
+one of those came back on the next upgrade, reported as a green "new file added"
+and written without asking. Worse than a conflict, which at least stops: a
+decision that has to be re-made on a schedule is not a decision.
+
+The manifest already draws the line and needs no decline list: an entry means
+skeletor *wrote* that file here, so its absence is a deletion; no entry means the
+template has only just started shipping it, and adding it is what an upgrade is
+for. Both directions are gated, because over-applying the fix would silently stop
+delivering genuinely new files — the same wrong answer facing the other way. A
+persisted list of declines would be a second home for a fact the filesystem
+already states, and would go stale the moment somebody changed their mind by
+restoring the file.
+
+It reports as one standing line rather than a roll-call, because it is permanent:
+the manifest is re-copied from the head render on every applying run, so a
+decline persists and is reported forever. Only the subset the template has
+*changed* since is itemised, with the current version in `tmp/upgrade/`, since
+that is the only part there is anything new to decide about. sky.boss found this
+while weighing a retrofit and asking whether settled declines would become
+recurring conflicts; they would have become something quieter and worse.
+
 A file the user had *before* the template claimed its path is reported as its own
 category, not as an edit. The handling is identical — left alone, template's
 version to `tmp/upgrade/`, never overwritten — and only the sentence differs,
