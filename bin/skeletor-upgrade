@@ -155,6 +155,16 @@ def refuse_a_dirty_base(base: Path, writing: str) -> None:
     `--dry-run` writes nothing and is never refused, which is also what keeps
     `bin/skeletor-verify` running `--from-dir .` against this checkout while it
     is being edited.
+
+    **The teeth are in "unreproducible", not in "write"** — worth stating,
+    because this reasoning now backs three guards and the short version of it
+    would over-apply. A merely *wrong* write is not this: the next correct run
+    overwrites it and nothing is lost. What cannot be undone is recording a hash
+    of a render nobody can re-derive, because from then on every run is
+    internally correct and disagrees forever, and no amount of re-running gets
+    you out. A guard is owed to a write with that property and not to writes in
+    general. (proto.pilot's narrowing, and a fair one — the first draft of this
+    argued from "write".)
     """
     dirty = uncommitted(base, untracked=True)
     if not dirty:
