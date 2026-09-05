@@ -1379,8 +1379,16 @@ def entangled_gate(workdir: Path) -> List[Result]:
         (
             t
             for t in tags
-            if run(["git", "-C", str(SKELETOR), "diff", "--quiet", t, "HEAD", "--",
-                    f"template/core/{importer}", f"template/core/{importee}"], cwd=SKELETOR)[0] != 0
+            # BOTH must differ, checked one path at a time. `--quiet` over two
+            # pathspecs is non-zero when *either* differs, so the pair predicate
+            # silently became an "or" and picked a tag where the importee had
+            # not moved — leaving nothing to conflict and the gate asserting
+            # against an empty conflict set.
+            if all(
+                run(["git", "-C", str(SKELETOR), "diff", "--quiet", t, "HEAD", "--", f"template/core/{f}"],
+                    cwd=SKELETOR)[0] != 0
+                for f in (importer, importee)
+            )
             and len(changed_py(t)) > 2
         ),
         "",

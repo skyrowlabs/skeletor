@@ -22,6 +22,12 @@ SUITES = {
     "unit": ("host-side tests, no services required", False),
     "integration": ("requires the stack up and seeded", True),
     "manual": ("never in scheduled CI — E2E, live third-party, paid APIs", True),
+    # Empty in a headless tree and that is fine — an empty suite is green, and
+    # the row costs nothing until something fills it. It exists as a row rather
+    # than as a `--ui` overlay because what a TUI, a browser and an Electron
+    # window share is not a framework, it is a failure mode: the interaction can
+    # be delivered to nothing. See docs/rules/testing.md § Interaction.
+    "ui": ("drives a user interface; needs a display, a browser, or a pilot", True),
 }
 
 

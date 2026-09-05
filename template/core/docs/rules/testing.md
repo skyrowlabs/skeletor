@@ -52,6 +52,52 @@ there means the harness broke, and a harness that silently skips its whole suite
 green. Raw `pytest.skip` is only for genuine cross-environment conditions CI does not
 guarantee.
 
+## Interaction: Assert at the Act, Not at the Consequence
+
+For the `ui` suite — a Textual pilot, a browser, an Electron window. The rule is
+framework-independent because the failure is:
+
+> **A UI harness can deliver an action to nothing, and every assertion after it
+> is then vacuous.** The test fails later, somewhere unrelated, or does not fail
+> at all.
+
+This is the `scanned()` rule one domain over. An enumeration that found nothing
+makes every assertion *over* it a tautology; an interaction that landed on
+nothing makes every assertion *after* it a tautology. Same remedy: put the guard
+in the act, not beside it.
+
+Three ways the action goes missing, one per stack, all the same bug:
+
+| | how it disappears |
+| --- | --- |
+| TUI | a widget is mounted **before the first layout pass**, so for a few frames it exists with a zero-width region and a click resolves to coordinates that hit nothing |
+| Browser | the element is in the DOM before hydration, or is zero-size, or is covered, or an animation is still moving it |
+| Electron | the window exists before it is focusable, and input goes to the previous window |
+
+And one that is not about timing at all: **a harness may coalesce or drop the
+action itself.** Textual's `pilot.click` merges repeat clicks at the same
+position — measured at three clicks delivering two presses — so a test asserting
+*a second run is refused* passes whether the refusal works or not.
+
+So:
+
+1. **Wait on the property that makes the action deliverable**, never on the
+   element existing. Existence is the wrong predicate; size, focus, and
+   stability are the right ones.
+2. **Assert the interaction landed, in the helper that performs it** — the
+   screen changed, the handler ran, the count moved. A missed click must fail
+   *at the click*, not ten seconds later in an assertion about state.
+3. **Never repeat an identical action to mean two things.** If a second press
+   must be distinguishable from the first, use a different route — a keybinding,
+   a distinct target — because a harness that merges them makes the distinction
+   unobservable.
+4. **A negative assertion after an interaction needs (2) before it is worth
+   anything.** *Nothing happened* and *the action never arrived* look identical.
+
+The adapter is yours: only this repository knows its framework. What is not
+negotiable is that the helper asserts delivery, because a harness that silently
+swallows input turns the whole suite into a coin flip that always lands green.
+
 ## Never Create State Without a Teardown
 
 Every fixture that creates a record owns its deletion. A cleanup that runs at *startup* is
