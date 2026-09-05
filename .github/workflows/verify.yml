@@ -28,7 +28,20 @@ jobs:
     name: every tier passes its own gates
     runs-on: ubuntu-latest
     steps:
+      # `fetch-depth: 0` because two gates resolve *tags*: `dirty_ref_gate` and
+      # `entangled_gate` scaffold at an older release and upgrade to HEAD, which
+      # needs both the tag list and the commits behind it. `actions/checkout`
+      # fetches one commit and no tags by default, so `git tag` returned nothing
+      # and both gates reported "no tag differs from HEAD" — failing loudly,
+      # correctly, on a cause that was the runner rather than the repository.
+      #
+      # They fail rather than skip on purpose: a version-gap gate that quietly
+      # does nothing when it cannot find a version gap is a gate that passes
+      # forever on a shallow clone. The template makes the same trade in its own
+      # `ci.yml` for `test_docs_name_live_code.py`, which asks `git log --all`.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       # Verify on the Python a scaffold actually defaults to, read from the
       # scaffolder rather than repeated here: a hard-coded version would be a

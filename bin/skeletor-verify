@@ -86,14 +86,41 @@ def load_scaffolder():
     return module
 
 
+#: A git identity for every subprocess — see `run()`. Held here rather than
+#: inline so the values have one home.
+GIT_IDENTITY = {
+    "GIT_AUTHOR_NAME": "skeletor-verify",
+    "GIT_AUTHOR_EMAIL": "verify@skeletor.invalid",
+    "GIT_COMMITTER_NAME": "skeletor-verify",
+    "GIT_COMMITTER_EMAIL": "verify@skeletor.invalid",
+}
+
+
 def run(cmd: List[str], cwd: Path, env_extra: Optional[dict] = None) -> Tuple[int, str]:
     import os
 
     env = dict(os.environ)
+    # Every subprocess, not just the ones that obviously commit. Nothing here may
+    # depend on the host having a git identity: a GitHub runner has none, and the
+    # failure is not a git error but a *tree* that has a repository and no HEAD —
+    # so it surfaces as 97 uncommitted files in an unrelated gate, pointing at
+    # the wrong subsystem.
+    #
+    # `scaffold()` learned this on its first CI run and carried it alone. The
+    # gates added later called `git commit` bare, or invoked the scaffolder
+    # directly, and went red on CI while passing here — three sites, one rule,
+    # applied once. Putting it in `run()` is the only version that cannot be
+    # forgotten by the next gate, which is the same argument as `scanned()`.
+    env.update(GIT_IDENTITY)
     if env_extra:
         env.update(env_extra)
     proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, env=env)
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+def git_in(tree: Path, *args: str) -> Tuple[int, str]:
+    """A git command in `tree`. The identity comes from `run()`."""
+    return run(["git", *args], cwd=tree)
 
 
 def toolchain() -> List[str]:
@@ -1161,8 +1188,8 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
 
     # Committed, because an upgrade refuses a dirty tree — and rightly: the
     # tampering above is exactly the "in-progress edits" that refusal protects.
-    run(["git", "add", "-A"], cwd=tree)
-    run(["git", "commit", "-m", "tamper"], cwd=tree)
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "-m", "tamper")
 
     started = time.time()
     code, output = run(upgrade, cwd=tree)
@@ -1217,7 +1244,7 @@ def clean_skeletor(workdir: Path) -> Path:
     if working:
         run(["git", "-C", str(clone), "fetch", "--quiet", "origin", working], cwd=workdir)
         run(["git", "-C", str(clone), "checkout", "--quiet", working, "--", "."], cwd=workdir)
-        run(["git", "-C", str(clone), "commit", "--quiet", "-am", "verify: the working tree under test"], cwd=workdir)
+        git_in(clone, "commit", "--quiet", "-am", "verify: the working tree under test")
     return clone
 
 
@@ -1262,7 +1289,14 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
     if not tag:
         # Loudly, never silently: no tag differs from HEAD under `template/`, so
         # there is no version gap to upgrade across and this gate cannot run.
-        return [Result("dirty ref: no tag differs from HEAD under template/", False, time.time() - started, "")]
+        #
+        # And say *which* nothing it found. An empty tag list is a shallow clone,
+        # not a repository without releases — `actions/checkout` fetches neither
+        # tags nor history by default, which is how this failed on CI for three
+        # releases while passing here. "Looked and saw nothing" and "could not
+        # see" are the same red until the message separates them.
+        why = "no tags are visible at all — a shallow clone?" if not tags else "no tag differs from HEAD under template/"
+        return [Result(f"dirty ref: {why}", False, time.time() - started, f"{len(tags)} tag(s) visible")]
 
     old_checkout = workdir / "dirty-base"
     code, output = run(["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(old_checkout), tag], cwd=SKELETOR)
@@ -1394,7 +1428,12 @@ def entangled_gate(workdir: Path) -> List[Result]:
         "",
     )
     if not tag:
-        return [Result(f"entangled: no tag moves {importer}, {importee} and another .py", False, time.time() - started, "")]
+        why = (
+            "no tags are visible at all — a shallow clone?"
+            if not tags
+            else f"no tag moves {importer}, {importee} and another .py"
+        )
+        return [Result(f"entangled: {why}", False, time.time() - started, f"{len(tags)} tag(s) visible")]
 
     old_checkout = workdir / "entangled-base"
     run(["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(old_checkout), tag], cwd=SKELETOR)
@@ -1412,8 +1451,8 @@ def entangled_gate(workdir: Path) -> List[Result]:
             "\n".join("### OURS ###" for _ in clobber.read_text(encoding="utf-8").splitlines()) + "\n",
             encoding="utf-8",
         )
-        run(["git", "add", "-A"], cwd=target)
-        run(["git", "commit", "-m", "ours"], cwd=target)
+        git_in(target, "add", "-A")
+        git_in(target, "commit", "-m", "ours")
 
         code, output = run(
             [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(target), "--dry-run", "--json"],
@@ -1653,8 +1692,8 @@ def declined_gate(tier: str, workdir: Path) -> List[Result]:
     (tree / manifest_name).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     for rel in (dropped, arriving, moved):
         (tree / rel).unlink()
-    run(["git", "add", "-A"], cwd=tree)
-    run(["git", "commit", "-m", "decline"], cwd=tree)
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "-m", "decline")
 
     upgrade = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree), "--no-base", "--json"]
 
