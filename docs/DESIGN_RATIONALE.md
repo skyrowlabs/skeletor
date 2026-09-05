@@ -689,6 +689,74 @@ Ground truth is pytest's own collection, not a scan for `pytestmark`. A single
 visible to the runner — and it is exactly what somebody writes on the day the
 exemption stops being true.
 
+### Two bugs that hid each other, and only one of them was a bug about tests
+
+stash.flow reported this pair on v0.5.1, and the order matters: the visible one
+was in a test, the one worth generalising was in the check that should have
+caught it.
+
+`test_a_host_exemption_is_still_true` parametrized over the checkers declaring
+`CANNOT_RUN_ON_HOST`. Zero of those is the *intended* state of a fresh scaffold
+and the docstring said so approvingly — "it costs nothing until somebody makes
+the claim". It does not cost nothing. **pytest reports an empty parameter set by
+skipping**, `tests/skip_budget.json` ships `max_skipped: 0`, and so every tree
+generated at v0.5.1 was born one skip over its own ratchet. The intended case
+was the breaching case.
+
+Two things are worth separating there. An assertion that is *correct* when empty
+and a *skip* emitted when empty are different objects, and a ratchet counting
+skips can only see the second — which is why this survived a suite that already
+holds the "negative over an empty set" rule in four places. And the reason the
+empty case is safe at all is structural rather than a guard: `_host_exempt()`
+and `_host_runnable()` partition the checkers, so an exemption the scanner fails
+to see does not disappear, it lands in the other set and fails loudly against a
+script that cannot answer `--json`. The fix is a loop instead of a parametrize;
+the emptiness needed no new assertion.
+
+It reached users because the ratchet was not running. `ci.yml` ran
+`python -m pytest tests/ -m unit -q --durations=25` — no `--junitxml` — and then
+`python scripts/check_skip_budget.py`, which found no report at `tmp/junit.xml`,
+printed a warning and **exited 0**. Every push, every scaffold, since the
+template first shipped. The check that exists to catch a suite quietly stopping
+testing had quietly stopped testing, and its output was a `⚠️` in a green step.
+
+The general statement, and stash.flow's:
+
+> **A graceful degradation that degrades into a pass is not graceful.** There is
+> no case where *"I could not measure"* is the same answer as *"the budget is
+> respected"*, so a checker whose whole job is to fail on a number has no
+> warn-and-pass path. A ratchet with nothing to read has not passed; it has not
+> run.
+
+`check_coverage_budget.py` carried the identical hole, latent — the one workflow
+that runs it does write its report — and the pair is the useful reading: a
+latent instance is one edited workflow away from the live one, so both were
+fixed together rather than the one that had already fired.
+
+`bin/skeletor-verify` structurally could not see this. It runs a generated
+tree's gates directly, where the hand invocation is fine; the defect lived in
+what the **workflow** passes, and no tree's own suite was asking. So the tree
+now ships `tests/test_ci_ratchet_inputs.py`: for every workflow step running a
+ratchet, the artifact that ratchet reads must be named earlier **in the same
+job** — a later job is a different runner with a different filesystem. Enrolment
+is by pattern at both ends, so the next ratchet is covered by existing: a ratchet
+is any `scripts/check_*.py` naming a file under `tmp/`, read from its source.
+
+Both plants were run and both went red, including the one that matters most
+here: replacing the flag with `# TODO: restore --junitxml=tmp/junit.xml here`
+leaves the string in the file and the job without the flag, so an unmasked grep
+passes. That is `scripts/yaml_text.py`'s rule collecting its third instance —
+a check hunting for a *requirement* must mask comments, because the string most
+likely to appear where the thing is missing is a comment saying it should be
+there.
+
+One thing stash.flow did **not** do is the reason this is a template fix rather
+than an adopter's workaround: they left `max_skipped: 0` alone. Raising it to 1
+would have recorded a claim about their tree that was false — they had no
+legitimate skip, they had our empty parametrize — and it would have outlived the
+fix as a permanently loosened ratchet nobody remembers loosening. A number that
+is wrong in the honest direction is worth more than a green one.
+
 ---
 
 ## CI, cost, and the draft-PR discipline

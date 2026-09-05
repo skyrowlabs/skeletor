@@ -136,6 +136,18 @@ Adding a legitimate skip → raise the budget **in the same commit** and justify
 body. Removing skips, or raising coverage meaningfully → lower/raise the baseline in the same
 commit to lock the gain in. A ratchet is not a target: never chase the number.
 
+Both read a report pytest writes, so **both fail when that report is missing** rather than
+warning and passing. A ratchet with nothing to read has not passed, it has not run, and the
+two are indistinguishable from a green step. Run them the way CI does:
+
+```bash
+python -m pytest tests/ -m unit -q --junitxml=tmp/junit.xml
+python scripts/check_skip_budget.py --suite unit
+```
+
+`tests/test_ci_ratchet_inputs.py` holds the workflows to the same rule, because the version
+of this that shipped was a job running the ratchet and never writing the file.
+
 ## Before You Commit
 
 ```bash

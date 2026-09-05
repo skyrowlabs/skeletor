@@ -29,7 +29,7 @@ from pathlib import Path
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.output import detail, emit, fail, ok, warn  # noqa: E402
+from scripts.output import detail, emit, fail, ok  # noqa: E402
 from scripts.paths import TESTS_DIR, TMP_DIR  # noqa: E402
 
 BUDGET = TESTS_DIR / "coverage_budget.json"
@@ -51,8 +51,15 @@ def main() -> int:
         return status
 
     if not args.xml.exists():
-        warn(f"no coverage report at {args.xml} — run pytest with --cov-report=xml first")
-        return done({"state": "no-report", "xml": str(args.xml)}, 0)
+        # Same reason as `check_skip_budget.py`, and found the same day: a
+        # ratchet that cannot read its report has not passed, it has not run.
+        # This one was latent rather than live — its only workflow does produce
+        # the report — which is exactly how the pair should be read. One graceful
+        # degradation was already degrading into a pass; the other was one
+        # edited workflow away from it.
+        fail(f"no coverage report at {args.xml} — run pytest with --cov-report=xml:{args.xml} first")
+        detail("Nothing was measured, so nothing is being ratcheted. See docs/rules/testing.md.")
+        return done({"state": "no-report", "xml": str(args.xml)}, 1)
 
     budget = json.loads(BUDGET.read_text(encoding="utf-8"))
     entry = budget["suites"].get(args.suite)

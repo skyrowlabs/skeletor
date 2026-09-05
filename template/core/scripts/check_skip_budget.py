@@ -29,7 +29,7 @@ from pathlib import Path
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.output import detail, emit, fail, item, ok, warn  # noqa: E402
+from scripts.output import detail, emit, fail, item, ok  # noqa: E402
 from scripts.paths import TESTS_DIR, TMP_DIR  # noqa: E402
 
 BUDGET = TESTS_DIR / "skip_budget.json"
@@ -65,8 +65,18 @@ def main() -> int:
         return status
 
     if not args.junit.exists():
-        warn(f"no junit report at {args.junit} — run pytest with --junitxml first")
-        return done({"state": "no-report", "junit": str(args.junit)}, 0)
+        # A ratchet with nothing to read has not passed; it has not run. This
+        # warned and exited 0 for as long as the tree existed, and `ci.yml` ran
+        # pytest without `--junitxml` — so the check that exists to catch a
+        # suite quietly stopping testing was itself quietly not testing, on
+        # every push, in every scaffold. stash.flow found it by writing the
+        # report by hand and watching a green step turn red.
+        #
+        # There is no case where "I could not measure" is the same answer as
+        # "the budget is respected", so there is no warn-and-pass path here.
+        fail(f"no junit report at {args.junit} — run pytest with --junitxml={args.junit} first")
+        detail("Nothing was measured, so nothing is being ratcheted. See docs/rules/testing.md.")
+        return done({"state": "no-report", "junit": str(args.junit)}, 1)
 
     budget = json.loads(BUDGET.read_text(encoding="utf-8"))
     entry = budget["suites"].get(args.suite)

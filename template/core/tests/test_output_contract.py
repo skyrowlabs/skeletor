@@ -149,8 +149,7 @@ def test_the_human_half_still_happens():
     assert any(symbol.strip() in result.stderr for symbol in STATE_SYMBOLS.values())
 
 
-@pytest.mark.parametrize("script", _host_exempt(), ids=lambda p: p.name)
-def test_a_host_exemption_is_still_true(script: Path):
+def test_a_host_exemption_is_still_true():
     """A script claiming it cannot answer `--json` here, which then does.
 
     This is the exemption's staleness check, and it is keyed to the exact
@@ -159,12 +158,32 @@ def test_a_host_exemption_is_still_true(script: Path):
     is silently carrying a claim that is no longer true — and the next reader
     takes it as a live reason not to test the thing.
 
-    Zero of these in a fresh scaffold, so it costs nothing until somebody makes
-    the claim, and then it costs one subprocess.
+    ## Why this one loops where its neighbours parametrize
+
+    Zero exemptions is the *expected* state of a fresh scaffold, and pytest
+    reports an empty parameter set by **skipping** — which is a legitimate
+    assertion over an empty set arriving as an illegitimate one. `skip_budget`
+    ships at 0, so the intended case was the breaching case: every v0.5.1 tree
+    was born one skip over its own ratchet. stash.flow found it, and declined to
+    raise the budget on the grounds that the number would then record a claim
+    about their tree that was false and outlive the fix — which is right, and is
+    why the fix is here rather than there.
+
+    An assertion that is correct when empty and a skip that is emitted when
+    empty are different things, and only the second is visible to a ratchet.
+
+    What keeps the empty case from being vacuous is not a guard beside it but
+    the shape of the enumeration: `_host_exempt()` and `_host_runnable()`
+    partition `_checkers()`, so a declaration this scanner fails to see does not
+    vanish — it lands in the other set, where the contract is asserted against a
+    script that cannot answer and fails loudly. That is why
+    `test_there_are_checkers_to_check` can guard the other two sets and not this
+    one, and why it does not need to.
     """
-    result = _run(script, "--json")
-    assert not _parses(result), (
-        f"{script.name} declares CANNOT_RUN_ON_HOST ({_declared_reason(script)!r}) and answered "
-        "`--json` with a parseable object anyway. The exemption has outlived its reason: delete "
-        "the constant so the contract is asserted against this script again."
-    )
+    for script in _host_exempt():
+        result = _run(script, "--json")
+        assert not _parses(result), (
+            f"{script.name} declares CANNOT_RUN_ON_HOST ({_declared_reason(script)!r}) and answered "
+            "`--json` with a parseable object anyway. The exemption has outlived its reason: delete "
+            "the constant so the contract is asserted against this script again."
+        )

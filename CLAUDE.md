@@ -775,6 +775,41 @@ interlock, and which you cannot understand from one file:
    proto.pilot, who found a `monkeypatch` aimed at the module a call had left,
    turning a negative into a tautology with nothing in the output to say so.
 
+   **The empty case can be legitimate and still be a defect**, which is the
+   half this had not reached. `test_a_host_exemption_is_still_true` parametrized
+   over the scripts declaring `CANNOT_RUN_ON_HOST`, and zero of them is the
+   *expected* state of a fresh scaffold — the docstring said so, as though that
+   settled it. pytest reports an empty parameter set by **skipping**, and
+   `skip_budget.json` ships at 0, so every scaffold was born one skip over its
+   own ratchet. An assertion that is correct when empty and a skip that is
+   emitted when empty are different things, and a ratchet only sees the second.
+   The fix is a loop rather than a parametrize, and what makes the empty case
+   non-vacuous is not a guard beside it but the shape of the enumeration: the
+   exempt and runnable sets partition the checkers, so an exemption this scanner
+   fails to see lands in the other set and fails loudly there.
+
+   It shipped because the ratchet that would have caught it **was not running**.
+   `ci.yml` ran pytest with no `--junitxml`, and `check_skip_budget.py` answered
+   a missing report with a warning and exit 0 — so the check that exists to
+   catch a suite quietly stopping testing was itself quietly not testing, on
+   every push, in every generated repository. stash.flow found both, by writing
+   the report by hand and watching a green step turn red. Two bugs that hid each
+   other, and the second is the general one: **there is no case where "I could
+   not measure" is the same answer as "the budget is respected"**, so neither
+   ratchet has a warn-and-pass path any more. `check_coverage_budget.py` had the
+   identical hole, latent — its one workflow does write the report — which is
+   the pair worth reading together, since a latent one is an edited workflow
+   away from the live one.
+
+   `bin/skeletor-verify` could not see it: it runs a tree's gates directly,
+   where the hand invocation is fine, and the hole was in what the *workflow*
+   passes. So the tree ships `tests/test_ci_ratchet_inputs.py`, which requires
+   the artifact a ratchet reads to be named earlier in the same job — enrolment
+   by pattern at both ends, since a ratchet is any `scripts/check_*.py` naming a
+   file under `tmp/`. It reads the workflows with comments blanked, and the
+   plant proves why: `# TODO: restore --junitxml=tmp/junit.xml here` leaves the
+   string in the file and the job without the flag.
+
    Measured, not grepped: the heuristic that found these also produced two false
    positives, and it missed `test_the_scan_finds_the_docs` because its name says
    "finds" and the pattern said "found". The question that settles it is not

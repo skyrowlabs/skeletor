@@ -241,11 +241,16 @@ jobs:
             pip install -e .
           fi
 
+      # `--junitxml` is not optional decoration: the step below reads that file
+      # and has nothing to say without it. It ran without one for as long as
+      # this template existed, and the ratchet reported a warning and exited 0.
       - name: Unit suite
-        run: python -m pytest tests/ -m unit -q --durations=25
+        run: |
+          mkdir -p tmp
+          python -m pytest tests/ -m unit -q --durations=25 --junitxml=tmp/junit.xml
 
       - name: Skip budget
-        run: python scripts/check_skip_budget.py
+        run: python scripts/check_skip_budget.py --suite unit
 
   # ── Integration ─────────────────────────────────────────────────────────
   # Gated on full_suite. When it is skipped it still REPORTS `skipped`, which
