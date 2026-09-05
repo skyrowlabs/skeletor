@@ -124,13 +124,32 @@ def test_the_scan_finds_the_citations():
 
 
 def test_every_cited_path_exists():
-    """Resolved against the repo root, or against the citing document."""
+    """Resolved against the repo root, or against the citing document.
+
+    **Collected, then asserted once.** An `assert` inside the loop reports the
+    alphabetically first finding and says nothing about the rest — which is a
+    negative assertion over the remainder, this repository's count-vs-set rule
+    with failures substituted for tests. `docs/DEVELOPMENT.md` already ships the
+    principle: *"Every gate runs even after one fails. One fix per round trip is
+    the thing this exists to avoid."* This gate broke it in the situation where
+    the whole list matters most, which is arrival: an adopting tree meets every
+    finding at once, and reads one.
+
+    proto.pilot supplied the instance. Theirs landed red with five findings and
+    printed one, so they concluded an exclusion they had written was
+    unnecessary — it was necessary by three, all of them behind the first
+    `assert`, alphabetically.
+    """
+    dangling = []
     for token, citing in sorted(cited_paths().items(), key=lambda item: item[0]):
-        found = (PROJECT_ROOT / token).exists() or any((doc.parent / token).exists() for doc in citing)
-        where = sorted(str(doc.relative_to(PROJECT_ROOT)) for doc in citing)
-        assert found, (
-            f"{where} names `{token}`, which is not in this tree — not at the repo root and "
-            "not beside the document citing it. A rules file naming a helper the reader does "
-            "not have is an instruction that cannot be followed: point it at a real file, or "
-            "say what to create."
-        )
+        if (PROJECT_ROOT / token).exists() or any((doc.parent / token).exists() for doc in citing):
+            continue
+        where = ", ".join(sorted(str(doc.relative_to(PROJECT_ROOT)) for doc in citing))
+        dangling.append(f"`{token}` — cited by {where}")
+
+    assert not dangling, (
+        f"{len(dangling)} cited path(s) are not in this tree — not at the repo root and not "
+        "beside the document citing them. A rules file naming a helper the reader does not "
+        "have is an instruction that cannot be followed: point each at a real file, or say "
+        "what to create.\n  " + "\n  ".join(dangling)
+    )

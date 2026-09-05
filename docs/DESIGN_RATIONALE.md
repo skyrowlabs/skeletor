@@ -1488,6 +1488,116 @@ confirmed. It is not built, because the one consumer it would serve already has
 an answer it chose on measurement, and a second door to a solved problem is how
 two mechanisms start disagreeing.
 
+### Two guards, each right, and a documented flow neither could reach
+
+`bin/skeletor-upgrade` told you to port the conflicts from `tmp/upgrade/` and
+re-run. Neither half of that sentence worked.
+
+**A plain re-run never advances the base.** A hand-ported file no longer matches
+its recorded hash, so it comes back as an edit and three-way merges — and a
+merge cannot tell an applied hunk from an unapplied one, so it conflicts again,
+`pending` stays non-empty, and the ref stays where it is forever. The flag that
+does advance it is `--ported`, and the instruction did not name it. The code
+comment three lines below the message says exactly why a merge cannot tell, so
+this was two correct statements that never met.
+
+**And `--ported` refused a dirty tree, which the flow guarantees.** The run that
+produced the conflicts had already written every file it could apply, so the
+tree is dirty from the tool's own output *before* the first hand-edit. That left
+two exits and both are bad, which is how proto.pilot found it: commit with the
+manifest knowingly at the old ref — the record corruption every other guard here
+exists to prevent, reached for *because* you are being careful — or pass
+`--allow-dirty`, whose help describes merging into in-progress edits of your
+own. There were none. The dirty tree *is* the tool's output, so the flag that
+works reads wrong, and they backed three files up by hand before trusting it.
+
+Neither guard is wrong and what they jointly imply is: the class this document
+already records as the defect that lives in what two files jointly imply,
+arriving this time between a guard and an instruction.
+
+The fix names the missing fact rather than relaxing anything. **A conflicted file
+is never written by this tool**, so `--ported` cannot overwrite a hand-port — it
+moves the record, not the bytes. That sentence is now in the flag's help, in the
+warning that replaces the refusal, and is why a warning is the right shape: a
+refusal is only a refusal if its escape hatch fits the case, and otherwise it is
+a riddle.
+
+The gate rides on `pending_ref_gate`, which already manufactures the only state
+in which `--ported` is warranted — a run that applied some files and conflicted
+on one — and leaves it uncommitted, which is what makes it the right host.
+Committing between the runs is precisely what a careful reader does to get past
+the refusal, so a gate that committed would arrange the bug away. Both
+assertions were established by planting: the refusal restored, and the manifest
+copy removed so `--ported` proceeds without advancing anything.
+
+`--dry-run` got the same treatment from the other direction, on proto.pilot's
+observation rather than their request. It is never refused a dirty base, and that
+is correct — nothing is written, so the unreproducible-render hazard cannot
+land, and it is what lets `bin/skeletor-verify` run `--from-dir .` against this
+checkout mid-edit. But a dry run is the thing somebody *reads to decide*, so a
+plan computed from a base that exists in no commit is exactly where it matters,
+and it arrived looking like any other plan: this checkout was mid-pass, their dry
+run planned two files, and a real run from a clean tag correctly left both alone.
+It warns now, once per checkout — twice was the first draft, because a dry run
+reaches the check for the base and again for the head render, and with
+`--from-dir .` those are one directory. The refusal never showed that, because it
+exits on the first call.
+
+### One finding printed, four withheld
+
+`test_every_cited_path_exists` asserted inside its loop, so it reported the
+alphabetically first dangling citation and said nothing about the rest. That is
+this repository's count-versus-set rule with *failures* substituted for tests: a
+single reported failure is a negative assertion over the remainder, and it looks
+identical to there being no remainder.
+
+It matters most at arrival, which is the only moment an adopting tree meets every
+finding at once. proto.pilot landed red with five, read one, and concluded that an
+exclusion they had written was unnecessary — it was necessary by three, all
+behind the first `assert`, alphabetically. They caught it only by running the
+finder by hand afterwards instead of trusting the line.
+
+The template already shipped the principle: `docs/DEVELOPMENT.md` says *"Every
+gate runs even after one fails. One fix per round trip is the thing this exists
+to avoid."* A new gate broke a rule the tree states in prose, which is the
+argument for Rule 2 in miniature — a convention you must remember to apply is a
+registry with no enforcement.
+
+### A ratchet that varies by time, and a rise with two readings
+
+`setup_block_budget.json` is written by the scaffolder because the shared-prefix
+depth varies by `--language`. Its comment anticipated that axis and not the other
+one: arriving through `bin/skeletor-upgrade` into a tree scaffolded long ago, it
+carries the floor for a *fresh* scaffold, and a tree that has since converged
+further is red on arrival. Red **upward**, with "raise it to 4" in the message —
+which is the ratchet asking you to lock in a gain, not a defect, and one
+documented line is the whole remedy. It is now that line, in the file the reader
+will have open.
+
+`bin/skeletor-upgrade` re-measuring and writing the floor was considered and
+declined. A tool that rewrites a ratchet's floor to whatever it currently
+measures has stopped being a ratchet, and the one moment it would need to is
+adoption — where a human deciding is the entire point, and where this repository
+already says to baseline at what the repo has.
+
+The same file gave up a better bug. Its docstring opened *"`README.md`,
+`docs/DEVELOPMENT.md` and `AGENTS.md` each carry the install steps"* as fact,
+while enrolment is by content and `least=2` tolerates two — so a tree whose third
+document legitimately stopped being an install block ran a two-way comparison
+under a three-way claim, silently. Invariant 7 again, on the axis that has now
+produced three instances: a count measured in one configuration, written into a
+file every configuration carries.
+
+But it was not invisible, and that is the useful half. Fewer blocks almost always
+agree *further*, so a departure surfaces as a rise in the depth ratchet — which
+proto.pilot hit at 4 against a floor of 2. It surfaces unreadably if the message
+omits the list, and it did: the shrunk branch named the enrolled blocks and the
+grown branch did not, so the branch an upgrade actually produces was the one with
+no way to tell "we got tighter" from "one of us left". Both branches name them
+now. No new ratchet on the block count, deliberately — a floor there would
+manufacture a red on precisely the trees whose divergence is correct, which is
+the previous finding arriving from the other side.
+
 ---
 
 ## CI, cost, and the draft-PR discipline

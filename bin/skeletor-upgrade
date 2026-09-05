@@ -227,6 +227,49 @@ def head_commit(target: Path) -> Optional[str]:
     return result.stdout.strip() or None if result.returncode == 0 else None
 
 
+#: Checkouts `warn_a_dirty_base` has already reported on, so a dry run that
+#: reads the same directory twice says it once.
+_WARNED_DIRTY: set = set()
+
+
+def _list_dirty(dirty: List[str]) -> None:
+    """The paths, capped. One home, because three guards report this set."""
+    for path in dirty[:10]:
+        item(path)
+    if len(dirty) > 10:
+        item(f"... and {len(dirty) - 10} more")
+
+
+def warn_a_dirty_base(base: Path) -> None:
+    """The dry run's half of `refuse_a_dirty_base`: say it, do not refuse it.
+
+    Never refusing is right and the silence was not. `--dry-run` writes nothing,
+    so the unreproducible-render hazard cannot land — and that is what keeps
+    `bin/skeletor-verify` running `--from-dir .` against this checkout mid-edit.
+    But a dry run is the thing somebody *reads to decide*, so a plan computed
+    from a base that exists in no commit is precisely where the difference
+    matters most, and it arrived looking like any other plan.
+
+    proto.pilot hit it from the far side: this checkout was mid-pass, their dry
+    run planned two files, and the real run from a clean tag correctly left both
+    alone. Nothing was damaged and nothing in the output could have told them.
+
+    Said once per checkout. A dry run reaches this twice — for the base and for
+    the head render — and with `--from-dir .` those are one directory, so the
+    unguarded version printed the same four lines about the same two files. The
+    refusal never showed that because it exits on the first call.
+    """
+    dirty = uncommitted(base, untracked=True)
+    if not dirty or base in _WARNED_DIRTY:
+        return
+    _WARNED_DIRTY.add(base)
+    say("⚠️ ", f"the base checkout has {len(dirty)} uncommitted change(s) — this plan includes them")
+    _list_dirty(dirty)
+    detail()
+    detail("A real run from a committed base will differ, and is refused from this one.")
+    detail("Read the plan as a statement about a tree that exists on one machine.")
+
+
 def refuse_a_dirty_base(base: Path, writing: str) -> None:
     """A base render nobody can reproduce must not be written into a manifest.
 
@@ -266,10 +309,7 @@ def refuse_a_dirty_base(base: Path, writing: str) -> None:
     if not dirty:
         return
     say("❌", f"the base checkout has {len(dirty)} uncommitted change(s):")
-    for path in dirty[:10]:
-        item(path)
-    if len(dirty) > 10:
-        item(f"... and {len(dirty) - 10} more")
+    _list_dirty(dirty)
     detail()
     detail(f"{writing} would record hashes of a render that exists in no commit, so the")
     detail("next run resolves the recorded ref, renders something else, and refuses —")
@@ -290,7 +330,7 @@ def refuse_a_dirty_base(base: Path, writing: str) -> None:
     raise SystemExit(1)
 
 
-def refuse_a_dirty_tree(target: Path) -> None:
+def refuse_a_dirty_tree(target: Path, ported: bool = False) -> None:
     """An upgrade whose result cannot be read, or undone, must not start.
 
     This is **not** protecting somebody from their own git. Everything is
@@ -314,15 +354,41 @@ def refuse_a_dirty_tree(target: Path) -> None:
 
     `--dry-run` writes nothing and is never refused; `--repair-manifest` touches
     only `.skeletor.json`, which stays legible in a diff and reverts on its own.
+
+    **`--ported` is exempt, because the documented flow guarantees the state it
+    would refuse.** That flag is warranted only *after* a run left conflicts and
+    you ported them by hand — and that run already wrote every file it could
+    apply, so the tree is dirty from this tool's own output before your first
+    hand-edit. Refusing left two exits and both are bad, which is how proto.pilot
+    found it: commit with the manifest knowingly at the old ref, which is the
+    record corruption every other guard here exists to prevent and which a
+    careful person reaches for *because* they are being careful; or pass
+    `--allow-dirty`, whose help describes merging into in-progress edits of your
+    own. There are none — the dirty tree is the tool's output — so the flag that
+    works reads wrong, and they backed three files up by hand before trusting it.
+
+    Nothing is put at risk that the flag has not already put there. A conflicted
+    file is **never written** by this tool, so `--ported` cannot overwrite a
+    hand-port: it advances the record and leaves the bytes alone. That is the
+    sentence the help was missing, and it is why a warning is the right shape
+    here rather than a refusal with an escape hatch that does not fit.
+
+    Two guards, each right, jointly making a documented flow unreachable — the
+    class `docs/DESIGN_RATIONALE.md` records as the defect that lives in what
+    two files jointly imply.
     """
     dirty = uncommitted(target)
     if not dirty:
         return
+    if ported:
+        say("⚠️ ", f"--ported into a tree with {len(dirty)} uncommitted change(s) — expected here")
+        detail("A run that left conflicts had already written every file it could apply, so")
+        detail("this tree is dirty before you port anything. Your hand-ports are safe: a")
+        detail("conflicted file is never written by this tool, and --ported moves the record")
+        detail("rather than the bytes. `git checkout -- .` still discards both at once.")
+        return
     say("❌", f"{len(dirty)} tracked file(s) have uncommitted changes:")
-    for path in dirty[:10]:
-        item(path)
-    if len(dirty) > 10:
-        item(f"... and {len(dirty) - 10} more")
+    _list_dirty(dirty)
     detail()
     detail("An upgrade here would interleave with that work: `git diff` could no longer")
     detail("say what the template changed, and `git checkout -- .` would discard both.")
@@ -631,7 +697,9 @@ def main() -> int:
         action="store_true",
         help="assert every conflict and collision is resolved as you want it, and advance "
         "the recorded base to this skeletor. Without it, a run that leaves anything "
-        "pending holds the base where it is.",
+        "pending holds the base where it is. Safe on the dirty tree hand-porting leaves, "
+        "and not refused on one: a conflicted file is never written, so this moves the "
+        "record and not your bytes.",
     )
     args = parser.parse_args()
 
@@ -640,7 +708,7 @@ def main() -> int:
         die(f"{target} is not a directory")
 
     if not (args.dry_run or args.repair_manifest or args.allow_dirty):
-        refuse_a_dirty_tree(target)
+        refuse_a_dirty_tree(target, ported=args.ported)
 
     pre_upgrade = head_commit(target)
     # This one before a single byte is written, or it answers about the upgrade's
@@ -672,7 +740,9 @@ def main() -> int:
             say("⏸️ ", "no base render — classifying from the recorded hashes, and not merging")
         elif args.from_dir:
             base_src = Path(args.from_dir).expanduser().resolve()
-            if not args.dry_run:
+            if args.dry_run:
+                warn_a_dirty_base(base_src)
+            else:
                 refuse_a_dirty_base(
                     base_src, "--repair-manifest" if args.repair_manifest else "The upgrade"
                 )
@@ -706,7 +776,9 @@ def main() -> int:
         # Found by the gate written to pin a *different* corrected claim: it
         # scaffolded dirty, upgraded, and got `-dirty` back — refreshed, and
         # still unresolvable, because verify runs from a working checkout.
-        if not args.dry_run:
+        if args.dry_run:
+            warn_a_dirty_base(SKELETOR)
+        else:
             refuse_a_dirty_base(SKELETOR, "The upgrade")
         render_with(SKELETOR, recorded, head_tree)
         head_files = files_under(head_tree)
@@ -959,7 +1031,10 @@ def main() -> int:
                 say("⏸️ ", f"{MANIFEST_NAME} left at {ref} — {len(pending)} file(s) still pending")
                 detail("Advancing it would record the new render as this tree's base for files")
                 detail("the new render never reached, and their changes would stop being offered.")
-                detail("Port them from tmp/upgrade/, then run this again to advance the base.")
+                detail("Port them from tmp/upgrade/, then re-run with --ported to advance the base.")
+                detail("Not a plain re-run: a three-way merge cannot tell an applied hunk from an")
+                detail("unapplied one, so a hand-ported file conflicts again and the base never")
+                detail("moves. The dirty tree the porting leaves is expected and not refused.")
                 detail("Until then the files that DID apply read as edited, which is what they are.")
                 detail()
                 detail("If your version of these IS the resolution — an adopter's file the")

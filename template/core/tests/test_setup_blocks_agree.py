@@ -1,11 +1,16 @@
-"""The setup steps are copied into three documents; nothing keeps them together.
+"""The setup steps are copied into several documents; nothing keeps them together.
 
-`README.md`, `docs/DEVELOPMENT.md` and `AGENTS.md` each carry the install steps.
+Every document that tells a reader how to start carries the install steps. Which
+documents those are is a property of **your** tree, not of this file: enrolment
+is by content, and a document is in the comparison for as long as its block
+still installs something. A fresh scaffold enrols three; a tree that has since
+moved its venv line out of one of them enrols two, correctly and silently.
+
 They were rendered from one source when this repository was scaffolded, and the
 generator left. **The drift starts at the moment the guarantee ends**, which is
 why this check lives here and not in the generator: there, one substitution
-fills all three, and a check would be asserting that a regex produced the same
-value three times.
+fills every copy, and a check would be asserting that a regex produced the same
+value more than once.
 
 That is the coordinate-system rule on a different face from the path gate.
 `test_docs_name_real_paths.py` moved into this tree because the population is
@@ -202,9 +207,20 @@ def test_the_shared_prefix_has_not_shrunk():
     and for the same reason they go down — the direction that needs no argument
     is the one nobody has to be talked into.
 
-    A block's own tail is deliberately unchecked. `docs/DEVELOPMENT.md` adds
-    `cp .env.example .env` and `AGENTS.md` adds three commands, and those are
-    per-file by design. Only the agreed head is anybody's shared claim.
+    A block's own tail is deliberately unchecked. A document may add
+    `cp .env.example .env` or three commands of its own, and those are per-file
+    by design. Only the agreed head is anybody's shared claim.
+
+    **Both messages name the enrolled documents, because a rise has two
+    readings.** The blocks got tighter, or one of them left the comparison — and
+    a document whose block stops installing anything drops out with nothing said
+    about it. That is not invisible, which is the useful part: fewer blocks
+    almost always agree further, so the departure surfaces here as a rise. It
+    surfaces *unreadably* if the list is missing, and it was: the shrunk branch
+    named the blocks and the grown branch did not, so the case an upgrade
+    actually produces was the one with no way to tell the two apart.
+    proto.pilot met exactly that, arriving at 4 against a floor of 2 with two
+    documents enrolled and no line saying which.
     """
     blocks = setup_blocks()
     floor = json.loads(BUDGET.read_text(encoding="utf-8"))["min_shared_prefix"]
@@ -218,6 +234,9 @@ def test_the_shared_prefix_has_not_shrunk():
     )
     assert depth == floor, (
         f"the setup blocks now agree on {depth} leading lines, above the pinned {floor}. "
+        f"Blocks: {sorted(blocks)}. Either they got tighter, or a document left the "
+        "comparison — its block stopped installing anything, so it is no longer being "
+        "checked against the others. Read that list before raising the floor.\n  "
         f"Raise `min_shared_prefix` in {BUDGET.name} to {depth} in this commit, or the gain "
         f"is not locked in and the next drift back to {floor} passes silently."
     )

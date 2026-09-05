@@ -2198,6 +2198,19 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
             _, second = run(
                 [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--dry-run"], cwd=target
             )
+            # `--ported` is warranted in exactly this state and no other — and
+            # this state is dirty, because the run above wrote every file it
+            # could apply. Nothing is committed between the two runs on
+            # purpose: committing is what a careful reader does to get past the
+            # refusal, and it is the record corruption the rest of this tool
+            # exists to prevent, so a gate that commits here arranges away the
+            # bug. The instruction said "port them, then re-run"; a plain
+            # re-run cannot advance anything, since a hand-ported file
+            # conflicts exactly like an unapplied one.
+            _, ported = run(
+                [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--ported"], cwd=target
+            )
+            ported_ref = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
         finally:
             run(["git", "-C", str(SKELETOR), "worktree", "remove", "--force", str(old_checkout)], cwd=SKELETOR)
 
@@ -2222,9 +2235,21 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
                 f"the second run reports 'already current' — the pending change to {rel} was "
                 "silently dropped rather than re-offered"
             )
+        if "have uncommitted changes" in ported:
+            problems.append(
+                "--ported was refused for a dirty tree, which the flow that warrants it "
+                "guarantees: the run above wrote every file it applied. The escape it names "
+                "(--allow-dirty) describes in-progress edits of your own, and there are none"
+            )
+        elif ported_ref == before:
+            problems.append(
+                f"--ported left the manifest at {before}; the flag exists to advance it once "
+                "the pending files are resolved, and without it the base can never move past "
+                "a permanently diverged file"
+            )
         return [
             Result(
-                f"pending ref: a conflict holds the manifest at {before}",
+                f"pending ref: a conflict holds the manifest at {before}, --ported moves it to {ported_ref}",
                 not problems,
                 time.time() - started,
                 "\n".join(problems) or f"tried: {'; '.join(attempts)}",
