@@ -185,6 +185,39 @@ def die(message: str) -> "NoReturn":  # type: ignore[valid-type]
     raise SystemExit(1)
 
 
+#: What a base render reads, and therefore the only dirt that can make one
+#: unreproducible. `render_with` runs `<checkout>/bin/skeletor-new`, which walks
+#: `template/`; nothing else in this repository is opened by that process.
+#: A short list rather than a pattern because it is a fact about another
+#: program's behaviour, which no predicate here can discover — so
+#: `bin/skeletor-verify` asserts dirt inside and outside is classified
+#: oppositely, on a real run.
+RENDER_INPUTS = ("template/", "bin/skeletor-new")
+
+
+def reaches_a_render(path: str) -> bool:
+    """Can uncommitted work at this path change what the base renders to?
+
+    The guard used to count **every** uncommitted file, which was right about
+    untracked files and wrong about which ones. The justification was always
+    scoped — `copy_overlay` walks `template/`, so an untracked file *there* is
+    rendered into the base as readily as a committed one — and the code applied
+    it to the whole repository. So one untracked `notes.md` at this repo's root,
+    which no render can read, refused every adopter in a five-repository round:
+    two cloned at a tag to get past it and two more were warned off.
+
+    node-zero's predicate, and it is the one already accepted for the scaffold
+    end of the same pipe: **does the dirt intersect what this render reads.**
+    It still refuses the case the guard exists for — an uncommitted `ci.yml`
+    under `template/`, which is how proto.pilot's manifest was poisoned.
+
+    A rename reports as `old -> new`, and either side landing in a render input
+    is enough: moving a file into `template/` adds it to the render, and moving
+    one out removes it.
+    """
+    return any(part.startswith(RENDER_INPUTS) for part in path.split(" -> "))
+
+
 def uncommitted(target: Path, *, untracked: bool = False) -> Optional[List[str]]:
     """Paths with uncommitted changes — or None if git cannot say.
 
@@ -195,6 +228,10 @@ def uncommitted(target: Path, *, untracked: bool = False) -> Optional[List[str]]
     matter most of all: `copy_overlay` walks the template directory, so an
     untracked file under `template/` is rendered into the base as readily as a
     committed one, and is exactly as absent from history.
+
+    Its base callers then filter to `reaches_a_render`. The scoping belongs to
+    the question rather than to the enumeration — the target's callers want the
+    whole set.
     """
     result = subprocess.run(
         ["git", "-C", str(target), "status", "--porcelain", f"--untracked-files={'all' if untracked else 'no'}"],
@@ -259,7 +296,7 @@ def warn_a_dirty_base(base: Path) -> None:
     unguarded version printed the same four lines about the same two files. The
     refusal never showed that because it exits on the first call.
     """
-    dirty = uncommitted(base, untracked=True)
+    dirty = [path for path in uncommitted(base, untracked=True) or [] if reaches_a_render(path)]
     if not dirty or base in _WARNED_DIRTY:
         return
     _WARNED_DIRTY.add(base)
@@ -305,10 +342,10 @@ def refuse_a_dirty_base(base: Path, writing: str) -> None:
     general. (proto.pilot's narrowing, and a fair one — the first draft of this
     argued from "write".)
     """
-    dirty = uncommitted(base, untracked=True)
+    dirty = [path for path in uncommitted(base, untracked=True) or [] if reaches_a_render(path)]
     if not dirty:
         return
-    say("❌", f"the base checkout has {len(dirty)} uncommitted change(s):")
+    say("❌", f"the base checkout has {len(dirty)} uncommitted change(s) to what it renders:")
     _list_dirty(dirty)
     detail()
     detail(f"{writing} would record hashes of a render that exists in no commit, so the")

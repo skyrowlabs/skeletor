@@ -2137,6 +2137,67 @@ def shadow_gate(workdir: Path, venv_python: Path) -> Result:
     )
 
 
+def dirty_scope_gate(workdir: Path) -> Result:
+    """Only dirt a render reads refuses an upgrade; the rest is not the tool's business.
+
+    The guard counted every uncommitted file in the base checkout, including
+    untracked ones. The justification was always narrower than the code — the
+    scaffolder walks `template/`, so an untracked file *there* is rendered into
+    the base and is exactly as absent from history — and applying it to the whole
+    repository meant one untracked `notes.md` at this repo's root refused every
+    adopter in a five-repository round. Two cloned at a tag to get past it and
+    two more were warned off. Nothing in that file can reach a render.
+
+    Both directions, on the same clone, because the guard is only useful if it
+    still refuses: an untracked file under `template/` must refuse, which is
+    proto.pilot's `ci.yml` case and the reason the guard exists at all.
+
+    Untracked plants specifically, so cleanup is an unlink and the shared clone
+    other gates reuse is left exactly as found.
+    """
+    started = time.time()
+    clean = clean_skeletor(workdir)
+    target = workdir / "dirty-scope" / "probe"
+    if not target.exists():
+        code, output = run(
+            [sys.executable, str(clean / "bin" / "skeletor-new"), str(target),
+             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", "core", "--force"],
+            cwd=SKELETOR,
+        )
+        if code != 0:
+            return Result("dirty scope: scaffold", False, time.time() - started, output)
+
+    problems = []
+    for rel, reaches in ((Path("scope-probe-notes.md"), False), (Path("template") / "core" / "scope-probe.txt", True)):
+        plant = clean / rel
+        assert not plant.exists(), f"{rel} already exists in the clone — the plant would prove nothing"
+        plant.write_text("planted\n", encoding="utf-8")
+        try:
+            code, output = run(
+                [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--dry-run",
+                 "--from-dir", str(clean)],
+                cwd=target,
+            )
+        finally:
+            plant.unlink()
+        refused = "uncommitted change" in output
+        if refused != reaches:
+            problems.append(
+                f"an untracked {rel} {'was not' if reaches else 'was'} treated as reaching a render"
+                + (" — the guard has stopped catching the case it exists for" if reaches else
+                   " — dirt a render cannot read is refusing adopters")
+            )
+        if reaches and code == 0:
+            problems.append(f"a dirty {rel} exited 0; the base is unreproducible and must refuse")
+
+    return Result(
+        "dirty scope: an untracked file under template/ refuses, one at the root does not",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
+
+
 def manifest_args_gate() -> Result:
     """Every render-affecting flag reaches `.skeletor.json` by existing.
 
@@ -3061,6 +3122,7 @@ def main() -> int:
         results.append(manifest_args_gate())
         venv_python = make_venv(workdir, args.quiet)
         results.append(shadow_gate(workdir, venv_python))
+        results.append(dirty_scope_gate(workdir))
         pyright_ok, pyright_note = warm_pyright(venv_python)
         if not args.quiet:
             print(f"   pyright {pyright_note}" if pyright_ok else f"   ⚠️  pyright unavailable: {pyright_note}")
