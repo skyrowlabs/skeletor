@@ -1387,6 +1387,61 @@ truncates at ten, so "it mentioned something" would pass a report that dropped
 the rest. Required red against the pre-fix script first, where the line carries
 no version and the sidecars go unmentioned entirely.
 
+### A verdict that changes with the neighbours
+
+`check_doc_links.py` crashed on a link that left the repository.
+`target.relative_to(PROJECT_ROOT)` raises `ValueError` for a path outside the
+root, so a single `[x](../sibling-repo/GUIDE.md#anchor)` took the whole check
+down in a traceback that named pathlib and not the link. Reported by
+skyrow-workspace, a repo built entirely on sibling checkouts, where it was
+latent: their one out-of-repo link has no fragment, and the crash is in the
+dead-anchor branch.
+
+The interesting part is that fixing the crash is the wrong fix. The question
+underneath is whether such a link should be checked at all, and it should not:
+**whether `../sibling-repo/GUIDE.md` resolves is a fact about what is checked
+out beside this tree, not about this tree.** True on the machine the docs were
+written on, false on a runner that cloned one repository — and this checker is a
+*ratchet*, so a verdict that changes with the neighbours breaks the build on the
+CI runner while every local run is green. Rendering the path more carefully
+would have kept a check whose answer nobody can rely on and made it quiet.
+
+So a link that walks out is out of scope by construction, which makes the
+`relative_to` unreachable rather than guarded. It is **counted and named on
+every run** — `skip()`, not silence — because an unchecked link inside a clean
+report is precisely the failure `markdown_files()` was widened to prevent. That
+is empty-scope-versus-empty-finding one more time: the links are a real finding
+about what this checker cannot answer, and dropping them would have made the
+scope smaller while the report looked identical.
+
+Three things it cost that the bug report could not have named:
+
+- **There were two sites, not one.** `repoint_fragments()` formats the same
+  path, and `--fix` runs it *before* `scan()` — so every run that reached the
+  reported crash had already survived the other one, which needs an anchor with
+  exactly one obvious successor to get far enough to format anything. The
+  convenient reproduction reaches neither the second site nor, in `--fix`, any
+  file: the exception escapes the loop before the write pass, so one out-of-repo
+  link silently turns the repair tool into a no-op for the entire tree.
+- **The boundary is a property of the href, not of the filesystem.** The first
+  fix asked `Path.resolve()`, which follows symlinks — so a document that is a
+  symlink into another checkout, one file with one home in two repositories,
+  became out-of-repo and kept raising. `os.path.normpath` collapses `..`
+  textually and answers the question actually being asked: *where does this link
+  point*, not *which file is this*. `exists()` and `read_text()` follow symlinks
+  themselves, so resolving bought nothing it was not also breaking.
+- **The fixture that shows it cannot be the fixture already there.** The
+  existing one puts the repository at `tmp_path`, which leaves nowhere to *be*
+  outside it — the out-of-repo case is unreachable from it, not merely untested.
+  The new one nests, and asserts the sibling file really resolves before
+  planting, since a target that does not exist tests "does not exist" instead.
+
+The other half of that report is not a bug and is worth naming as such:
+`SCAN_ROOTS` is `docs`, `.claude`, `.github` plus every root `*.md`, so a repo
+whose prose lives in `strategy/` adds a line. That is adoption cost, correctly
+placed — the roots are bounded on purpose, and a discovered-everywhere rule
+would walk `template/`, `node_modules` and every vendored tree in repos that
+have one.
 
 ---
 

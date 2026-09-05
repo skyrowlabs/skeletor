@@ -80,7 +80,7 @@ def test_a_broken_link_in_a_root_document_is_reported(tmp_path, monkeypatch):
     monkeypatch.setattr(links, "SCAN_ROOTS", [])
     (tmp_path / "NOTES.md").write_text("# N\n\nSee [gone](does-not-exist.md).\n", encoding="utf-8")
 
-    dead_paths, _ = links.scan()
+    dead_paths, _, _ = links.scan()
 
     assert any("NOTES.md" in entry for entry in dead_paths), dead_paths
 
@@ -135,6 +135,89 @@ def test_never_rewrites_a_broken_path(tree):
     assert links.scan()[0], "the broken path must still be reported"
 
 
+@pytest.fixture
+def sibling(tmp_path, monkeypatch):
+    """A repository with a checkout beside it, which `tree` cannot express.
+
+    `tree` puts the repository at `tmp_path` itself, so there is nowhere to
+    *be* outside it. This one nests, which makes `../../sibling/GUIDE.md` a
+    path that genuinely resolves — and that is the whole difficulty. The link
+    is not broken. It is unanswerable.
+    """
+    root = tmp_path / "repo"
+    (root / "docs").mkdir(parents=True)
+    (tmp_path / "sibling").mkdir()
+    (tmp_path / "sibling" / "GUIDE.md").write_text("# Guide\n\n## Real Heading\n", encoding="utf-8")
+    monkeypatch.setattr(links, "PROJECT_ROOT", root)
+    monkeypatch.setattr(links, "DOCS_DIR", root / "docs")
+    monkeypatch.setattr(links, "IGNORE_FILE", root / ".validate-ignore")
+    monkeypatch.setattr(links, "SCAN_ROOTS", ["docs"])
+
+    def write(name: str, body: str) -> Path:
+        path = root / "docs" / name
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    return write
+
+
+def test_a_link_that_leaves_the_repo_is_named_and_not_judged(sibling, tmp_path):
+    """This crashed: `relative_to(PROJECT_ROOT)` on a target outside the root
+    raises `ValueError`, so one link into a sibling checkout took the whole
+    check down, in a traceback that named pathlib and not the link.
+
+    Both halves are asserted, because the cheap repair is the quieter bug.
+    Skipping such a link *silently* would trade a crash for an unchecked link
+    inside a clean report, which is the failure this checker exists to prevent.
+    """
+    guide = tmp_path / "sibling" / "GUIDE.md"
+    assert guide.exists(), "only a plant if the target really resolves — otherwise this tests 'does not exist'"
+    sibling("a.md", "# A\n\n[out](../../sibling/GUIDE.md#no-such-anchor)\n")
+
+    dead_paths, dead_anchors, outside = links.scan()
+
+    assert (dead_paths, dead_anchors) == ([], []), "a neighbour's headings are not this tree's verdict"
+    assert outside == ["docs/a.md: '../../sibling/GUIDE.md#no-such-anchor'"], outside
+
+
+def test_fix_does_not_repoint_across_a_repo_boundary(sibling, tmp_path):
+    """The second `relative_to`, which the first one's crash hid.
+
+    `--fix` runs `repoint_fragments()` before `scan()`, so every run that
+    reached the reported crash had already survived this site — and only an
+    anchor with exactly one obvious successor gets far enough to format the
+    report at all. Two sites, one bug, and the anchor you reach for first
+    exercises neither of them.
+    """
+    guide = tmp_path / "sibling" / "GUIDE.md"
+    assert links._successor("heading", links.headings(guide)) == "real-heading", "the fixture must be repointable"
+    source = sibling("a.md", "# A\n\n[out](../../sibling/GUIDE.md#heading)\n")
+    before = source.read_text(encoding="utf-8")
+
+    assert links.repoint_fragments() == []
+    assert source.read_text(encoding="utf-8") == before
+
+
+def test_a_symlink_out_of_the_repo_is_still_the_repo(sibling, tmp_path):
+    """The boundary is where the link points, not where the file ends up.
+
+    `Path.resolve()` follows symlinks, so deciding on the resolved path would
+    put every in-repo document that happens to be a symlink out of scope —
+    silently, and exactly in the repositories that use one to give a file a
+    single home.
+    """
+    (tmp_path / "sibling" / "SHARED.md").write_text("# Shared\n\n## A Section\n", encoding="utf-8")
+    linked = tmp_path / "repo" / "docs" / "shared.md"
+    linked.symlink_to(tmp_path / "sibling" / "SHARED.md")
+    assert linked.resolve() == (tmp_path / "sibling" / "SHARED.md"), "the plant must actually leave the tree"
+    sibling("a.md", "# A\n\n[x](shared.md#gone-entirely)\n")
+
+    _, dead_anchors, outside = links.scan()
+
+    assert outside == [], outside
+    assert any("shared.md" in entry for entry in dead_anchors), dead_anchors
+
+
 def test_leaves_links_inside_code_fences_alone(tree):
     """A link in a fenced example is illustration, not a reference.
 
@@ -168,4 +251,4 @@ def test_fix_is_idempotent(tree):
 
     assert len(links.repoint_fragments()) == 1
     assert links.repoint_fragments() == []
-    assert links.scan() == ([], [])
+    assert links.scan() == ([], [], [])

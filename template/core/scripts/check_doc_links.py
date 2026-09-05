@@ -13,6 +13,14 @@ project this was extracted from, that had silently produced 141 dead links, 128
 of them inside the archive — the filing process was generating the rot at a
 steady rate and nothing caught it.
 
+**A link that leaves the repository is out of scope, in both directions.**
+Whether `../sibling-repo/GUIDE.md` resolves is a fact about what is checked out
+beside this tree, not about this tree — true on the machine the docs were
+written on and false on a runner that cloned one repository. A ratchet cannot
+carry a verdict that changes with the neighbours. They are counted and named on
+every run, because an unchecked link nobody is told about is the failure this
+whole checker exists to prevent.
+
 **Repoint, never delete.** A link whose target is genuinely gone gets its
 sentence rewritten to name the successor, or de-linked to a backticked path plus
 the commit that removed it. These links are prose that records why the docs say
@@ -28,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -37,7 +46,7 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.output import detail, emit, fail, item, ok  # noqa: E402
+from scripts.output import detail, emit, fail, item, ok, skip  # noqa: E402
 from scripts.paths import DOCS_DIR, GITHUB_DIR, PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 
 BASELINE = SCRIPTS_DIR / "doc_links_baseline.json"
@@ -136,6 +145,26 @@ def _suggest(target: Path) -> str:
     return f"  → probably {matches[0].relative_to(PROJECT_ROOT)}" if len(matches) == 1 else ""
 
 
+def _walked(source: Path, path_part: str) -> Path:
+    """Where a link points, **textually** — `..` collapsed, symlinks not followed.
+
+    Deliberately not `Path.resolve()`, which is what this used to be. Resolving
+    answers "which file is this", and every question below is really "where does
+    this link point": whether it left the repository, and what path to name it by
+    in a report. A document that is a symlink to another checkout — one file, one
+    home, two repositories — is an in-repo link by that reading and was an
+    out-of-repo file by the other, so `relative_to(PROJECT_ROOT)` raised on it.
+    `exists()` and `read_text()` follow symlinks themselves, so nothing is lost.
+    """
+    return Path(os.path.normpath(os.path.join(source.parent, path_part)))
+
+
+def _leaves_repo(walked: Path) -> bool:
+    """Does this link walk out of the repository?"""
+    root = str(PROJECT_ROOT)
+    return str(walked) != root and not str(walked).startswith(root + os.sep)
+
+
 def _walk() -> Iterator[Tuple[Path, Path, str, "re.Match[str]"]]:
     """Every link in the tree, once: `(source, rel_source, original, match)`.
 
@@ -186,10 +215,11 @@ def _successor(anchor: str, available: Sequence[str]) -> Optional[str]:
     return sorted(hits)[0] if len(hits) == 1 else None
 
 
-def scan() -> Tuple[List[str], List[str]]:
+def scan() -> Tuple[List[str], List[str], List[str]]:
     ignore = _ignored()
     dead_paths: List[str] = []
     dead_anchors: List[str] = []
+    outside: List[str] = []
     heading_cache: Dict[Path, List[str]] = {}
 
     for source, rel_source, _original, match in _walk():
@@ -207,8 +237,11 @@ def scan() -> Tuple[List[str], List[str]]:
         path_part, _, anchor = href.partition("#")
         if not path_part:
             continue
-        target = (source.parent / path_part).resolve()
         if f"{rel_source}#{anchor}" in ignore or path_part in ignore:
+            continue
+        target = _walked(source, path_part)
+        if _leaves_repo(target):
+            outside.append(f"{rel_source}: '{href}'")
             continue
         if not target.exists():
             dead_paths.append(f"{rel_source}: '{path_part}' does not exist{_suggest(Path(path_part))}")
@@ -217,7 +250,7 @@ def scan() -> Tuple[List[str], List[str]]:
             if anchor not in heading_cache.setdefault(target, headings(target)):
                 dead_anchors.append(f"{rel_source}: '{href}' — no such heading in {target.relative_to(PROJECT_ROOT)}")
 
-    return dead_paths, dead_anchors
+    return dead_paths, dead_anchors, outside
 
 
 def repoint_fragments() -> List[str]:
@@ -247,7 +280,9 @@ def repoint_fragments() -> List[str]:
         if f"{rel_source}#{anchor}" in ignore or path_part in ignore:
             continue
         if path_part:
-            target = (source.parent / path_part).resolve()
+            target = _walked(source, path_part)
+            if _leaves_repo(target):
+                continue
             # A fragment on a path that does not resolve is not a fragment
             # problem. Repointing it would paper over the broken path.
             if not target.exists() or target.suffix != ".md":
@@ -297,7 +332,15 @@ def main() -> int:
             ok("no dead fragment had exactly one obvious successor — nothing changed")
             detail("A fragment with two candidates, or none, is a sentence for a human to rewrite.")
 
-    dead_paths, dead_anchors = scan()
+    dead_paths, dead_anchors, outside = scan()
+    if outside:
+        skip(f"{len(outside)} link(s) leave this repository — not checked")
+        detail("Whether they resolve depends on what is checked out beside this tree.")
+        for entry in outside[:10]:
+            item(entry)
+        if len(outside) > 10:
+            detail(f"… and {len(outside) - 10} more")
+
     baseline = (
         json.loads(BASELINE.read_text(encoding="utf-8"))
         if BASELINE.exists()
@@ -318,12 +361,28 @@ def main() -> int:
             encoding="utf-8",
         )
         if args.json:
-            emit({"broken": dead_paths, "dead_anchors": dead_anchors, "repointed": repointed, "baseline_updated": True})
+            emit(
+                {
+                    "broken": dead_paths,
+                    "dead_anchors": dead_anchors,
+                    "outside": outside,
+                    "repointed": repointed,
+                    "baseline_updated": True,
+                }
+            )
         ok(f"baseline set to {len(dead_paths)} broken / {len(dead_anchors)} dead anchors")
         return 0
 
     if args.json:
-        emit({"broken": dead_paths, "dead_anchors": dead_anchors, "repointed": repointed, "baseline": baseline})
+        emit(
+            {
+                "broken": dead_paths,
+                "dead_anchors": dead_anchors,
+                "outside": outside,
+                "repointed": repointed,
+                "baseline": baseline,
+            }
+        )
 
     status = 0
     for label, found, ceiling in (
