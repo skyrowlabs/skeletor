@@ -99,6 +99,14 @@ NARRATIVE = (TODO_DIR, IMPL_DIR, DOCS_DIR / "reports")
 #:
 #:     EXPLORE_DIR = PROJECT_ROOT / "explore"
 #:     NARRATIVE += (EXPLORE_DIR,)
+#:
+#: **Keep a blank line between your block and the template's**, and audit it per
+#: line rather than per block. The unit of collision is the line: stash.flow's
+#: five-line explanation sat hard against the constant above and conflicted
+#: anyway, and mind.head's was a single `#:` separator, which cost exactly the
+#: same. proto.pilot's landed clean on one blank line — and nothing recorded
+#: that the line was load-bearing, so a whitespace tidy-up would have brought
+#: the conflict back looking like housekeeping.
 
 # ── Code and configuration ───────────────────────────────────────────────────
 CLI_DIR = PROJECT_ROOT / "cli"

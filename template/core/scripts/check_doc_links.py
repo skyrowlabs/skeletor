@@ -60,6 +60,12 @@ SCAN_ROOTS = ["docs", ".claude", ".github"]
 #: `NARRATIVE` in `scripts/paths.py`, where the two spellings were measured.
 #:
 #:     SCAN_ROOTS += ["strategy"]
+#:
+#: **Keep a blank line between your block and the template's**, and audit it per
+#: line rather than per block. The unit of collision is the line: a single `#:`
+#: separator left above the list costs exactly what a five-line explanation
+#: does. Both were measured, in two adopted trees, on this constant and on
+#: `NARRATIVE`.
 
 _LINK = re.compile(r"(?<!!)\[(?P<text>[^\]]*)\]\((?P<href>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
 _HEADING = re.compile(r"^(#{1,6})\s+(?P<text>.+?)\s*$", re.MULTILINE)
