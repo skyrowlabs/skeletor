@@ -1490,6 +1490,97 @@ def populated_tree_gate(tier: str, workdir: Path) -> List[Result]:
     return results
 
 
+def rescaffold_gate(tier: str, workdir: Path) -> List[Result]:
+    """Scaffold twice into the same tree, and require the manifest not to move.
+
+    `populated_tree_gate` already compares a `--force` manifest against an
+    empty-directory one — and could not see either of the two bugs below,
+    because its populated tree is decoys and its `--force` is a *first* one.
+    That is the fixture rule again: the tree you reach for first is a tree with
+    no skeletor history, and the whole defect is about what the second run
+    thinks it did.
+
+    Two failures were reported separately, from different repositories, with
+    different symptoms and opposite signs. They are one line.
+
+    **Under-record.** `regen.py`'s four outputs are shipped by no overlay, so
+    they enter the manifest only by changing across `post_copy_steps`. On a
+    second `--force` they already exist with identical bytes, regen no-ops, and
+    all four leave the manifest silently. Measured 126 -> 122 into a tree
+    skeletor itself had just made, with `--agent none` and no adopter content
+    anywhere. sky.boss's sentence is the one to keep: `produced_files()` asks
+    *did this run write it*, `cross_check` asks *does the base render produce
+    it*, and an idempotent generator is exactly where those two diverge.
+
+    **Over-record.** `add_frontmatter.py` stamps lifecycle frontmatter onto the
+    adopter's own plans in `docs/TODO/`, which is its job. Their hashes move
+    across the same two snapshots, so documents no render can produce are
+    recorded as skeletor's — mind.head measured 124 against a true 105, and
+    every later upgrade refused on a *wrong hash*, which is worse than a
+    surplus entry because a surplus entry can be deleted by hand.
+
+    Both directions are asserted here, in one tree, because a fix for either
+    alone would leave the other and look complete. The remedy is that on a
+    populated target the manifest's membership comes from `pristine`, which is
+    `post_copy_steps` run against the render alone and is therefore the base
+    render by construction. The upgrade at the end is the independent reading:
+    the comparison above is two readings of the same scaffolder and would stay
+    green if both went equally wrong, which is the reason this file's own
+    docstrings keep saying two copies of a mistake agree with each other.
+    """
+    results: List[Result] = []
+    started = time.time()
+    manifest_name = load_scaffolder().MANIFEST_NAME
+
+    first, tree = scaffold(tier, "python", workdir, name="rescaffold")
+    results.append(Result(f"rescaffold: {first.label}", first.ok, first.seconds, first.output))
+    if not first.ok:
+        return results
+    before = set(json.loads((tree / manifest_name).read_text(encoding="utf-8"))["files"])
+
+    # The adopter using the lifecycle the scaffold ships, which is the whole
+    # point of shipping it. Planted after the first run and before the second,
+    # because a plan written before adoption is `populated_tree_gate`'s case and
+    # was already covered — this is the one that only exists after a scaffold.
+    plan = tree / "docs" / "TODO" / "a-plan-of-my-own.md"
+    assert plan.parent.is_dir(), "the scaffold no longer ships docs/TODO/ — this plant is aimed at nothing"
+    plan.write_text("# A Plan Of My Own\n\nWritten after adoption.\n", encoding="utf-8")
+
+    second, _ = scaffold(tier, "python", workdir, name="rescaffold")
+    results.append(Result(f"rescaffold: second {second.label}", second.ok, second.seconds, second.output))
+    if not second.ok:
+        return results
+    after = set(json.loads((tree / manifest_name).read_text(encoding="utf-8"))["files"])
+
+    dropped, gained = sorted(before - after), sorted(after - before)
+    results.append(
+        Result(
+            f"rescaffold: a second --force records the same {len(before)} files",
+            not dropped and not gained,
+            time.time() - started,
+            (("dropped by the second run:\n  " + "\n  ".join(dropped) + "\n") if dropped else "")
+            + (("gained by the second run:\n  " + "\n  ".join(gained) + "\n") if gained else ""),
+        )
+    )
+    results.append(
+        Result(
+            "rescaffold: the adopter's own plan is not recorded as skeletor's",
+            "docs/TODO/a-plan-of-my-own.md" not in after and plan.read_text(encoding="utf-8").startswith("---"),
+            0.0,
+            "the plant only proves anything if the step really stamped it: "
+            f"stamped={plan.read_text(encoding='utf-8').startswith('---')}, "
+            f"recorded={'docs/TODO/a-plan-of-my-own.md' in after}",
+        )
+    )
+
+    # The consequence. Both bugs above surface to a user as one sentence —
+    # `.skeletor.json` disagrees with the base it names — and this is the only
+    # assertion here that renders that base independently.
+    results.append(check_upgrade_is_noop(tree))
+    results[-1].label = f"rescaffold: {results[-1].label}"
+    return results
+
+
 def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
     """`tmp/upgrade/` describes one run, and `--dry-run` says it wrote nothing.
 
@@ -3285,6 +3376,13 @@ def main() -> int:
             results.append(gate)
 
         for gate in populated_tree_gate(fullest, workdir):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        # Beside `populated_tree_gate`, and after it, because it is the case
+        # that gate's fixture cannot reach: a `--force` over a tree skeletor
+        # itself made, rather than over decoys.
+        for gate in rescaffold_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 

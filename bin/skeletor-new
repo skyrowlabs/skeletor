@@ -758,10 +758,32 @@ def main() -> int:
     # snapshots either side of them are what tells the files they generate
     # apart from files that were simply already here — see `produced_files`.
     final = hash_tree(target)
-    produced = produced_files(written, after_copy, final)
-    # `pristine` wins where it has an answer: it is what the base render makes,
-    # and `final` is what this tree ended up with. They differ only for a file a
-    # post-copy step derived from something that was already here.
+    # On a populated target the base render is standing right there, in
+    # `pristine`, and it is the answer to the question the manifest asks — so
+    # it decides membership and not only the hashes. `produced_files` answers a
+    # different question, "did this run write it", and the two diverge in both
+    # directions at once:
+    #
+    #   * An **idempotent generator.** `regen.py`'s four outputs are not shipped
+    #     by any overlay, so they enter only by changing across `post_copy_steps`.
+    #     On a second `--force` they already exist with identical content, regen
+    #     no-ops, and all four silently leave the manifest — measured, 126 -> 122
+    #     into a tree skeletor itself had just made. Every second `--force`, on
+    #     any tree, whatever it looked like going in.
+    #   * A **post-copy step reading the user's files**, which is what those
+    #     steps are for. `add_frontmatter.py` stamps an adopter's own plan in
+    #     `docs/TODO/`, its hash moves, and a document no render can produce is
+    #     recorded as skeletor's. mind.head measured 124 recorded against a true
+    #     105 and every later upgrade refused on a wrong hash, which is the worse
+    #     refusal because a surplus entry can be deleted by hand and a wrong one
+    #     cannot.
+    #
+    # Both were reported as separate bugs and both are this line. `pristine` is
+    # `post_copy_steps` run against the render alone, so it is neither too small
+    # on the first count nor too large on the second, by construction rather
+    # than by correction. For an empty target it is `{}` and cannot be consulted
+    # — but there the tree *is* the render, so `produced_files` is exact.
+    produced = set(pristine) if populated else produced_files(written, after_copy, final)
     write_manifest(target, args, overlays, {rel: pristine.get(rel, final[rel]) for rel in sorted(produced)})
 
     overwritten = sorted(pre_existing.intersection(written))
