@@ -1920,6 +1920,20 @@ def clean_skeletor(workdir: Path) -> Path:
     return clone
 
 
+def upgrade_applied(tree: Path, manifest_name: str) -> List[str]:
+    """Which files an upgrade actually wrote — asked of git, not of its output.
+
+    A scaffold is its own repository at its first commit, so anything the
+    upgrade touched is a modification against it. Two exclusions, both because
+    they would make the question answer itself: the manifest is rewritten
+    *because* something applied, and `tmp/` holds the sidecars written for a
+    conflict, which are a report about what was NOT applied.
+    """
+    lines = [line for line in git_in(tree, "status", "--porcelain")[1].splitlines() if line.strip()]
+    paths = [line[3:].strip() for line in lines]
+    return [path for path in paths if path != manifest_name and not path.startswith("tmp/")]
+
+
 def dirty_ref_gate(workdir: Path) -> List[Result]:
     """A `-dirty` scaffold ref clears on the first upgrade that applies anything.
 
@@ -1937,28 +1951,34 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
     the case nobody had run.
 
     A version gap is needed too, since the manifest is only rewritten when the
-    upgrade applies something. The gap comes from scaffolding at the previous
-    tag, which is read from git rather than written here so it cannot go stale.
+    upgrade applies something — and *which* tag provides one is measured rather
+    than predicted. "Its `template/` differs from HEAD" was the whole selector
+    once, and it is a broader question than this gate needs: a `core` scaffold
+    ships none of `template/governed/`, so a release that moved only that is a
+    version gap the tree cannot see. The upgrade was then correctly a no-op and
+    the gate went red on a true statement about the wrong scenario — this
+    repository's own recurring failure, in the gate for a report about it.
+
+    So the scaffold is the fullest configuration, read from the scaffolder's own
+    maps, which makes nearly every template change a shipped one; and each
+    candidate tag is tried until one actually applies something, which is what
+    makes that "nearly" harmless rather than load-bearing. Running out of
+    candidates is a loud failure naming what it tried, never a silent pass.
     """
     started = time.time()
-    # The newest tag whose TEMPLATE differs from HEAD's — discovered, not
-    # guessed. This was `HEAD~1`, which is the convenient answer and not a
-    # discriminating one: the manifest is only rewritten when the upgrade
-    # applies something, so a tag that changed only `bin/` produces a no-op
-    # upgrade and the ref correctly does not clear. The gate then fails on a
-    # true statement about the wrong scenario — which it did, twice, because
-    # the first fix was lost to a `git reset --hard` during plant testing and
-    # the gate passed anyway on that day's tag.
+    scaffolder = load_scaffolder()
+    tier = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
+    language = max(scaffolder.LANGUAGE_OVERLAYS, key=lambda name: len(scaffolder.LANGUAGE_OVERLAYS[name].split(",")))
+
     tags = run(["git", "-C", str(SKELETOR), "tag", "--sort=-creatordate"], cwd=SKELETOR)[1].split()
-    tag = next(
-        (
-            t
-            for t in tags
-            if run(["git", "-C", str(SKELETOR), "diff", "--quiet", t, "HEAD", "--", "template/"], cwd=SKELETOR)[0] != 0
-        ),
-        "",
-    )
-    if not tag:
+    # A cheap pre-filter, not the decision: a tag whose template is identical to
+    # HEAD's cannot possibly apply anything, so it is not worth a scaffold.
+    candidates = [
+        tag
+        for tag in tags
+        if run(["git", "-C", str(SKELETOR), "diff", "--quiet", tag, "HEAD", "--", "template/"], cwd=SKELETOR)[0] != 0
+    ]
+    if not candidates:
         # Loudly, never silently: no tag differs from HEAD under `template/`, so
         # there is no version gap to upgrade across and this gate cannot run.
         #
@@ -1970,83 +1990,101 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
         why = "no tags are visible at all — a shallow clone?" if not tags else "no tag differs from HEAD under template/"
         return [Result(f"dirty ref: {why}", False, time.time() - started, f"{len(tags)} tag(s) visible")]
 
-    old_checkout = workdir / "dirty-base"
-    code, output = run(["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(old_checkout), tag], cwd=SKELETOR)
-    if code != 0:
-        return [Result(f"dirty ref: check out {tag}", False, time.time() - started, output)]
-    try:
-        # Dirty, but nothing the scaffold ships — see the docstring.
-        marker = old_checkout / "bin" / "skeletor-verify"
-        marker.write_text(marker.read_text(encoding="utf-8") + "\n# scratch\n", encoding="utf-8")
-
-        target = workdir / "dirty-scaffold"
-        run(
-            [sys.executable, str(old_checkout / "bin" / "skeletor-new"), str(target),
-             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--force"],
-            cwd=SKELETOR,
+    clean = clean_skeletor(workdir)
+    attempts: List[str] = []
+    results: List[Result] = []
+    for index, tag in enumerate(candidates):
+        old_checkout = workdir / f"dirty-base-{index}"
+        code, output = run(
+            ["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(old_checkout), tag], cwd=SKELETOR
         )
-        manifest = target / load_scaffolder().MANIFEST_NAME
-        before = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
+        if code != 0:
+            return [Result(f"dirty ref: check out {tag}", False, time.time() - started, output)]
+        try:
+            # Dirty, but nothing the scaffold ships — see the docstring.
+            marker = old_checkout / "bin" / "skeletor-verify"
+            marker.write_text(marker.read_text(encoding="utf-8") + "\n# scratch\n", encoding="utf-8")
 
-        # From a CLONE, because an upgrade now refuses a dirty skeletor — and
-        # this checkout is dirty whenever somebody is working in it. That is not
-        # a workaround: a user upgrading from a clean skeletor is the condition
-        # being tested, and running it from here would test the refusal instead.
-        _, upgrade_output = run(
-            [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(target)], cwd=target
-        )
-        after = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
+            target = workdir / f"dirty-scaffold-{index}"
+            run(
+                [sys.executable, str(old_checkout / "bin" / "skeletor-new"), str(target),
+                 "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
+                 "--tier", tier, "--language", language, "--force"],
+                cwd=SKELETOR,
+            )
+            manifest = target / scaffolder.MANIFEST_NAME
+            before = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
 
-        results = [
+            # From a CLONE, because an upgrade now refuses a dirty skeletor — and
+            # this checkout is dirty whenever somebody is working in it. That is not
+            # a workaround: a user upgrading from a clean skeletor is the condition
+            # being tested, and running it from here would test the refusal instead.
+            _, upgrade_output = run([sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target)], cwd=target)
+            after = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
+            applied = upgrade_applied(target, scaffolder.MANIFEST_NAME)
+        finally:
+            run(["git", "-C", str(SKELETOR), "worktree", "remove", "--force", str(old_checkout)], cwd=SKELETOR)
+
+        attempts.append(f"{tag}: the upgrade applied {len(applied)} file(s)")
+        if applied:
+            results = [
+                Result(
+                    "dirty ref: clears on the first upgrade that applies anything",
+                    before.endswith("-dirty") and not after.endswith("-dirty"),
+                    time.time() - started,
+                    f"tried: {'; '.join(attempts)}\n"
+                    f"a {tier}/{language} scaffold upgraded across {tag}, applying {len(applied)} file(s)\n"
+                    f"scaffolded at: {before}\nafter upgrade: {after}\n{upgrade_output}",
+                )
+            ]
+            break
+    if not results:
+        return [
             Result(
-                "dirty ref: clears on the first upgrade that applies anything",
-                before.endswith("-dirty") and not after.endswith("-dirty"),
+                "dirty ref: no tagged release changes anything this scaffold ships",
+                False,
                 time.time() - started,
-                f"scaffolded at: {before}\nafter upgrade: {after}\n{upgrade_output}",
+                "\n".join(attempts),
             )
         ]
 
-        # And the guard that makes the above the only outcome. Two properties,
-        # not one: the assertion above passes with the guard removed, because it
-        # upgrades from a clean clone by construction. Planting proved that —
-        # the gate was written for the claim and assumed it covered the refusal.
-        #
-        # The clone is dirtied here rather than testing this checkout, which is
-        # dirty only when somebody happens to be working in it. A gate that
-        # passes or fails on that is not a gate.
-        started = time.time()
-        # Cloned from the CLEAN clone, not from this checkout, so it inherits the
-        # working tree under test rather than the last commit. Cloning SKELETOR
-        # here is what made this assertion pass on a guard that had not been
-        # written yet — the same mistake, in the gate for the mistake.
-        dirty_clone = workdir / "skeletor-dirtied"
-        run(["git", "clone", "--quiet", "--no-hardlinks", str(clean_skeletor(workdir)), str(dirty_clone)], cwd=workdir)
-        shipped = dirty_clone / "template" / "core" / "AGENTS.md"
-        shipped.write_text(shipped.read_text(encoding="utf-8") + "\n<!-- uncommitted -->\n", encoding="utf-8")
+    # And the guard that makes the above the only outcome. Two properties,
+    # not one: the assertion above passes with the guard removed, because it
+    # upgrades from a clean clone by construction. Planting proved that —
+    # the gate was written for the claim and assumed it covered the refusal.
+    #
+    # The clone is dirtied here rather than testing this checkout, which is
+    # dirty only when somebody happens to be working in it. A gate that
+    # passes or fails on that is not a gate.
+    started = time.time()
+    # Cloned from the CLEAN clone, not from this checkout, so it inherits the
+    # working tree under test rather than the last commit. Cloning SKELETOR
+    # here is what made this assertion pass on a guard that had not been
+    # written yet — the same mistake, in the gate for the mistake.
+    dirty_clone = workdir / "skeletor-dirtied"
+    run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(dirty_clone)], cwd=workdir)
+    shipped = dirty_clone / "template" / "core" / "AGENTS.md"
+    shipped.write_text(shipped.read_text(encoding="utf-8") + "\n<!-- uncommitted -->\n", encoding="utf-8")
 
-        second = workdir / "dirty-scaffold-2"
-        run(
-            [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-new"), str(second),
-             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--force"],
-            cwd=SKELETOR,
+    second = workdir / "dirty-scaffold-refusal"
+    run(
+        [sys.executable, str(clean / "bin" / "skeletor-new"), str(second),
+         "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--force"],
+        cwd=SKELETOR,
+    )
+    code, refused = run([sys.executable, str(dirty_clone / "bin" / "skeletor-upgrade"), str(second)], cwd=second)
+    dry_code, _ = run(
+        [sys.executable, str(dirty_clone / "bin" / "skeletor-upgrade"), str(second), "--dry-run"], cwd=second
+    )
+    results.append(
+        Result(
+            "dirty ref: an upgrade from a dirty skeletor is refused, but --dry-run is not",
+            code == 1 and "uncommitted change" in refused and dry_code != 1,
+            time.time() - started,
+            f"real run exit {code}, dry-run exit {dry_code}\n{refused}",
         )
-        code, refused = run(
-            [sys.executable, str(dirty_clone / "bin" / "skeletor-upgrade"), str(second)], cwd=second
-        )
-        dry_code, _ = run(
-            [sys.executable, str(dirty_clone / "bin" / "skeletor-upgrade"), str(second), "--dry-run"], cwd=second
-        )
-        results.append(
-            Result(
-                "dirty ref: an upgrade from a dirty skeletor is refused, but --dry-run is not",
-                code == 1 and "uncommitted change" in refused and dry_code != 1,
-                time.time() - started,
-                f"real run exit {code}, dry-run exit {dry_code}\n{refused}",
-            )
-        )
-        return results
-    finally:
-        run(["git", "-C", str(SKELETOR), "worktree", "remove", "--force", str(old_checkout)], cwd=SKELETOR)
+    )
+    return results
 
 
 def entangled_gate(workdir: Path) -> List[Result]:

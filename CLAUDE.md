@@ -446,6 +446,21 @@ hashes came from the dirty render and there is nothing to check them against.
 Verified in both directions by planting the edit — inside `template/` it is a
 manifest-drift refusal, outside it the bounding line prints.
 
+That gate needs a **version gap** to cross, since the manifest is only rewritten
+when the upgrade applies something, and it used to pick one by asking whether a
+tag's `template/` differs from HEAD's. That is a broader question than the gate
+needs and it went red on the first release that exercised the difference: a
+docs-only commit touching one file in `template/governed/`, against a scaffold
+at `core`, which correctly applied nothing. A true statement about the wrong
+scenario — this repository's own recurring failure, arriving inside the gate for
+a report about it, and only on CI, because a *dirty* checkout here happened to
+supply a different gap. The scaffold is the fullest configuration now, so nearly
+every template change is a shipped one, and each candidate tag is **tried** —
+scaffold, upgrade, ask git what changed — until one applies something. The
+difference between the two is that a selector this gate cannot satisfy is now a
+failure that names every tag it tried, rather than an assertion about a scenario
+that did not happen.
+
 A hash is a derived value with a second home, which is normally the thing this
 project refuses. It earns its place by being **checked against its source on
 every ordinary run**: when the base is rendered it is re-hashed, and a manifest
