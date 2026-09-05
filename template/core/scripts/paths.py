@@ -88,6 +88,15 @@ SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 TESTS_DIR = PROJECT_ROOT / "tests"
 GITHUB_DIR = PROJECT_ROOT / ".github"
 
+#: The host toolchain this tree installs — the CLI, the docs pipeline, the lint
+#: gates. `ci.yml` names it as the source of truth at its install step and
+#: `tests/test_lint_tool_parity.py` holds it to `.pre-commit-config.yaml`.
+#:
+#: It lives here because a second test now needs the same file, and two tests
+#: each computing `SCRIPTS_DIR / "requirements.txt"` is the shape that goes
+#: wrong quietly: each is right about its own caller and nothing compares them.
+REQUIREMENTS = SCRIPTS_DIR / "requirements.txt"
+
 #: Scratch, and gitignored. Tree locks, coverage XML, merge markers — everything
 #: whose lifetime is a run rather than a commit, and which nothing will want
 #: next week. The record of what ran is **not** here; see `state_dir` below.

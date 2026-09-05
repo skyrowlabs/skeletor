@@ -22,10 +22,9 @@ pytestmark = [pytest.mark.unit]
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
+from scripts.paths import PROJECT_ROOT, REQUIREMENTS  # noqa: E402
 
 PRECOMMIT = PROJECT_ROOT / ".pre-commit-config.yaml"
-REQUIREMENTS = SCRIPTS_DIR / "requirements.txt"
 
 #: repo slug fragment -> the name it goes by in requirements.txt
 TOOLS = {"flake8": "flake8", "black": "black", "isort": "isort", "pyright": "pyright"}

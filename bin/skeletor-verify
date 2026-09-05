@@ -782,6 +782,102 @@ def check_no_baked_paths(tree: Path) -> Result:
 SETUP_PATH_LOOKUPS = {"npm"}
 
 
+#: A fenced ``bash`` block that installs dependencies, and the two toolchains a
+#: scaffold can carry. Kept in step with ``tests/test_setup_blocks_agree.py``,
+#: which asks the *other* question about the same blocks — see below.
+SETUP_FENCE = re.compile(r"```bash\n(?P<body>.*?)```", re.DOTALL)
+SETUP_INSTALLS = re.compile(r"pip install\s+-r\s+[\w./-]+|npm install")
+SETUP_REQUIREMENTS = re.compile(r"pip install\s+-r\s+(?P<target>[\w./-]+)")
+
+
+def setup_blocks_in(tree: Path) -> Dict[str, List[str]]:
+    """`{document: [command lines]}`, the same enrolment the shipped test uses."""
+    found: Dict[str, List[str]] = {}
+    code, listing = git_in(tree, "ls-files", "*.md")
+    if code != 0:
+        return found
+    for name in listing.split():
+        document = tree / name
+        for match in SETUP_FENCE.finditer(document.read_text(encoding="utf-8")):
+            lines = [line.split("#", 1)[0].rstrip() for line in match.group("body").splitlines()]
+            lines = [line for line in lines if line.strip()]
+            if not any(SETUP_INSTALLS.search(line) for line in lines):
+                continue
+            if any(line.strip().startswith("cd ") for line in lines):
+                continue
+            found[name] = lines
+    return found
+
+
+def check_setup_blocks_agree(tree: Path, tier: str, language: str) -> Result:
+    """The shipped drift check's two inputs are right *for this language*.
+
+    `tests/test_setup_blocks_agree.py` runs in the tree and is the real check.
+    It cannot run here for every configuration — `gated_language` is `python`,
+    so a node tree's own suite is never executed by this verifier — and both of
+    its inputs vary along exactly the axis it does not cover.
+
+    So this asks the generator's half of the question, which is the half no
+    tree can ask about itself:
+
+    * `{{SETUP_SHARED_PREFIX}}` is rendered from `len(setup_commands())` and the
+      shipped ratchet asserts equality with the measured depth. If a document's
+      first *unshared* line ever became shared, the rendered floor would sit one
+      below the truth and every fresh scaffold would be red on arrival — the one
+      outcome this repository refuses. That is an assumption about template
+      prose, held here where all three languages are generated.
+    * Every enrolled block installs the host toolchain. `cli/`, `tests/` and
+      `scripts/` ship at the base tier, so a scaffold is a python project at
+      every `--language`; `node` documented `npm install` alone and its own
+      quick start could not run past line two.
+
+    Both halves were established by planting the bug they claim to catch.
+    """
+    started = time.time()
+    label = f"setup blocks: rendered floor and toolchain ({language})"
+    blocks = setup_blocks_in(tree)
+    if len(blocks) < 2:
+        return Result(label, False, time.time() - started,
+                      f"enrolled {len(blocks)} setup block(s) — a drift check needs at least two, "
+                      "and a scan that finds nothing passes having looked at nothing")
+
+    budget = tree / "tests" / "setup_block_budget.json"
+    if not budget.exists():
+        return Result(label, False, time.time() - started, "tests/setup_block_budget.json is missing")
+    floor = json.loads(budget.read_text(encoding="utf-8"))["min_shared_prefix"]
+
+    depth = 0
+    for column in zip(*blocks.values()):
+        if len(set(column)) != 1:
+            break
+        depth += 1
+
+    problems = []
+    if depth != floor:
+        problems.append(
+            f"the rendered floor is {floor} and the blocks actually agree on {depth} leading "
+            f"line(s); a fresh {language} scaffold is red on arrival"
+        )
+    for name, lines in sorted(blocks.items()):
+        installed = {
+            match.group("target")
+            for line in lines
+            if (match := SETUP_REQUIREMENTS.search(line))
+        }
+        if "scripts/requirements.txt" not in installed:
+            problems.append(
+                f"{name} never installs scripts/requirements.txt — it installs "
+                f"{sorted(installed) or 'nothing'}, so the CLI its next line calls is absent"
+            )
+
+    return Result(
+        f"setup blocks: {len(blocks)} blocks, floor {floor} ({language})",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
+
+
 def check_setup_block_is_self_contained(tree: Path) -> Result:
     """Every command in the generated README's Setup block runs a tool by path.
 
@@ -2546,7 +2642,15 @@ def main() -> int:
             for language in languages:
                 result, tree = scaffold(tier, language, workdir)
                 results.append(result)
-                if not result.ok or language != gated_language:
+                if not result.ok:
+                    continue
+                # Runs for EVERY language, unlike everything below it: both of
+                # its inputs vary with `--language`, so gating it on `python`
+                # would check the one configuration that cannot be wrong.
+                setup_gate = check_setup_blocks_agree(tree, tier, language)
+                setup_gate.label = f"{tier}: {setup_gate.label}"
+                results.append(setup_gate)
+                if language != gated_language:
                     continue
                 (tree / ".venv").symlink_to(venv_python.parents[1])
                 for gate in gates(tree, venv_python, pyright_ok):

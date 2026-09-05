@@ -172,6 +172,35 @@ executing the block would have caught this here and never on a CI runner, whose
 `setup-python` is not externally managed, so the rule — every tool run by path,
 with `npm` the one allowlisted PATH lookup — is what makes the two agree.
 
+The **setup blocks** gate is the newest and the only one that runs for every
+language, which is the whole reason it exists. `gated_language = "python"`: a
+node tree is scaffolded but its own suite is never executed here, and the drift
+check the template ships — `tests/test_setup_blocks_agree.py`, prototyped by
+stash.flow — has two inputs that both vary along exactly that axis. Its
+enrolment predicate matched `pip install -r <file>` only, which found **zero
+blocks** in a node tree; and its ratchet floor is 2 shared lines for `python`
+and 3 once node joins, so a number baked into the template is right for one
+`--language` and red on arrival for the others. The floor is rendered from
+`len(setup_commands(language))` now, and this gate checks the rendered pin
+against the measured depth for every configuration.
+
+That split is the useful part. **Same artifact, two questions, two homes**: the
+tree asks whether its three setup blocks have drifted since it was scaffolded,
+which the generator cannot ask because one substitution fills all three; the
+generator asks whether the pin it handed over is right and whether every
+language installs its own toolchain, which no tree can ask about itself. Not
+"upstream" or "downstream" but *which side can be wrong about this*.
+
+Building it found a worse bug than the drift. `--language` reads as three
+symmetric choices and is not — `cli/`, `tests/` and `scripts/` ship at `core`,
+so every scaffold is a python project and the flag only ever adds a *second*
+toolchain. `setup_commands()` guarded the venv steps on `language in ("python",
+"both")`, so a `--language node` tree documented `npm install` alone and line
+two of its own Quick Start ran a python CLI nothing had installed. It was green
+on this box, which has a system-wide `click`, and dead on a clean one — the
+`--pythonpath` hazard from the pyright gate, on the language axis instead of
+the platform one.
+
 The repository gate is the one that had to be paid for twice. `--no-git` reads
 as the careful flag for scaffolding into a repo that already exists, and it is a
 no-op in precisely that case: the scaffolder skips a tree that has a `.git`

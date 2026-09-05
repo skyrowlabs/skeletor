@@ -1089,6 +1089,119 @@ about CI, made by a file CI runs, is checkable by the reader; a claim about a
 generator that has left is not.
 
 
+### A flag that reads as symmetric, and one language that shipped unrunnable
+
+Building the drift check above found a worse bug than the drift it was for.
+
+`--language` offers `python`, `node` and `both`, and `setup_commands()` treated
+them as three symmetric choices: the venv-and-pre-commit steps were guarded by
+`language in ("python", "both")`, the `npm install` step by `language in ("node",
+"both")`. It reads as obviously correct. It is not, and the reason is one
+directory level away from the function: `cli/`, `tests/` and `scripts/` all ship
+at **`core`**. Every scaffold is a python project. `--language` chooses whether a
+*second* toolchain joins the first — it has never been able to remove one.
+
+So a `--language node` scaffold documented `npm install` and nothing else, and
+line two of its own Quick Start — `./<cli> check pre-push` — invoked a python CLI
+whose interpreter and dependencies the block above it never installed. Twenty-three
+python test files, five `pip install -r scripts/requirements.txt` steps in its own
+CI, and a setup section that mentioned none of it.
+
+**It was invisible on the machine that wrote it.** `CLI_WRAPPER` looks for
+`.venv/bin/python` and falls through to whatever `python3` it finds, and this
+developer box has `click` installed system-wide, so the command ran. Reproduced
+with a click-free interpreter it stops dead:
+
+    ❌ The Probe CLI requires 'click'.
+       Install with: pip install -r scripts/requirements.txt
+
+— naming the step the README had not given. That is the `--pythonpath` lesson
+from the pyright gate, on a different axis: same tree, same command, opposite
+answers, decided by a package nobody installed on purpose. It is also the third
+time the setup path has shipped broken here, after PEP 668 and the PATH lookups,
+and the first time on the language axis rather than the platform one.
+
+The fix is that the python steps are unconditional and `--language` only ever
+appends. What generalises is narrower than "test every flag combination":
+**a flag whose options look parallel is worth checking against what the tiers
+actually ship**, because the asymmetry lives in the overlay layout and the flag's
+own signature cannot show it.
+
+### Two questions about one artifact, and only one of them is the tree's
+
+stash.flow prototyped the setup-block drift check in their tree and it ships here
+largely as they wrote it: enrolment by fenced `bash` block, a `cd` on the first
+line excluding a sub-component with its own toolchain, an authority check for the
+requirements filename, and a ratchet for the shared prefix whose floor is
+*measured, not chosen*. Their argument for the split is the part worth keeping —
+**a requirements filename has an authority and a shared prefix does not.** Three
+documents disagreeing about a command is a vote with no tiebreaker, so the prefix
+can only be defended as "the agreement does not quietly get smaller"; a document
+disagreeing with `ci.yml` is a defect with a direction.
+
+Two changes were needed to make it a template gate, and both are the same class
+this repository keeps finding — a claim measured on one point of an axis, written
+into a file that ships at every point.
+
+**Enrolment named one toolchain.** `pip install -r <file>` is what a python
+reader writes, and it enrolled **zero blocks** in a node tree, where `scanned(...,
+least=2)` correctly turns a silent nothing into a red. The predicate names both.
+
+**The floor is language-dependent** — 2 shared lines for `python`, 3 once node
+joins. A `min_shared_prefix` baked into the template would be right for one
+`--language` and red on arrival for the others, which is invariant 6 with the
+axis changed from time to space. It is rendered instead, from
+`len(setup_commands(language))`, which is the same source the blocks themselves
+come from.
+
+That last one forces a second gate, and the split is the interesting part.
+`bin/skeletor-verify` sets `gated_language = "python"`: a node tree is scaffolded
+but its own test suite is never run. So the shipped test can never check itself
+on the axis its inputs vary along. The generator's gate asks the question no tree
+can ask about itself — *is the pin this tree was handed the right one, and does
+every language install its own toolchain* — and runs for every configuration; the
+tree's test asks whether the blocks have drifted since, which the generator
+cannot ask because there, one substitution fills all three.
+
+**Same artifact, two questions, two homes.** The rule is not "downstream" or
+"upstream" but *which side can be wrong about this*.
+
+Established by planting four bugs, each asserting its target existed first: a
+drifted venv line (prefix 2 → 0), an invented `requirements-dev.txt`, a floor
+rendered one below the truth, and the node bug itself. The fourth is the one that
+argues for two checks rather than one — with `npm install` alone in all three
+documents the prefix stayed at its rendered floor and the doc-to-doc half had
+nothing to say, because three copies of one wrong string are maximally
+consistent. Only the authority check fired. stash.flow predicted that case
+before either of us ran it.
+
+### Two ways a plant can lie, both hit in one afternoon
+
+The rule here was already *a plant that did not land is indistinguishable from a
+gate that works*. Both failures below are that rule's other face — the plant
+landed, and something else made the result meaningless.
+
+**The revert overshot.** Undoing the first plant with `git checkout
+bin/skeletor-new` reverted the plant *and* the two uncommitted real edits in the
+same file, silently. The next control run came back red for a reason that had
+nothing to do with what was being tested, and the error — `unknown placeholder
+{{SETUP_SHARED_PREFIX}}` — pointed at the template rather than at the revert. A
+plant is an edit to a working tree, so undo it with the inverse edit, asserted
+the same way the plant is. `git checkout <file>` is not an undo of a plant; it is
+an undo of the file.
+
+**The control passed having run nothing.** Checking the shipped test against the
+plants with the system interpreter printed `4 passed` for the control and green
+for all three plants, because that interpreter has no `pytest` — the last line of
+output was `No module named pytest` and the harness was grepping for the word
+`failed`. A test run that could not run is not a pass, which is `filesAnalyzed`
+and the ratchets' *"I could not measure" is not "the budget is respected"*
+arriving in a five-line scratch harness. The habit that catches it is cheap:
+**state the expected result before running, and let the harness say which it
+got** — a control expected green and a plant expected red cannot both be
+satisfied by an empty run.
+
+
 ---
 
 ## CI, cost, and the draft-PR discipline

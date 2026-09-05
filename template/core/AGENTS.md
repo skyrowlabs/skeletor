@@ -30,8 +30,10 @@ look optional to anybody not using that tool.
 
 **Every one of them exists** — that is the claim this paragraph is making, and it
 is the one worth checking. The install lines came from the same source as the
-README's Setup block when this repository was scaffolded; nothing keeps them
-together now, and the three lines after them belong to this file alone. An
+README's Setup block when this repository was scaffolded, and what keeps them in
+step now is `tests/test_setup_blocks_agree.py` rather than the generator, which
+left. The three lines after them belong to this file alone and are not compared
+with anything. An
 earlier version of this file opened with `./{{CLI}} setup`
 and `./{{CLI}} service up`, which the CLI has never implemented — and `setup`
 could not be implemented, because the CLI cannot run until the install it would

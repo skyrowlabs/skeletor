@@ -16,12 +16,22 @@ did not exist, in a repository whose `AGENTS.md` explained on the same page that
 never had. Nothing could see the disagreement, because the two files were separate
 copies of one instruction.
 
-That was fixed where it could be: the block above and the README's were generated
-from one source when this repository was scaffolded. **Do not read that as a
-standing guarantee** — a guarantee implemented by rendering is spent at the moment
-of rendering. Both blocks are static text here, the generator is not present, and
-the two files wrap the shared steps differently. Change the setup steps and you
-change them in both places, by hand, and nothing will tell you if you miss one.
+That was fixed where it could be: this block, the README's and `AGENTS.md`'s were
+generated from one source when this repository was scaffolded. **Do not read that
+as a standing guarantee** — a guarantee implemented by rendering is spent at the
+moment of rendering. All three are static text here, the generator is not present,
+and the three files wrap the shared steps differently.
+
+What holds them together now is `tests/test_setup_blocks_agree.py`, which ratchets
+on how many leading lines the three blocks agree on and fails when that number
+drops. Change a shared step and you change it in all three, by hand — and the test
+tells you if you missed one.
+
+That last sentence is a present-tense claim about a mechanism, which is exactly
+what the paragraph above says to distrust. It is honest here for the single reason
+the warning turns on: the test ships beside this file and runs in the same
+`{{CLI}} check pre-push`, so there is no rendering step between the claim and its
+enforcement, and nothing that could separate them later.
 
 Two things it installs are easy to miss, because they live outside version control:
 

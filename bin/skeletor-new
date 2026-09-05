@@ -111,11 +111,25 @@ def setup_commands(language: str) -> List[str]:
     through to whatever `python3` it can find; a system-wide install left every
     `./<cli>` invocation resolving against an interpreter nobody chose, which is
     the same ambient-resolution bug the pyright gate was fixed for.
+
+    **The python steps are unconditional, and `--language` only ever adds.**
+    They used to be guarded by `language in ("python", "both")`, which reads as
+    symmetry and is not: `cli/`, `tests/` and `scripts/` all ship at `core`, so
+    every scaffold is a python project and the flag chooses whether a *second*
+    toolchain joins it. A `--language node` tree therefore documented
+    `npm install` alone, and line two of its own quick start — `./<cli> check
+    pre-push` — ran a python CLI whose interpreter and dependencies the block
+    never installed. It failed with *"requires 'click'. Install with: pip
+    install -r scripts/requirements.txt"*, naming a step the README had not
+    given, and only on a host without a system-wide `click`: the wrapper falls
+    through to whatever `python3` it finds, so the developer box that wrote it
+    was green and a clean machine was not. That is the ambient-resolution
+    hazard in the paragraph above, arriving on the language axis.
     """
-    steps = []
-    if language in ("python", "both"):
-        steps.append("python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt")
-        steps.append(".venv/bin/pre-commit install --install-hooks")
+    steps = [
+        "python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt",
+        ".venv/bin/pre-commit install --install-hooks",
+    ]
     if language in ("node", "both"):
         steps.append("npm install")
     return steps
@@ -198,8 +212,13 @@ def substitutions(args) -> Dict[str, str]:
         "ORG": args.org,
         "TZ": args.timezone,
         "LANG_RULES": "python" if args.language in ("python", "both") else "javascript",
-        "SETUP_COMMANDS": "\n".join(setup_commands(args.language))
-        or "# no language toolchain in this tier — nothing to install",
+        "SETUP_COMMANDS": "\n".join(setup_commands(args.language)),
+        # The shared head of the three setup blocks is exactly what was
+        # substituted into all three, since every document's next line is its
+        # own. `tests/test_setup_blocks_agree.py` ratchets on it and cannot
+        # derive it: by the time that test runs, the placeholder is gone and
+        # the only thing left to measure is the answer.
+        "SETUP_SHARED_PREFIX": str(len(setup_commands(args.language))),
     }
 
 

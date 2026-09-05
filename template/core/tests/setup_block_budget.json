@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "Ratchet floor for tests/test_setup_blocks_agree.py. This number may only go UP.",
+    "It is how many leading lines every fenced setup block agrees on -- measured, not",
+    "chosen. Lowering it records an intended divergence and needs the reason in the",
+    "commit message; raising it locks in a new shared line.",
+    "",
+    "Written by the scaffolder, because the count depends on which toolchains this",
+    "tree was generated with: a python tree shares two leading lines and one that",
+    "also carries node shares three. A number baked into the template would be true",
+    "for one --language and red on arrival for the others.",
+    "Read the test's docstring before changing either way."
+  ],
+  "min_shared_prefix": {{SETUP_SHARED_PREFIX}}
+}
