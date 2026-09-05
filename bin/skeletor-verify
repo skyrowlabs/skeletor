@@ -1696,11 +1696,38 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     purpose is to say that counting is not looking.
 
     Reading the block would not have caught it and did not. Running it did, on
-    the first try, and the fix is a `wc -l` line in the printed recipe. So the
-    gate extracts the commands the tool actually printed and executes them,
-    requiring a non-empty collection. `$PY` is repointed at the shared venv,
-    which is the one substitution: a verify tree never runs the README's setup,
-    so it has no `.venv` of its own.
+    the first try. So the gate extracts the commands the tool actually printed
+    and executes them.
+
+    ## The first fix was `wc -l`, and it was wrong
+
+    That is worth keeping because this gate then made the same mistake, and for
+    the same reason. `wc -l` asks whether the two files are empty; this gate
+    asked `len(collected) > 0`. One question, two homes, and node-zero found the
+    failure neither could see: an unscoped `pytest` descends into the
+    `tmp/pre-upgrade` worktree the recipe just created, collides on every module
+    basename, and Interrupts at exit 2 — **after** writing the right ids. Both
+    files come out correct and non-empty, `diff` reports no change and is
+    telling the truth about them, and `grep :: | sort` has thrown the exit code
+    away. This gate ran that command on every verify and passed.
+
+    That is the repository's own empty-scope rule arriving inside the gate
+    written to enforce it, one level up: the recipe and its guard were written
+    by one hand, so the guard was written against the failure that was imagined
+    rather than the one the recipe causes. A doc-and-check pair agreeing with
+    each other by construction — node-zero's framing, and it is the workspace's
+    two-consumers rule applied to a procedure and its own safety check.
+
+    So the recipe is scoped to `tests/` and announces its own failure, and this
+    gate requires the announcement to be **absent** — then plants the unscoped
+    form and requires it to be **present**. Without that second run the first is
+    a negative assertion over a set nobody proved non-empty, which is precisely
+    the reading that shipped.
+
+    `$PY` is not repointed: `$(pwd)/.venv/bin/python` is a path the recipe names
+    out loud, and a gate that swapped it in could not catch a path pointing at
+    nothing. A verify tree never runs the README's setup, so the venv is
+    symlinked to the shared one and the line executes as printed.
     """
     results: List[Result] = []
     manifest_name = load_scaffolder().MANIFEST_NAME
@@ -1784,7 +1811,7 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
         gate then ran nothing and reported a clean comparison — the failure mode
         under test, arriving inside the thing testing for it.
         """
-        for name in ("before.txt", "after.txt"):
+        for name in ("before.txt", "after.txt", "before.raw", "after.raw"):
             line = line.replace(f"/tmp/{name}", str(scratch / name))
         return line
 
@@ -1792,15 +1819,41 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     code, ran = run(["bash", "-c", script], cwd=tree)
     before = scratch / "before.txt"
     collected = [ln for ln in before.read_text().splitlines() if "::" in ln] if before.exists() else []
+    # The recipe's own marker, read out of the recipe rather than spelled here:
+    # a second copy would keep passing after somebody reworded the echo.
+    marker = "collection FAILED"
+    assert any(marker in line for line in recipe), "the recipe no longer announces a failed collection"
     results.append(
         Result(
-            f"collect-diff: the printed recipe runs and collects something ({len(collected)} ids)",
-            code == 0 and len(collected) > 0 and len(recipe) >= 5,
+            f"collect-diff: the printed recipe runs and reports no failure ({len(collected)} ids)",
+            code == 0 and len(collected) > 0 and len(recipe) >= 5 and marker not in ran,
             time.time() - started,
             f"{len(recipe)} command line(s) extracted, exit {code}, {len(collected)} collected ids\n"
+            f"the recipe's own failure marker fired: {marker in ran}\n"
             f"--- script ---\n{script}\n--- output ---\n{ran}",
         )
     )
+
+    # The plant, in the gate, because the assertion above is a negative one and
+    # a negative over a set nobody sized is what shipped here. Strip the `tests/`
+    # scope back out — the exact defect node-zero reported — and the marker must
+    # fire. If it does not, the assertion above is decoration.
+    started = time.time()
+    unscoped = script.replace("-m pytest tests/ ", "-m pytest ")
+    planted = unscoped != script
+    prune = "rm -rf tmp/pre-upgrade; git worktree prune\n"
+    plant_code, plant_ran = run(["bash", "-c", prune + unscoped], cwd=tree)
+    results.append(
+        Result(
+            "collect-diff: unscoping the recipe makes it say so",
+            planted and marker in plant_ran,
+            time.time() - started,
+            f"the plant changed the script: {planted}\n"
+            f"the marker fired: {marker in plant_ran}\n"
+            f"--- output ---\n{plant_ran}",
+        )
+    )
+    run(["bash", "-c", "rm -rf tmp/pre-upgrade; git worktree prune"], cwd=tree)
 
     # And the other direction, which is the one an unconditional footer passes.
     started = time.time()
