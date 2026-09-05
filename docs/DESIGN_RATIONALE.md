@@ -1683,6 +1683,45 @@ both directions: a wrapper answering correctly from its own root was always
 green and proves nothing, and a gate running only the cross-tree invocation
 would be satisfied by a wrapper too broken to start.
 
+### The warning that arrives after the write
+
+`--force` is step 1 of adoption — `AGENTS.md` calls scaffolding into a
+repository somebody already works in *the usual case* — and it overwrites
+without asking. The losses are silent by construction: a file that is gone
+raises nothing. The scaffolder named them, which was the right fix, but it
+named them **after** the write, which makes the list a post-mortem.
+
+The measurement that settles it: **`CLAUDE.md` collided in four adoptions out of
+four.** Every adopter overwrote the file holding whatever agent instructions
+their project already had, on the documented first command, and found out from
+a report printed underneath the damage. That is not a risk profile to be
+weighed, it is what the command does.
+
+`--dry-run` renders into a temporary directory and prints what a real run would
+write and which of your files it would replace, creating nothing. Two design
+choices are load-bearing:
+
+* It **renders**, through `copy_overlays` and `post_copy_steps`, the same
+  functions the real run uses. A dry run that reproduced the loop would be a
+  second reading of the same intent, and the two would answer differently the
+  first time an overlay grew a rule.
+* It is **not refused** for a populated target without `--force`. Being told to
+  pass `--force` in order to discover what `--force` would destroy is the shape
+  the flag exists to remove.
+
+The gate asserts the tree is byte-identical afterwards, that an absent target is
+not created, and — the assertion with teeth — that the prediction **equals what
+the real run then reports**, file for file. "Writes nothing" is easy to satisfy
+uselessly; a dry run printing a plausible number passes it.
+
+That comparison earned itself before it ever ran in anger. The first version
+predicted from the pristine render while the real run's warning intersected
+`written`, the copy phase alone — so `regen.py` overwrote a user's own
+`docs/todo_index.json` and the warning whose entire job is completeness did not
+name it. **The manifest bug, in the warning about the manifest bug**, found by
+building the thing that predicts it. The two are one set now, which is what
+makes the prediction worth anything.
+
 ### An extension point implemented as an edit is not an extension point
 
 `v0.5.7` added `NARRATIVE` to `scripts/paths.py` so an adopter could declare a

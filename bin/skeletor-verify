@@ -1490,6 +1490,111 @@ def populated_tree_gate(tier: str, workdir: Path) -> List[Result]:
     return results
 
 
+def dry_run_gate(tier: str, workdir: Path) -> List[Result]:
+    """`--dry-run` writes nothing, and predicts the real run exactly.
+
+    Every adoption so far was a `--force` into a repository somebody already
+    worked in, and every one learned what it had destroyed from a list printed
+    **after** the write. `CLAUDE.md` collided in four of four: each adopter
+    overwrote the file holding their previous agent instructions, on step 1 of
+    `SETUP_GUIDE.md`. That is not a risk profile, it is a certainty.
+
+    Two assertions, and the second is the one with teeth. "Writes nothing" is
+    easy to satisfy and easy to satisfy uselessly — a dry run that printed a
+    plausible number would pass it. The prediction must equal what a real run
+    then reports, file for file, or it is a reassurance rather than a report.
+
+    That comparison earned itself immediately. The first version predicted from
+    the pristine render while the real run's warning intersected `written` —
+    the copy phase alone — so `regen.py` silently overwrote a user's own
+    `docs/todo_index.json` and the warning whose entire job is completeness did
+    not name it. The manifest's bug, in the warning about the manifest's bug.
+    They are the same set by construction now, which is what makes the
+    prediction worth anything.
+
+    The decoys are chosen to cover both writers: `CLAUDE.md` and `README.md`
+    are copy-phase collisions, `docs/todo_index.json` is a post-copy one, and
+    `src/app.py` is a file skeletor never touches — named by neither, or the
+    report is reporting the tree instead of the overwrites.
+    """
+    results: List[Result] = []
+    started = time.time()
+
+    target = workdir / "dryrun"
+    (target / "docs").mkdir(parents=True, exist_ok=True)
+    (target / "src").mkdir(parents=True, exist_ok=True)
+    (target / "CLAUDE.md").write_text("# Mine\n\nmy agent instructions.\n", encoding="utf-8")
+    (target / "README.md").write_text("# Mine\n", encoding="utf-8")
+    (target / "docs" / "todo_index.json").write_text('{"mine": true}\n', encoding="utf-8")
+    (target / "src" / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    def state() -> Dict[str, str]:
+        return {
+            path.relative_to(target).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(target.rglob("*"))
+            if path.is_file()
+        }
+
+    def named(output: str) -> List[str]:
+        return sorted(line.strip()[2:].strip() for line in output.splitlines() if line.strip().startswith("· "))
+
+    def invoke(*extra: str) -> Tuple[int, str]:
+        return run(
+            [sys.executable, str(SCAFFOLDER), str(target), "--name", "Dry", "--slug", "dryrun",
+             "--cli", CLI_NAME, "--tier", tier, "--language", "python", *extra],
+            cwd=workdir,
+        )
+
+    before = state()
+    assert before, "the decoys did not land — this gate would be measuring an empty directory"
+    code, dry = invoke("--dry-run")
+    after = state()
+
+    predicted = named(dry)
+    results.append(
+        Result(
+            f"dry-run: writes nothing and needs no --force ({len(predicted)} collision(s) predicted)",
+            code == 0 and after == before and bool(predicted),
+            time.time() - started,
+            f"exit {code}, tree unchanged: {after == before}, predicted: {predicted}\n{dry}",
+        )
+    )
+
+    # An untouched target is the other half of "writes nothing": a dry run that
+    # created the directory would leave a repository behind on a machine whose
+    # owner had decided not to scaffold.
+    started = time.time()
+    absent = workdir / "dryrun-absent"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(absent), "--name", "Dry", "--slug", "dryabsent",
+         "--cli", CLI_NAME, "--tier", tier, "--language", "python", "--dry-run"],
+        cwd=workdir,
+    )
+    results.append(
+        Result(
+            "dry-run: a target that does not exist is not created",
+            code == 0 and not absent.exists(),
+            time.time() - started,
+            f"exit {code}, created: {absent.exists()}\n{output}",
+        )
+    )
+
+    started = time.time()
+    code, real = invoke("--force")
+    reported = named(real)
+    off_limits = [rel for rel in predicted + reported if rel == "src/app.py"]
+    results.append(
+        Result(
+            f"dry-run: the prediction is what the real run then reports ({len(reported)} overwritten)",
+            code == 0 and predicted == reported and bool(reported) and not off_limits,
+            time.time() - started,
+            f"predicted: {predicted}\nreported : {reported}\n"
+            f"named a file skeletor never writes: {off_limits}\n{real}",
+        )
+    )
+    return results
+
+
 def branch_gate(tier: str, workdir: Path) -> List[Result]:
     """A single-branch repository does not get told a name twice.
 
@@ -3467,6 +3572,10 @@ def main() -> int:
             results.append(gate)
 
         for gate in branch_gate(fullest, workdir):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        for gate in dry_run_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 

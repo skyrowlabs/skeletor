@@ -95,6 +95,20 @@ for thirteen hours every Saturday.
 The scaffolder substitutes every placeholder, generates the docs indexes, and
 installs the merge driver, so the tree's own gates are green on the first run.
 
+**Scaffolding into a directory that already has files needs `--force`, and
+`--force` should always be run twice — once with `--dry-run`.**
+
+```bash
+bin/skeletor-new . --force --dry-run   # …plus every flag above
+```
+
+It renders into a temporary directory and prints what a real run would write
+and which of your files it would replace, without creating or touching the
+target. This is not caution for its own sake: `--force` overwrites silently, a
+file that is gone raises nothing, and all four adoptions measured so far
+collided on `CLAUDE.md` — the file holding whatever agent instructions the
+project already had. The dry run names it before the write instead of after.
+
 **Verify immediately.** A scaffold whose first check is red teaches that red is
 normal:
 

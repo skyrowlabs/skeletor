@@ -80,6 +80,15 @@ $SKELETOR/bin/skeletor-new . --force \
 Use `--force` when scaffolding **into** the current directory (the usual
 case); drop it when creating a new one: `skeletor-new ../new-dir --name ...`.
 
+**Run it once with `--dry-run` first, and read the list.** Same command, same
+flags, `--dry-run` on the end: it renders into a temporary directory, prints
+every file that would be written and every one of yours it would replace, and
+does not create or touch the target. `--force` overwrites without asking and
+every loss is silent — a file that is gone raises nothing — and the four
+adoptions measured so far all collided on `CLAUDE.md`, which is the file
+holding whatever agent instructions the project already had. That collision is
+not a risk, it is what happens. Save what you mean to keep before the real run.
+
 Do **not** add `--no-git`. It reads like the safe choice for an existing repo,
 but a tree that already has a `.git` is skipped regardless — so the flag does
 nothing in the case it looks written for, and in an empty directory it leaves a

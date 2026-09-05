@@ -24,7 +24,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 SKELETOR = Path(__file__).resolve().parents[1]
 TEMPLATE = SKELETOR / "template"
@@ -663,6 +663,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="which agent's tooling to ship (settings, hooks, subagents, skills). "
         "The conventions in docs/rules/ are shipped either way.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="render into a temporary directory and report what a real run would write "
+             "and which of your files it would overwrite; writes nothing",
+    )
     parser.add_argument("--base-branch", default="develop", help="the integration branch")
     parser.add_argument("--release-branch", default="main")
     parser.add_argument("--python", default="3.12")
@@ -688,7 +694,7 @@ def build_parser() -> argparse.ArgumentParser:
 #: `git init`; re-rendering a base wants neither. Every other flag is recorded
 #: by existing, which is the point — this set is the only thing anybody has to
 #: keep, and `bin/skeletor-verify` fails if an entry stops being a real flag.
-NOT_RENDERED = {"force", "no_git"}
+NOT_RENDERED = {"force", "no_git", "dry_run"}
 
 #: Flags whose recorded value is the **derived** one rather than the raw
 #: argument. All four default from the target directory name, and an upgrade
@@ -728,12 +734,118 @@ def manifest_args(args, values: Dict[str, str]) -> List[str]:
     return recorded
 
 
+def existing_files(target: Path) -> Set[str]:
+    """What is in the tree before skeletor touches anything.
+
+    Not "before this overlay": a later overlay overwriting an earlier one is
+    the composition working, and only a file predating the whole scaffold is
+    somebody's own. `.git/` is excluded because it is not content.
+
+    One function because there are two callers — the real run, which uses it to
+    name what it overwrote, and `--dry-run`, which uses it to name what a real
+    run *would*. Two copies of this would be two answers to "is that yours?",
+    and the dry run's job is to predict the other one exactly.
+    """
+    return {
+        path.relative_to(target).as_posix()
+        for path in target.rglob("*")
+        if path.is_file() and ".git/" not in path.relative_to(target).as_posix()
+    }
+
+
+def copy_overlays(
+    target: Path, overlays: List[str], values: Dict[str, str], cli_name: str, omit: Iterable[str]
+) -> Optional[List[str]]:
+    """Render every overlay into `target`, and report what was written.
+
+    Extracted so `--dry-run` renders through *this* code rather than a
+    description of it. A dry run that reproduced the loop would be a second
+    reading of the same intent, and the two would answer differently the first
+    time an overlay grew a rule — which is the failure this repository keeps
+    finding in other people's registries.
+
+    Returns `None` after reporting a missing overlay, which is always a bug in
+    the template rather than in the invocation.
+    """
+    written: List[str] = []
+    for overlay in overlays:
+        source = TEMPLATE / overlay
+        if not source.exists():
+            print(f"❌ missing overlay: {source}")
+            return None
+        copy_overlay(source, target, values, cli_name, written, omit=omit)
+
+    (target / cli_name).chmod(0o755)
+    (target / "tmp").mkdir(exist_ok=True)
+    (target / "tmp" / ".gitkeep").touch()
+    return written
+
+
+def report_a_dry_run(
+    target: Path, pre_existing: Set[str], overlays: List[str], values: Dict[str, str], args
+) -> int:
+    """Say what a real run would write, and what of yours it would replace.
+
+    Every adopter so far took `--force` into a repository they already worked
+    in — `AGENTS.md` calls that the usual case — and learned what it had
+    destroyed from a list printed **after** the write. `CLAUDE.md` collided in
+    four adoptions out of four: every one of them overwrote the file holding
+    their previous agent instructions, on step 1 of the setup guide. That is
+    not a risk profile, it is a certainty, and it is the reason this exists.
+
+    The render happens in a temporary directory, so the answer is measured
+    rather than predicted, and `target` is not so much as created. The set is
+    the **pristine** render — copy plus the post-copy steps — because
+    `regen.py` and `register_shipped_docs` write files too, and a report that
+    counted only the copied ones would understate what it is warning about.
+    """
+    with tempfile.TemporaryDirectory(prefix="skeletor-dry-") as tmp:
+        preview = Path(tmp) / "tree"
+        preview.mkdir()
+        written = copy_overlays(preview, overlays, values, values["CLI"], VERSIONING[args.versioning])
+        if written is None:
+            return 1
+        post_copy_steps(preview, values)
+        produced = set(hash_tree(preview))
+
+    collides = sorted(pre_existing & produced)
+    print()
+    print(f"→ dry run — nothing is written, and {target} is not created or modified")
+    print()
+    print(f"   {len(produced)} file(s) would be written into {target}")
+    print(f"   {args.tier} tier, --language {args.language}, --agent {args.agent}, "
+          f"--versioning {args.versioning}")
+    print()
+
+    if collides:
+        print(f"⚠️  {len(collides)} of them already exist here and WOULD BE OVERWRITTEN:")
+        for rel in collides:
+            print(f"   · {rel}")
+        print()
+        print("   Save what you mean to keep first. Whatever survives a real run is")
+        print("   recorded as skeletor's, so every later `skeletor-upgrade` three-way")
+        print("   merges it — a file you kept is a standing merge point, not a one-off.")
+    elif pre_existing:
+        print(f"✅ none of the {len(pre_existing)} file(s) already here would be overwritten")
+    else:
+        print("✅ the target is empty — nothing of yours is at risk")
+
+    if pre_existing and not args.force:
+        print()
+        print("   The target is not empty, so a real run needs --force as well.")
+    return 0
+
+
 def main() -> int:
     args = build_parser().parse_args()
 
     target = Path(args.target).expanduser().resolve()
     populated = target.exists() and any(target.iterdir())
-    if populated and not args.force:
+    # A dry run is not refused here. Looking before you decide is the whole
+    # point, and being told to pass `--force` in order to find out what
+    # `--force` would destroy is the shape this flag exists to remove. The
+    # report says so instead.
+    if populated and not args.force and not args.dry_run:
         print(f"❌ {target} exists and is not empty (pass --force to write into it)")
         return 1
 
@@ -755,26 +867,17 @@ def main() -> int:
         if agent_root and (TEMPLATE / agent_root / name).is_dir():
             overlays.append(f"{agent_root}/{name}")
 
+    if args.dry_run:
+        return report_a_dry_run(target, existing_files(target) if populated else set(), overlays, values, args)
+
     target.mkdir(parents=True, exist_ok=True)
     # What was here before skeletor touched anything. Not "before this overlay":
     # a later overlay overwriting an earlier one is the composition working, and
     # only a file predating the whole scaffold is somebody's own.
-    pre_existing = {
-        path.relative_to(target).as_posix()
-        for path in target.rglob("*")
-        if path.is_file() and ".git/" not in path.relative_to(target).as_posix()
-    } if populated else set()
-    written: List[str] = []
-    for overlay in overlays:
-        source = TEMPLATE / overlay
-        if not source.exists():
-            print(f"❌ missing overlay: {source}")
-            return 1
-        copy_overlay(source, target, values, cli_name, written, omit=VERSIONING[args.versioning])
-
-    (target / cli_name).chmod(0o755)
-    (target / "tmp").mkdir(exist_ok=True)
-    (target / "tmp" / ".gitkeep").touch()
+    pre_existing = existing_files(target) if populated else set()
+    written = copy_overlays(target, overlays, values, cli_name, VERSIONING[args.versioning])
+    if written is None:
+        return 1
 
     after_copy = hash_tree(target)
     pristine = pristine_post_copy(target, written, values) if populated else {}
@@ -813,7 +916,15 @@ def main() -> int:
     produced = set(pristine) if populated else produced_files(written, after_copy, final)
     write_manifest(target, args, overlays, {rel: pristine.get(rel, final[rel]) for rel in sorted(produced)})
 
-    overwritten = sorted(pre_existing.intersection(written))
+    # `produced`, not `written`. The copy phase is not the only thing that
+    # writes: `regen.py` overwrote a user's own `docs/todo_index.json` and this
+    # warning never named it, because `written` answers "did the copy phase
+    # write it" and the question here is "what of yours did skeletor replace".
+    # The manifest bug above, in the one place whose entire job is to be
+    # complete. Found by building `--dry-run` and comparing its prediction
+    # against this list; they are the same set by construction now, which is
+    # what makes the prediction worth anything.
+    overwritten = sorted(pre_existing.intersection(produced))
     if overwritten:
         # Loudly, and by name. `--force` writes over whatever is in its way and
         # the losses are silent by construction: a file that is gone raises
