@@ -18,6 +18,14 @@ pytestmark = [pytest.mark.unit]   # see tests/pytest.ini for the full marker lis
 | `unit`        | Host, no services required                   | `{{CLI}} test unit`        |
 | `integration` | Services up, seeded data                     | `{{CLI}} test integration` |
 | `manual`      | Never in scheduled CI (E2E, live third-party, paid APIs) | `{{CLI}} test manual` |
+| `ui`          | Drives an interface — see § Interaction below | `{{CLI}} test ui`        |
+
+`ui` **is** run by CI: `.github/workflows/ci.yml` has a job for it, because a
+marker no workflow selects silently removes a test from every run. A headless
+pilot needs nothing added; a browser or an Electron window needs a driver or a
+virtual display, and that setup belongs in that job.
+`tests/test_ci_runs_every_suite.py` fails if a suite the CLI offers is run by
+nothing.
 
 `tests/test_marker_coverage.py` fails the unit suite if a test file declares no marker.
 

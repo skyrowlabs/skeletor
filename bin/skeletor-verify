@@ -446,7 +446,7 @@ def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
         results.append(Result(f"{CLI_NAME} {' '.join(command)}", code == 0, time.time() - started, output))
 
     results.append(check_docs_gate_sees_the_tree(tree))
-    results.append(check_empty_suite_is_not_red(tree))
+    results += check_empty_suite_is_not_red(tree, venv_python)
     results.append(check_upgrade_is_noop(tree))
     results.append(check_groups_register(tree))
     results.append(check_script_targets(tree))
@@ -558,21 +558,54 @@ def check_docs_gate_sees_the_tree(tree: Path) -> Result:
     return Result(f"check docs inspects the tree ({checked} source refs)", passed, time.time() - started, output)
 
 
-def check_empty_suite_is_not_red(tree: Path) -> Result:
-    """A suite the scaffold ships no tests for must not fail on arrival.
+#: Print the markers whose row says a scaffold ships no tests for them. Read
+#: from the tree rather than named here for the reason the lint arguments are:
+#: a copy would verify the template against a registry the template does not
+#: have, and would stay green while doing it.
+_TOLERANT_SUITES = (
+    "import sys; sys.path.insert(0, '.'); "
+    "from cli.test_cmds import SUITES; "
+    "print(' '.join(m for m, s in SUITES.items() if not s.ships_tests))"
+)
+
+
+def check_empty_suite_is_not_red(tree: Path, venv_python: Path) -> List[Result]:
+    """Every suite the scaffold ships no tests for must not fail on arrival.
 
     pytest exits 5 when a marker selects nothing, and no scaffold can ship a
-    test that needs a stack it does not know about — so `test integration` and
-    the CI job that runs the same selection were red on every fresh tree, and
-    stayed red until somebody wrote their first integration test.
+    test that needs a stack, a browser or a display it does not know about — so
+    `test integration` and the CI job running the same selection were red on
+    every fresh tree, and stayed red until somebody wrote their first
+    integration test.
 
     This ran nowhere before: verify ran `pytest -m unit` directly and never the
     CLI's own suite commands, so the one selection guaranteed to be empty was
     the one nothing exercised.
+
+    It named `integration` for as long as that was the only such suite, which is
+    the shape Rule 2 is about: `ui` arrived, took the identical code path, and
+    this gate would not have noticed either way. The set is discovered now, and
+    an empty one fails — a loop over nothing passes every assertion in it.
     """
     started = time.time()
-    code, output = run([f"./{CLI_NAME}", "test", "integration"], cwd=tree)
-    return Result("test integration on an empty suite", code == 0, time.time() - started, output)
+    code, listed = run([str(venv_python), "-c", _TOLERANT_SUITES], cwd=tree)
+    markers = listed.split()
+    if code != 0 or not markers:
+        return [
+            Result(
+                "test on an empty suite: which suites tolerate one",
+                False,
+                time.time() - started,
+                f"could not read SUITES out of the tree's cli/test_cmds.py\n{listed}",
+            )
+        ]
+
+    results = []
+    for marker in markers:
+        started = time.time()
+        code, output = run([f"./{CLI_NAME}", "test", marker], cwd=tree)
+        results.append(Result(f"test {marker} on an empty suite", code == 0, time.time() - started, output))
+    return results
 
 
 def check_upgrade_is_noop(tree: Path) -> Result:

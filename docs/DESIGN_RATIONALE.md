@@ -559,6 +559,50 @@ slowness*, and it is declared as an ini key rather than a `--timeout` flag
 because an unknown ini key is a warning without the plugin while an unknown CLI
 flag is a hard error.
 
+### The other half of a marker, which took a consumer to see
+
+Marker-based registration is the strongest pattern here and it has an edge that
+went unstated for as long as the tree was headless. A marker is how a test file
+joins a suite. It is also, and by exactly the same act, **how a test file leaves
+CI** — and only one of those is visible:
+
+> **Marking a test with a marker no workflow selects deletes it from CI.** The
+> unit job runs `-m unit` and deselects it, nothing else selects it, and every
+> check reports green over a smaller set. Nothing is red at any point, and no
+> output anywhere distinguishes the smaller set from the whole one.
+
+That shipped. A `ui` suite was added — a row in `cli/test_cmds.py`, a CLI
+command, a documented description, a considered empty-suite message — and no job
+in `.github/workflows/` ran `-m ui`. Everything about the zero case was right and
+the populated case was a hole.
+
+proto.pilot found it from the outside, which is the only place it was visible:
+they hold 36 Textual pilot tests matching the marker's own description word for
+word, so adopting it as documented would have dropped all 36 from every run they
+do. They kept the tests on `unit` instead, which is correct and means the marker
+was unusable for them as written. **A registry row that costs coverage to use is
+worse than an absent feature**, because the absent one does not invite anybody.
+
+Two fixes were available and only one is honest. Calling `ui` a suite CI cannot
+run is false for at least one of the three stacks the description names — a
+Textual pilot is headless and runs on a bare runner — so the answer is the job.
+A browser or an Electron window may still need a driver or a virtual display,
+and that setup belongs to the adopting repo: a job failing loudly for want of a
+display is strictly better than tests quietly leaving CI.
+
+The generalisable part is not the job, it is where the obligation lives.
+`Suite.scheduled` is a field on the row, defaulting to `True`, so the safe answer
+is the one you get by not thinking about it, and `tests/test_ci_runs_every_suite.py`
+turns the unsafe answer into something you have to write down. Two literals
+collapsed into it on the way — `{{CLI}} test all` had been excluding `manual` by
+name, which is the same question CI asks, written twice.
+
+It also cost `bin/skeletor-verify` a list. Its empty-suite gate named
+`integration` for as long as that was the only tolerant suite; `ui` arrived,
+took the identical code path, and the gate would not have noticed either way.
+It discovers the set from the tree's own registry now — and fails on an empty
+one, because a loop over nothing passes every assertion inside it.
+
 ---
 
 ## CI, cost, and the draft-PR discipline

@@ -274,11 +274,76 @@ jobs:
             exit "$status"
           fi
 
+  # ── UI ──────────────────────────────────────────────────────────────────
+  # The job that makes the `ui` marker safe to use. Without it, marking a test
+  # `ui` DELETES it from CI: the unit job selects `-m unit` and deselects it, no
+  # other job selects it, and every check stays green over a smaller set. That
+  # shipped, and proto.pilot found it holding 36 tests that match the marker's
+  # own description word for word.
+  #
+  # `cli/test_cmds.py` is where the obligation is written down and
+  # `tests/test_ci_runs_every_suite.py` enforces it: every suite the CLI offers
+  # with `scheduled=True` must be selected by some workflow here.
+  #
+  # SCAFFOLD: a Textual or headless pilot needs nothing added below. A browser
+  # needs its driver installed; an Electron window needs a virtual display
+  # (`xvfb-run`). Add that here — this job failing for want of a display is the
+  # intended way to find out, and is the whole point of it not being silent.
+  ui:
+    name: UI Tests
+    needs: gate
+    if: needs.gate.outputs.full_suite == 'true'
+    runs-on: ubuntu-latest
+    env:
+      {{CI_ENV_VAR}}: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '{{PY}}'
+      - run: pip install -r scripts/requirements.txt
+
+      # Same step as the unit job, and the reason is stated there.
+      - name: Install the project, if it is one
+        run: |
+          if [ ! -f pyproject.toml ] || ! grep -q '^\[project\]' pyproject.toml; then
+            echo "no [project] block in this tree — nothing to install"
+            exit 0
+          fi
+          # One line because a heredoc cannot be indented into a YAML block —
+          # its terminator has to sit at column 0, and the Python inside would
+          # carry this block's indent. Reads the extra NAMES only; it never
+          # decides anything, so a malformed pyproject.toml fails the step
+          # loudly — GitHub runs this under `bash -eo pipefail`, so the failing
+          # substitution stops it — rather than quietly resolving to "no extras"
+          # and installing the wrong thing. Verified, not assumed.
+          extras=$(python -c 'import importlib.util as u, sys; sys.exit(0) if u.find_spec("tomllib") is None else None; import tomllib; d = tomllib.load(open("pyproject.toml", "rb")); print(",".join(sorted((d.get("project") or {}).get("optional-dependencies") or {})))')
+          if [ -n "$extras" ]; then
+            echo "pyproject.toml declares [project] with extras: $extras — installing all of them"
+            pip install -e ".[$extras]"
+          else
+            echo "pyproject.toml declares [project], no extras — installing it editable"
+            pip install -e .
+          fi
+
+      # Exit 5 is pytest for "the marker selected nothing", and a scaffold ships
+      # no ui test — so an empty selection is REPORTED, never passed off as a
+      # run, exactly as in the integration job. Every other non-zero status
+      # still fails the job.
+      - name: UI suite
+        run: |
+          python -m pytest tests/ -m ui -q --durations=25 || status=$?
+          if [ "${status:-0}" -eq 5 ]; then
+            echo "::notice title=UI suite::no ui tests are marked yet — the suite is empty, not passing"
+          elif [ "${status:-0}" -ne 0 ]; then
+            exit "$status"
+          fi
+
   # ── Release automation ──────────────────────────────────────────────────
   release-please:
     name: Release Please
     if: github.event_name == 'push' && github.ref == 'refs/heads/{{RELEASE_BRANCH}}'
-    needs: [lint, unit-tests, integration]
+    needs: [lint, unit-tests, integration, ui]
     runs-on: ubuntu-latest
     permissions:
       contents: write

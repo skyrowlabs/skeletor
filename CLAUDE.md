@@ -93,11 +93,24 @@ Python tree runs the unit suite, `check docs`, `check merge-drivers`,
 `check output`, a `--help` group-registration check, a static check that every
 `script()` call in the tree's CLI names a file that exists, a check that the
 generated README's Setup block runs every tool by path, a check that the tree is
-its own repository at its first commit, the lint hooks, pyright, and
+its own repository at its first commit, the tree's own `test <marker>` command
+for every suite a scaffold ships no tests for, the lint hooks, pyright, and
 `actionlint` over the workflows the tree ships.
 eslint and prettier run once, on the fullest tier's `both` tree, and the fullest
 tier is scaffolded a second time into a deliberately long path and a third time
 into a directory that already has files in it.
+
+That empty-suite gate named `integration` until it had to name two things. A
+suite whose tests a scaffold cannot ship is red on arrival unless the CLI
+tolerates an empty selection, and the gate is what proves the tolerance — so
+when `ui` arrived taking the identical code path, the gate would not have
+noticed either way. It reads the tolerant set out of the tree's own
+`cli/test_cmds.py` now, and fails when that set comes back empty, since a loop
+over nothing passes every assertion inside it. The `ui` marker itself shipped
+with no job selecting it, which is a hole of a different shape and is written
+up in [`docs/DESIGN_RATIONALE.md`](docs/DESIGN_RATIONALE.md): a marker is how a
+test joins a suite and equally how it leaves CI, and only one of those is
+visible.
 
 The two newest are the **setup path**, which this file's own gates had never
 once executed. Everything above verifies a tree that is already installed —

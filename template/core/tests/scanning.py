@@ -44,8 +44,20 @@ from typing import Sized, TypeVar
 #: convenience and is not: a generator that must be consumed to be measured is
 #: a scan the caller cannot iterate twice, and pyright caught the fallout —
 #: `invocations() -> dict` returning `Collection`. Requiring something sized is
-#: the smaller contract and the honest one; every caller here already passes a
-#: list or a dict.
+#: the smaller contract and the honest one.
+#:
+#: **So wrap a generator at the call site**, and expect to: a scaffold's own
+#: scans pass a list or a dict, and that is a survey of one tree. proto.pilot
+#: adopted this and eight of their fourteen call sites were genexps or a bare
+#: `rglob`, every one of which raises `TypeError: object of type 'generator'
+#: has no len()`. Loud, and at call time, which is the right kind of breakage —
+#: but "nobody passes a generator" was a claim about the tree that ships the
+#: helper, and a template helper's callers are mostly in trees it cannot see.
+#:
+#: `sorted(...)` is the wrapper to reach for rather than `list(...)`. It costs
+#: the same and it fixes a second thing: `Path.rglob` yields in filesystem
+#: order, so several of those scans were iterating nondeterministically and the
+#: `len()` error was the first thing to say so.
 C = TypeVar("C", bound=Sized)
 
 
