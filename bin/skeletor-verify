@@ -27,6 +27,7 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -2818,6 +2819,60 @@ def hook_args_for_tree(workdir: Path, tier: str) -> List[str]:
     return []
 
 
+def entry_point_gate() -> Result:
+    """`bin/skeletor --help` and the README name every tool, by discovery.
+
+    This gate is about *this repository*, not about a generated tree, which puts
+    it in the same small family as `check_no_baked_paths`: it asks whether what
+    skeletor ships is coherent, a question no scaffold can ask about itself.
+
+    It exists because the defect it prevents had already happened. The README
+    advertised the generated CLI as "one discoverable entry point" whose groups
+    are discovered rather than listed, three paragraphs below a hand-maintained
+    table of skeletor's own eight tools that named five — and
+    `bin/skeletor-components`, 339 lines, appeared in no document or workflow at
+    all. A list where a pattern would do, in the file that advertises the rule.
+
+    Two directions, because a generated block can be wrong in two ways and only
+    one of them is visible by reading it. The block must be **current** — the
+    regeneration produces no diff, which is invariant 4 — and it must be
+    **complete**, every executable `bin/skeletor-*` present in both the dispatch
+    listing and the README. Currency alone would stay green if the generator
+    itself started skipping a file, since both sides would skip it together.
+    That is the same two-readings-of-one-source trap the manifest gate is built
+    around: two copies of a mistake agree with each other.
+    """
+    started = time.time()
+    tools = sorted(
+        p.name for p in (SKELETOR / "bin").glob("skeletor-*") if p.is_file() and os.access(p, os.X_OK)
+    )
+    dispatcher = SKELETOR / "bin" / "skeletor"
+    listed_code, listed = run([str(dispatcher), "--help"], cwd=SKELETOR)
+    block_code, block = run([str(dispatcher), "--markdown"], cwd=SKELETOR)
+
+    readme = (SKELETOR / "README.md").read_text(encoding="utf-8")
+    current = block.strip() and block.strip() in readme
+    # Discovered independently of the generator, so this cannot be satisfied by
+    # a generator that under-reports: the filesystem is the third opinion.
+    missing_from_help = [t for t in tools if t[len("skeletor-"):] not in listed]
+    missing_from_readme = [t for t in tools if f"`bin/{t}`" not in readme]
+    enough = len(tools) >= 2
+
+    return Result(
+        f"bin/skeletor: --help and the README name all {len(tools)} tools",
+        listed_code == 0
+        and block_code == 0
+        and enough
+        and bool(current)
+        and not missing_from_help
+        and not missing_from_readme,
+        time.time() - started,
+        f"tools discovered: {tools}\nREADME block current: {bool(current)}\n"
+        f"missing from --help: {missing_from_help}\nmissing from README: {missing_from_readme}\n"
+        f"(run `bin/skeletor --markdown` and paste the block into README.md)",
+    )
+
+
 def main() -> int:
     scaffolder = load_scaffolder()
     all_tiers = sorted(scaffolder.TIERS)
@@ -2844,6 +2899,10 @@ def main() -> int:
 
     results: List[Result] = []
     try:
+        # Before the venv: it needs no toolchain, and a repository whose own
+        # entry points disagree with its README should say so in two seconds
+        # rather than after a five-minute grid.
+        results.append(entry_point_gate())
         venv_python = make_venv(workdir, args.quiet)
         pyright_ok, pyright_note = warm_pyright(venv_python)
         if not args.quiet:

@@ -56,6 +56,11 @@ does not.
 ## Commands
 
 ```bash
+# One entry point. Every tool below is also `bin/skeletor <verb>`, and the list
+# is the glob `bin/skeletor-*` rather than anything anybody maintains.
+bin/skeletor --help
+bin/skeletor --markdown            # the README's tool table, generated
+
 # Scaffold a project (the only "build" this repo has)
 bin/skeletor-new ../target --name "Name" --cli xx --tagline "..." --tier core
 bin/skeletor-new ../target --agent none          # no Claude tooling; rules still ship

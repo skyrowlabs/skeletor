@@ -23,15 +23,28 @@ tier ships it: `C` = core, `G` = governed, `A` = agentic (cumulative).
 
 ### skeletor's own tools
 
+`bin/skeletor` is the entry point — `bin/skeletor --help` lists these, and each
+is still runnable directly by the path below. The table is generated from the
+files, because the hand-written one it replaced had lost three of the eight:
+
+<!-- GENERATED bin/skeletor — do not hand-edit; run `bin/skeletor --markdown`. -->
+
 | Tool | What it does |
 | ---- | ------------ |
-| `bin/skeletor-new` | The generator — copies overlays, substitutes placeholders, verifies the result |
-| `bin/skeletor-verify` | Generates every tier and runs each tree's own gates — this repo's test suite |
-| `bin/skeletor-check-pins` | Reports how far behind every version the template pins users to |
-| `bin/skeletor-upgrade` | Carries a template change into an already-scaffolded tree — three-way merge, never a conflict marker |
-| `bin/skeletor-install-skill` | Installs `/new-project` into `~/.claude/skills/`, rewriting the path to this checkout |
-| `/new-project` skill | Lets any agent scaffold a repo from a plain-English ask |
-| `AGENTS.md` | The same procedure as a page an agent can be pointed at directly |
+| `bin/skeletor-bump` | Bump every location of a pinned tool at once, or refuse to bump it at all. |
+| `bin/skeletor-check-pins` | Report how far behind every version this repository pins its users to. |
+| `bin/skeletor-components` | What did this tree take from skeletor, and has any of it moved since? |
+| `bin/skeletor-install-skill` | Install the /new-project skill into the user's Claude Code config, so a blank repo can be scaffolded by asking rather than by remembering a path. |
+| `bin/skeletor-maintain` | The weekly maintenance pass, run locally, waking an agent only if there is work. |
+| `bin/skeletor-new` | Scaffold a new project from the skeletor template. |
+| `bin/skeletor-upgrade` | Carry a template change into a tree that was scaffolded from an older one. |
+| `bin/skeletor-verify` | Generate every tier and run the resulting tree's own gates against it. |
+
+<!-- /GENERATED -->
+
+Two more entry points that are not scripts: the `/new-project` skill lets any
+agent scaffold a repo from a plain-English ask, and [`AGENTS.md`](AGENTS.md) is
+the same procedure as a page an agent can be pointed at directly.
 
 ### The project CLI (`./<cli>`)
 

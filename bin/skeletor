@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""One discoverable entry point for skeletor's own tools.
+
+`README.md` tells every user of the generated CLI that it is **one discoverable
+entry point**, whose command groups are *discovered by module* so that an
+overlay can add one without patching an import list. This repository then
+shipped eight tools in `bin/` and a hand-maintained table naming five of them.
+`bin/skeletor-components` — 339 lines of provenance tooling — was referenced by
+no document and no workflow at all, which is the failure that rule exists to
+prevent, occurring in the file that advertises the rule.
+
+So this is the pattern where the list was: **the commands are the files**.
+Adding `bin/skeletor-<verb>` makes `skeletor <verb>` work and puts it in
+`--help` and in the README, with nothing to remember.
+
+## What it deliberately is not
+
+It is **not** the click CLI the template ships, and the difference is not
+squeamishness about dependencies:
+
+- **The command form is what a rename breaks.** `bin/skeletor-new` is named 26
+  times across the docs, `AGENTS.md`, `verify.yml` and the `/new-project`
+  skill — *including the installed snapshot under `~/.claude/skills/`, which is
+  outside this repository and which no gate here can see*. That copy has gone
+  stale once already, handing agents a `--no-git` flag that had been removed.
+  Renaming the tools to subcommands would re-run that, so nothing is renamed:
+  every existing path keeps working and this dispatches to it.
+- **Nothing installs skeletor.** It runs from a checkout, which is the same fact
+  that decides `--versioning tag` and why there is no `VERSION` file here.
+- **The tools are stdlib-only and must stay so.** `bin/skeletor-verify` builds
+  its own venv precisely because it cannot assume one exists; a dispatcher that
+  imported `click` would be unable to run the tool that installs click.
+
+`os.execv` rather than a subprocess, so exit codes, signals and stdio pass
+through untouched — `skeletor verify` has to stream a five-minute run and stay
+interruptible, and a wrapper that buffered it would be worse than no wrapper.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+BIN = Path(__file__).resolve().parent
+PREFIX = "skeletor-"
+
+
+def summary(script: Path) -> str:
+    """The tool's own one-line description, read from the file that owns it.
+
+    Line 2 in every one of these, as a `\"\"\"` opener in the Python tools and a
+    `#` comment in the shell one — so one rule covers both and neither has to
+    repeat itself into a table somebody maintains by hand.
+    """
+    sentence = ""
+    for line in script.read_text(encoding="utf-8").splitlines()[1:]:
+        text = line.strip().lstrip("#").strip().lstrip('"').strip()
+        if not text:
+            break
+        sentence = f"{sentence} {text}".strip()
+        # A wrapped opening sentence, not a second one: `skeletor-install-skill`
+        # runs its first over two `#` lines, and taking the line alone published
+        # "…so a blank" as its description. Stopping at the terminator rather
+        # than at the newline is what makes the two file shapes agree.
+        if sentence.endswith((".", "?", "!")):
+            break
+    return sentence or "(no description)"
+
+
+def tools() -> list:
+    """Every `bin/skeletor-*`, which is the command list by construction.
+
+    A glob that matches nothing would make `--help` an empty table and every
+    dispatch a "no such command" — a confident, wrong answer. This repository
+    states that rule for `scanned()` and for pyright's `filesAnalyzed`: an
+    assertion over an empty set is not a pass, so an empty scan is a failure
+    here rather than a quiet nothing.
+    """
+    found = sorted(
+        p for p in BIN.glob(f"{PREFIX}*") if p.is_file() and os.access(p, os.X_OK)
+    )
+    if not found:
+        sys.exit(f"skeletor: no {PREFIX}* tools found in {BIN} — this checkout is incomplete.")
+    return found
+
+
+def markdown() -> str:
+    """The README's tool table, generated. See `bin/skeletor --markdown`."""
+    rows = [
+        "<!-- GENERATED bin/skeletor — do not hand-edit; run `bin/skeletor --markdown`. -->",
+        "",
+        "| Tool | What it does |",
+        "| ---- | ------------ |",
+    ]
+    rows += [f"| `bin/{p.name}` | {summary(p)} |" for p in tools()]
+    rows += ["", "<!-- /GENERATED -->"]
+    return "\n".join(rows)
+
+
+def usage() -> None:
+    found = tools()
+    width = max(len(p.name[len(PREFIX):]) for p in found)
+    print("skeletor — one entry point for this repository's own tools.\n")
+    print("  bin/skeletor <command> [args...]     run a tool; every flag is passed through")
+    print("  bin/skeletor --markdown             emit the README's tool table\n")
+    print("Commands (each is bin/skeletor-<command>, and may still be run directly):\n")
+    for path in found:
+        print(f"  {path.name[len(PREFIX):]:<{width}}  {summary(path)}")
+    print("\nAGENTS.md is the scaffolding procedure; /new-project is the same procedure as a skill.")
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        usage()
+        return 0
+    if argv[0] == "--markdown":
+        print(markdown())
+        return 0
+
+    target = BIN / f"{PREFIX}{argv[0]}"
+    if not (target.is_file() and os.access(target, os.X_OK)):
+        names = ", ".join(p.name[len(PREFIX):] for p in tools())
+        sys.exit(f"skeletor: no such command '{argv[0]}'. Available: {names}")
+    os.execv(str(target), [str(target), *argv[1:]])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
