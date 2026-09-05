@@ -130,6 +130,24 @@ def sidecars(patches: Path) -> List[Path]:
     )
 
 
+def report_stale(stale: List[Path], target: Path, because: List[str]) -> None:
+    """List the sidecars an earlier run left, and say whose plan they are.
+
+    Two callers, because there are two ways for a dry run to end with that
+    directory holding somebody else's patches, and only the *reason* differs:
+    one has a plan above to contrast them against and one has no plan at all.
+    The listing was written for the first and the second went without, which is
+    why the reason is the parameter — it is the only part a reader acts on.
+    """
+    detail(f"{len(stale)} file(s) are already in tmp/upgrade/ from an earlier run.")
+    for line in because:
+        detail(line)
+    for path in stale[:10]:
+        item(str(path.relative_to(target)))
+    if len(stale) > 10:
+        detail(f"… and {len(stale) - 10} more")
+
+
 def clear_sidecars(patches: Path) -> int:
     """Remove the previous run's sidecars, so the directory describes this run.
 
@@ -692,6 +710,14 @@ def main() -> int:
             refuse_a_dirty_base(SKELETOR, "The upgrade")
         render_with(SKELETOR, recorded, head_tree)
         head_files = files_under(head_tree)
+        # The version this run is comparing the tree against, read out of the
+        # render rather than asked of git a second time — it is the value that
+        # would be recorded if this run applied anything, so there is one source
+        # for "what is skeletor now" and the report cannot disagree with the
+        # manifest it writes.
+        head_ref = (
+            json.loads((head_tree / MANIFEST_NAME).read_text(encoding="utf-8")).get("skeletor_ref") or "?"
+        )
 
         base_files: Dict[str, Path] = {}
         if base_src is not None:
@@ -975,6 +1001,11 @@ def main() -> int:
                     {
                         "target": str(target),
                         "base_ref": ref,
+                        # The version the tree is being compared *against*. A
+                        # consumer reading an empty diff off `base_ref` alone has
+                        # the same ambiguity the human line had: current with
+                        # what?
+                        "head_ref": head_ref,
                         "dry_run": args.dry_run,
                         # What is on disk in tmp/upgrade/, so a machine consumer
                         # is not left inferring it from `dry_run` the way a human
@@ -1150,20 +1181,56 @@ def main() -> int:
                 detail("started from. Your own uncommitted edits are in that diff too.")
 
         if not any((added, updated, merged, conflicted, collided, declined, dropped)):
-            say("✅", "already current — nothing to carry over")
+            # Name the version it is current *with*. This compares the tree
+            # against a render of skeletor's HEAD, so that is the claim — but the
+            # manifest is only re-copied by a run that applies something, so a
+            # tree that is already identical keeps recording whatever ref it was
+            # scaffolded at, indefinitely. Both are true, the bare sentence
+            # carried neither, and a reader holding it next to `.skeletor.json`
+            # could not tell "current with HEAD" from "current with the ref
+            # recorded there" — the reassuring reading of a line that is already
+            # the most reassuring one this tool prints. Reported by stash.flow,
+            # at base v0.6.0 against skeletor v0.6.1, which is exactly the pair
+            # the sentence could not distinguish.
+            say("✅", f"already current with skeletor @ {head_ref} — nothing to carry over")
+            if ref and ref != head_ref:
+                detail(f"{MANIFEST_NAME} still records {ref}, and will keep doing so: it is")
+                detail("re-copied only by a run that applies something. Being behind by a ref and")
+                detail("being behind by a file are different, and only the second is work.")
+            if args.dry_run and stale:
+                # The dry-run footer below is unreachable from here, and this is
+                # the case that needed it most. That warning is conditioned on
+                # there being a plan to contrast against, and absence-of-plan is
+                # not absence-of-hazard: here there is nothing above for any of
+                # these files to belong to, so every one of them is stale by
+                # definition rather than merely possibly. `stale` is only ever
+                # populated on a dry run — a real run cleared them and reported
+                # the count — and the condition says so rather than relying on it.
+                detail()
+                say("⏸️ ", "dry run — nothing was written, tmp/upgrade/ included")
+                report_stale(
+                    stale,
+                    target,
+                    [
+                        "Nothing is being carried over, so there is no plan above for them to",
+                        "belong to: every one is stale, not merely possibly stale. A real run",
+                        "clears them; this one wrote nothing at all.",
+                    ],
+                )
             return 0
 
         detail()
         if args.dry_run:
             say("⏸️ ", "dry run — nothing was written, tmp/upgrade/ included")
             if stale:
-                detail(f"{len(stale)} file(s) are already in tmp/upgrade/ from an earlier run.")
-                detail("They describe that run's plan against that template, not this one — a real")
-                detail("run clears them before writing. Nothing above refers to them.")
-                for path in stale[:10]:
-                    item(str(path.relative_to(target)))
-                if len(stale) > 10:
-                    detail(f"… and {len(stale) - 10} more")
+                report_stale(
+                    stale,
+                    target,
+                    [
+                        "They describe that run's plan against that template, not this one — a real",
+                        "run clears them before writing. Nothing above refers to them.",
+                    ],
+                )
         else:
             say("✅", "nothing was committed. Read the diff, then commit as one `chore(skeletor):` change")
         return 1 if (conflicted or collided) else 0

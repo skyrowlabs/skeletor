@@ -1305,6 +1305,45 @@ in, so a plant in the wrong place is visible rather than merely unlucky.
 Planted the original bug back and required red. Both assertions fire — the ref
 advances, and the second run says "already current".
 
+### The condition that narrows on the wrong end
+
+`sidecar_gate` reaches the conflict and collision branches, `pending_ref_gate`
+reaches the manifest-advance branch, and both are branches with *something to
+report*. The third way out of an upgrade is the one with nothing to report, and
+it `return`s before the footer — so the stale-sidecar warning, the sentence that
+exists because a fresh patch and a four-day-old one look identical on disk, was
+unreachable from **dry run, already current, sidecars present**. That is the
+case where every file in that directory is stale by definition rather than
+merely possibly, since there is no plan above for any of them to belong to, and
+it prints under the most reassuring line this tool has.
+
+stash.flow reported it and named the class: **the warning is conditioned on
+there being a plan to contrast against, and absence-of-plan is not
+absence-of-hazard.** The general form is worth holding, because the condition
+looks like ordinary narrowing every time: a guard predicated on a quantity
+being non-empty should be checked against the empty case explicitly, since that
+is usually the end where the hazard is *total* rather than absent. It is the
+sibling of the rule this repository already states for negative assertions —
+there, an empty enumeration makes a check vacuous; here, an empty plan makes a
+warning maximally warranted and turns it off.
+
+The same line had a second defect, and it cost one string: **"already current"
+named no version.** The run compares the tree against a render of skeletor's
+HEAD, so that is the claim — but the manifest is re-copied only by a run that
+*applies* something, so an already-current tree keeps recording the ref it was
+scaffolded at forever. A reader holding that line next to `.skeletor.json` had
+no way to tell "current with HEAD" from "current with the ref recorded there",
+and the two genuinely differ. Both now print, and `head_ref` joins `base_ref` in
+the `--json` envelope, because a machine consumer reading an empty diff off the
+base ref alone has exactly the same ambiguity.
+
+The gate for it is a third scaffold in `sidecar_gate` — clean, sidecars planted,
+one dry run — asserting the named ref equals the manifest's and that **every**
+planted sidecar appears by path. Every one, not one of them: the listing
+truncates at ten, so "it mentioned something" would pass a report that dropped
+the rest. Required red against the pre-fix script first, where the line carries
+no version and the sidecars go unmentioned entirely.
+
 
 ---
 

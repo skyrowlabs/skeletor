@@ -463,6 +463,29 @@ construction rather than by allowlist. That predicate is on its second draft —
 the first was per-line, and flagged the continuation line of a correct sentence,
 because these sentences wrap and the tense sits on whichever line it fell on.
 
+That gate then walked past the third way out, which is the one its own opening
+sentence names: it was built to reach the branches with *something to report*,
+and a dry run that finds nothing to do `return`s before the footer. So the stale
+warning was unreachable from the case that needs it hardest — **dry run, already
+current, sidecars present** — where there is no plan above for any of those
+files to belong to, so every one is stale by definition rather than merely
+possibly, printed under the most reassuring line this tool has. stash.flow
+stated the general form: **the warning is conditioned on there being a plan to
+contrast against, and absence-of-plan is not absence-of-hazard.** A condition
+that reads as a narrowing is worth checking against the case where the quantity
+it narrows on is zero, because that is usually not the safe end.
+
+They found the second half of the same line at the same time, and it is the
+cheaper one: **"already current" named no version.** At base `v0.6.0` against
+skeletor `v0.6.1` it means *current with HEAD*, which is the useful claim — but
+it reads identically to *current with the ref your manifest records*, and the
+two differ precisely because the manifest is re-copied only by a run that
+applies something, so an already-current tree keeps recording the ref it was
+scaffolded at indefinitely. Both facts now print, `head_ref` joins `base_ref` in
+the `--json` envelope so a machine consumer is not left inferring it either, and
+the stale listing is one function with the *reason* as its parameter, since the
+two callers differ in nothing else.
+
 The **arguments** are the primary record; the `files` hashes are a fallback for
 when the base render is out of reach — a `--depth 1` clone, a tarball, a
 collected ref. They answer only "has anybody touched this file?", which is

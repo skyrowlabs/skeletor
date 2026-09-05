@@ -1601,6 +1601,54 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
             "tmp/upgrade/ holds:\n  " + "\n  ".join(left) + "\n" + output,
         )
     )
+
+    # The third way out, and the one both of the above walk past: a dry run that
+    # finds nothing to do. It `return`s before the footer, so the stale warning
+    # was unreachable from the case that needs it most — there is no plan above,
+    # so every sidecar on disk is stale by definition rather than merely
+    # possibly — printed under the most reassuring line this tool has. And that
+    # line named no version, so "current with HEAD" and "current with the ref
+    # your manifest records" read identically. Both reported by stash.flow, from
+    # a tree at v0.6.0 against skeletor v0.6.1; neither is visible from a gate
+    # that only ever reaches the branches with something to report.
+    started = time.time()
+    result, clean = scaffold(tier, "python", workdir, name="current")
+    results.append(Result(f"current: {result.label}", result.ok, result.seconds, result.output))
+    if not result.ok:
+        return results
+
+    planted = clean / "tmp" / "upgrade"
+    planted.mkdir(parents=True, exist_ok=True)
+    (planted / "stale.patch").write_text("from a run four days ago\n", encoding="utf-8")
+    (planted / "gone.new").write_text("for a file not in today's plan\n", encoding="utf-8")
+    left_behind = sorted(f"tmp/upgrade/{f.name}" for f in planted.iterdir())
+
+    # `--from-dir SKELETOR` rather than the committed clone: this asserts the
+    # tree is current, and it was scaffolded by the live checkout, so a dirty
+    # working tree would otherwise make the two disagree and the branch under
+    # test would never be reached. That is `check_upgrade_is_noop`'s reasoning.
+    code, output = run(
+        [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(clean), "--dry-run", "--from-dir", str(SKELETOR)],
+        cwd=clean,
+    )
+    named = re.search(r"already current with skeletor @ (\S+)", output)
+    recorded = json.loads((clean / manifest_name).read_text(encoding="utf-8"))["skeletor_ref"]
+    # Every planted sidecar by path, not one of them and not a sentence: the
+    # listing truncates at ten, so "it mentioned something" would pass on a
+    # report that dropped the rest.
+    listed = [rel for rel in left_behind if rel in output]
+    results.append(
+        Result(
+            f"sidecars: 'already current' names its version and its {len(left_behind)} stale sidecar(s)",
+            code == 0
+            and named is not None
+            and named.group(1) == recorded
+            and listed == left_behind,
+            time.time() - started,
+            f"named: {named.group(1) if named else None} (manifest records {recorded})\n"
+            f"listed {listed} of {left_behind}\n{output}",
+        )
+    )
     return results
 
 
