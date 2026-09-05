@@ -1683,6 +1683,85 @@ both directions: a wrapper answering correctly from its own root was always
 green and proves nothing, and a gate running only the cross-tree invocation
 would be satisfied by a wrapper too broken to start.
 
+### A guard asking a broader question than it needed refused every adopter
+
+`bin/skeletor-upgrade` renders a tree's base from this checkout, so it refuses
+to run against a dirty one — a base rendered from uncommitted edits is a base
+nobody else can reproduce. Correct, and scoped to the wrong question. It asked
+whether the *checkout* was clean; what it needs to know is whether the *render*
+is reproducible, and those differ by everything outside `template/` and
+`bin/skeletor-new`.
+
+The cost was measured in one round: an untracked `notes.md` at this repository's
+root — a draft tag annotation, twenty-eight lines, touching nothing — refused
+all four adopters. Every one of them worked around it by cloning at a tag, which
+is precisely the fallback the guard exists to make unnecessary. A refusal that
+everybody routes around has stopped being a guard.
+
+`reaches_a_render()` is a prefix test over the render inputs, not a list of
+files to ignore, and it reads both sides of git's `old -> new` rename form. The
+gate holds both directions, because narrowing a guard is exactly where you stop
+noticing it narrowed too far: an untracked file under `template/` must still
+refuse, and one at the root must not. node-zero reported it and supplied the
+predicate.
+
+### A gate that reported its own failure as success
+
+`<cli> test coverage` ran pytest with `--cov --cov-report=term-missing` and no
+`xml:` report, then handed `check_coverage_budget.py` a path nothing had
+written. The ratchet said `❌ no coverage report at tmp/coverage.xml` — and the
+command exited 0, because the checker's return code was discarded. Both halves
+shipped in every tier.
+
+That pairing is worse than a check that never runs. A silent gate is at least
+consistent; this one printed the red where a human could see it and told every
+caller above it that the budget held. It is the `--junitxml` hole in `ci.yml`
+one layer down, and it survived for the same reason: `bin/skeletor-verify` runs
+a tree's suites *directly*, so the flags a wrapper passes were never executed by
+anything. The seam is not upstream-versus-downstream but *which side can be
+wrong about this* — and a wrapper's arguments are a question only the wrapper's
+own invocation can ask.
+
+`coverage_gate` runs the tree's own command, then raises the baseline to 99.9%
+and requires a non-zero exit. Both halves are load-bearing, and each was
+established by planting it: without the first the gate passes on a tree that
+measures nothing, and without the second it passes on the bug that shipped.
+
+### A recipe and its guard, written by one hand
+
+The upgrade footer tells a reader not to verify by counting tests, and hands
+them a recipe that diffs the collected ids instead. Its third line ran an
+unscoped `pytest --collect-only` from the tree at the moment `tmp/pre-upgrade`
+existed — created one line above, removed two below. Collection descends into
+the worktree, every module basename appears twice, and pytest Interrupts.
+
+The measurement is the interesting part: `136 tests collected, 19 errors`, exit
+2, and the file it wrote holds the right 136 ids in the right order. The output
+is not merely plausible, it is exactly correct. `grep :: | sort` discards the
+exit code, so `diff` reports no change and is telling the truth about two files
+that are both right. Only the exit status separates a good run from an aborted
+one here, and the recipe's own `wc -l` guard checks length.
+
+`collect_diff_gate` executed that command on every verify and passed, asking
+`len(collected) > 0` — the same question the `wc` line asks, in a second home.
+So the repository's empty-scope rule arrived inside the gate written to enforce
+it. node-zero's framing is the general statement and it is the workspace's
+two-consumers rule one level up, applied to a procedure and its own safety
+check rather than to two pieces of code:
+
+> The guidance and the guard were written by the same author, so the guard was
+> written against the failure the author imagined rather than the one the
+> guidance causes.
+
+**Any recipe that ships with a guard should have the guard written against what
+the recipe does, not against what could go wrong in general.** Scoping to
+`tests/` removes the cause; checking the exit code covers both the aborted case
+and the empty case the length check was written for, so it strictly dominates
+what it replaces. The recipe now announces its own failure, and the gate
+requires the announcement to be absent — then strips the scope back out and
+requires it to be present, because the first assertion alone is a negative over
+a set nobody sized, which is the reading that shipped.
+
 ---
 
 ## CI, cost, and the draft-PR discipline
