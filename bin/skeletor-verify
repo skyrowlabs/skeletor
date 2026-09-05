@@ -1554,6 +1554,40 @@ def components_gate(workdir: Path) -> List[Result]:
     recorded.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     both = states()
 
+    # `--fail-on-drift` is what lets this be a pre-push or a CI job at all; the
+    # default exits 0 like `skeletor-check-pins`. Drift means movement on
+    # SKELETOR's side: a file this repo adapted while upstream stayed still is a
+    # steady state, and failing it would make the gate red forever for every
+    # repo doing the thing components adoption exists to allow.
+    def drift_exit() -> int:
+        return run([sys.executable, str(tool), "report", str(consumer), "--fail-on-drift"], cwd=workdir)[0]
+
+    upstream_moved = drift_exit()
+
+    # A clean re-record puts every file back to current; drift must clear.
+    run([sys.executable, str(tool), "record", str(consumer), "--component", "output-contract"], cwd=workdir)
+    after_rerecord = drift_exit()
+
+    # The discriminating case, and the reason the two above cannot stand alone:
+    # with any upstream movement present, "drift = upstream moved" and "drift =
+    # anything not current" give the same exit, so a gate that only tests those
+    # passes under either rule. Only a LOCAL-EDIT-ONLY tree separates them.
+    clean = json.loads(recorded.read_text(encoding="utf-8"))
+    first = sorted(clean["components"]["output-contract"]["files"])[0]
+    clean["components"]["output-contract"]["files"][first]["local_sha"] = "0" * 64
+    recorded.write_text(json.dumps(clean, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    local_edit_only = drift_exit()
+
+    results.append(
+        Result(
+            "components: --fail-on-drift gates upstream movement, and a local edit is not drift",
+            upstream_moved == 1 and after_rerecord == 0 and local_edit_only == 0,
+            0.0,
+            f"upstream moved -> {upstream_moved} (want 1); after re-record -> {after_rerecord} (want 0); "
+            f"local edit only -> {local_edit_only} (want 0)",
+        )
+    )
+
     results.append(
         Result(
             "components: report separates upstream movement from a local edit",

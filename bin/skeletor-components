@@ -189,7 +189,7 @@ def classify(tree: Path, entry: dict) -> Tuple[str, str]:
     return "current", f"unchanged since {ref}"
 
 
-def report(tree: Path, as_json: bool) -> int:
+def report(tree: Path, as_json: bool, fail_on_drift: bool = False) -> int:
     data = load(tree)
     components = data.get("components", {})
     if not components:
@@ -203,7 +203,11 @@ def report(tree: Path, as_json: bool) -> int:
             entry = dict(components[name]["files"][path], path=path)
             state, why = classify(tree, entry)
             rows.append({"path": path, "source": entry["source"], "ref": entry["ref"], "state": state, "note": why})
-            if state != "current":
+            # Drift is movement on SKELETOR's side. A file this repo adapted and
+            # upstream has not touched is a steady state, not a pending decision
+            # — failing on it would make the gate red forever for every repo
+            # that did the thing components adoption exists to allow.
+            if state in ("upstream", "both", "gone"):
                 interesting += 1
         payload[name] = rows
 
@@ -225,13 +229,45 @@ def report(tree: Path, as_json: bool) -> int:
     if interesting:
         detail()
         detail("Nothing here was changed and nothing will be: this reports, it never merges.")
-        detail("`git -C <skeletor> diff <ref> HEAD -- <source>` shows what moved. Take what you")
-        detail("want by hand, then re-record that file so the next report starts from there.")
         detail(f"{MARKS['both']} is the one needing a person — both sides moved.")
-    return 0
+
+    # The exact commands, with the ref and the source filled in. This printed a
+    # template — `git -C <skeletor> diff <ref> HEAD -- <source>` — which is an
+    # instruction the reader has to complete from three places: where skeletor
+    # is, which ref this file was taken at, and what its source path is. All
+    # three are in the manifest, so asking for them back is the tool making the
+    # reader do its lookup. The re-record line matters most: it is the step that
+    # advances the baseline, and a step you must retype is a step you skip.
+    for name, rows in payload.items():
+        for row in rows:
+            if row["state"] in ("upstream", "both"):
+                detail()
+                detail(f"{row['path']} — what moved:")
+                detail(f"  git -C {SKELETOR} diff {row['ref']} HEAD -- {row['source']}")
+                detail("  then, once you have taken what you want:")
+                detail(f"  {sys.argv[0]} record {tree} --component {name} --file {row['source']}")
+
+    return 1 if (fail_on_drift and interesting) else 0
 
 
-def record(tree: Path, component: str, files: List[str]) -> int:
+def record(tree: Path, component: str, files: Optional[List[str]]) -> int:
+    """Record files, or re-record every file already in a component.
+
+    Omitting `--file` re-records the whole component at today's ref. It is the
+    "I have taken the upstream changes" step, and it is **deliberately loud**,
+    because the tool cannot tell whether you took them: re-recording without
+    taking them silences a true report rather than resolving it. That is the one
+    way this tool can lie, so it says so and names what it is about to advance.
+    """
+    if not files:
+        existing = load(tree).get("components", {}).get(component, {}).get("files", {})
+        if not existing:
+            die(f"no component named {component!r} in {tree / COMPONENTS_NAME} — nothing to re-record")
+        files = [f"{entry['source']}:{path}" for path, entry in sorted(existing.items())]
+        say("⚠️ ", f"re-recording all {len(files)} file(s) in {component} at today's ref")
+        detail("This marks them current. Do it AFTER taking the upstream changes — doing it")
+        detail("instead of taking them silences the report rather than resolving it.")
+
     ref = current_ref()
     if ref.endswith("-dirty"):
         # The same refusal skeletor-upgrade makes, for the same reason: a ref
@@ -268,6 +304,11 @@ def main() -> int:
     rep = sub.add_parser("report", help="what has moved since it was taken (the default)")
     rep.add_argument("tree")
     rep.add_argument("--json", action="store_true")
+    rep.add_argument(
+        "--fail-on-drift",
+        action="store_true",
+        help="exit 1 if anything moved upstream — for a pre-push or a CI job",
+    )
 
     rec = sub.add_parser("record", help="record files copied out of skeletor")
     rec.add_argument("tree")
@@ -275,7 +316,6 @@ def main() -> int:
     rec.add_argument(
         "--file",
         action="append",
-        required=True,
         dest="files",
         metavar="TEMPLATE_PATH[:TREE_PATH]",
         help="e.g. template/core/scripts/output.py, or ...:lib/output.py if you renamed it",
@@ -292,7 +332,7 @@ def main() -> int:
 
     if args.action == "record":
         return record(tree, args.component, args.files)
-    return report(tree, args.json)
+    return report(tree, args.json, args.fail_on_drift)
 
 
 if __name__ == "__main__":
