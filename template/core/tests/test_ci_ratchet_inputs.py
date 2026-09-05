@@ -27,6 +27,12 @@ offsets rather than parsing steps. What it cannot see is a report that arrives
 by `download-artifact` under a name that is not the filename; the remedy there
 is to name the file, which is worth doing anyway.
 
+A ratchet may be pointed at a report other than its default — the nightly runs
+`check_skip_budget.py` twice, once per marker, because a skip count belongs to
+the run that produced it. So the artifact required is the one named **on the
+invocation** when there is one, and the script's own default otherwise. Reading
+only the default would have made the correct workflow the red one.
+
 ## Why the workflows are read with comments blanked
 
 Because this hunts for a *requirement*, and the string most likely to appear in
@@ -56,11 +62,16 @@ from scripts.yaml_text import read_uncommented  # noqa: E402
 
 WORKFLOWS = GITHUB_DIR / "workflows"
 
-#: `TMP_DIR / "junit.xml"` — the artifact a ratchet reads, declared where it is
-#: used rather than listed here. Read from the source and not imported: a
-#: checker that cannot be imported on this host would otherwise drop out of the
-#: scan silently, which is the exemption problem this suite exists to refuse.
+#: `TMP_DIR / "junit.xml"` — the artifact a ratchet reads *by default*, declared
+#: where it is used rather than listed here. Read from the source and not
+#: imported: a checker that cannot be imported on this host would otherwise drop
+#: out of the scan silently, which is the exemption problem this suite refuses.
 _ARTIFACT = re.compile(r"""TMP_DIR\s*/\s*["'](?P<artifact>[^"'/]+)["']""")
+
+#: An explicit report on the invocation — `--junit tmp/junit-unit.xml`. Matched
+#: by shape rather than by flag name, because the flag differs per ratchet and a
+#: second list of them would be the thing Rule 2 forbids.
+_OVERRIDE = re.compile(r"tmp/(?P<artifact>[\w.\-]+)")
 
 #: A job header: two spaces, an identifier, a colon, nothing else on the line.
 _JOB = re.compile(r"^  (?P<id>[A-Za-z_][A-Za-z0-9_-]*):\s*$", re.MULTILINE)
@@ -87,13 +98,24 @@ def jobs(path: Path) -> dict:
 
 
 def invocations() -> list:
-    """Every (workflow, job, script, artifact) where a ratchet is run."""
+    """Every (workflow, job, script, artifact, offset) where a ratchet is run.
+
+    Per line, not per job: the nightly runs one ratchet twice with a different
+    report each time, and a job-level search would see the first and call it the
+    only one.
+    """
+    known = ratchets()
     found = []
     for path in sorted(WORKFLOWS.glob("*.yml")):
         for job, body in jobs(path).items():
-            for script, artifact in ratchets().items():
-                if script in body:
-                    found.append((path.name, job, script, artifact))
+            offset = 0
+            for line in body.splitlines(keepends=True):
+                for script, default in known.items():
+                    if script in line:
+                        override = _OVERRIDE.search(line)
+                        artifact = override.group("artifact") if override else default
+                        found.append((path.name, job, script, artifact, offset + line.index(script)))
+                offset += len(line)
     return found
 
 
@@ -110,10 +132,9 @@ def test_the_scan_finds_ratchets_and_the_jobs_that_run_them():
 
 def test_a_ratchet_reads_a_report_its_own_job_produced():
     """The artifact is named earlier in the job, or the ratchet reads nothing."""
-    for workflow, job, script, artifact in invocations():
+    for workflow, job, script, artifact, consumer in invocations():
         body = jobs(WORKFLOWS / workflow)[job]
         producer = body.find(artifact)
-        consumer = body.find(script)
         assert 0 <= producer < consumer, (
             f"{workflow}: job '{job}' runs {script}, which reads tmp/{artifact}, but no earlier "
             f"step in that job writes {artifact}. The ratchet will report that it found no "

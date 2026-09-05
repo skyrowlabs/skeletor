@@ -750,6 +750,25 @@ a check hunting for a *requirement* must mask comments, because the string most
 likely to appear where the thing is missing is a comment saying it should be
 there.
 
+The nightly then turned out to be wrong in a quieter way, found while fixing the
+first two and left unfixed for a release because the remedy was a design call I
+did not want to guess at. It ran `-m "unit or integration"` into one report and
+checked it with `--suite unit`; `count_skips` sums a whole file, so integration's
+skips were charged to the unit budget and reported under the unit suite's name.
+Green in a fresh tree, because a scaffold ships no integration tests — and a
+false red naming the wrong suite in any tree that grows one.
+
+stash.flow settled it, and the argument is the one that generalises: **a
+combined report is not checkable per suite at all**, so the workflow produces one
+report per marker rather than the checker learning to partition one. That keeps
+`count_skips` summing a whole file, which is the only thing it can be correct
+about. Coverage is the mirror image and stays combined — a line rate is a
+whole-tree measure both runs contribute to — so the two pytest runs append into
+one data file and the xml is written in its own step, where an empty integration
+selection cannot skip it. `tests/test_ci_ratchet_inputs.py` reads the report
+named **on the invocation** in preference to the script's default, because
+otherwise the correct workflow would have been the red one.
+
 One thing stash.flow did **not** do is the reason this is a template fix rather
 than an adopter's workaround: they left `max_skipped: 0` alone. Raising it to 1
 would have recorded a claim about their tree that was false — they had no

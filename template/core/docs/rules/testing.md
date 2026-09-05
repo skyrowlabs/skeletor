@@ -145,6 +145,11 @@ python -m pytest tests/ -m unit -q --junitxml=tmp/junit.xml
 python scripts/check_skip_budget.py --suite unit
 ```
 
+Each suite is checked against **its own** report. A skip count belongs to the run that
+produced it, and `count_skips` sums a whole file — so one report covering two markers
+charges the second suite's skips to the first and names the wrong one while doing it.
+Coverage is the opposite and stays combined: a line rate is a whole-tree measure.
+
 `tests/test_ci_ratchet_inputs.py` holds the workflows to the same rule, because the version
 of this that shipped was a job running the ratchet and never writing the file.
 

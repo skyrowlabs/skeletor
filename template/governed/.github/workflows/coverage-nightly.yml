@@ -38,19 +38,39 @@ jobs:
 
       - run: pip install -r scripts/requirements.txt
 
+      # One junit report per marker, because the two ratchets below measure
+      # opposite kinds of thing. A skip count belongs to the run that produced
+      # it — `count_skips` sums a whole report, so a combined one charges
+      # integration's skips to the unit budget and says "unit" while doing it.
+      # Coverage is the reverse: a whole-tree line rate that both runs
+      # contribute to, so they append into one data file and the xml is written
+      # once, in its own step, where an empty integration selection cannot skip
+      # it.
       - name: Full suite with coverage
         run: |
           mkdir -p tmp
-          python -m pytest tests/ -m "unit or integration" -q \
-            --junitxml=tmp/junit.xml \
-            --cov --cov-report=xml:tmp/coverage.xml \
+          python -m pytest tests/ -m unit -q \
+            --junitxml=tmp/junit-unit.xml \
+            --cov --cov-report= \
             --durations=25
+          status=0
+          python -m pytest tests/ -m integration -q \
+            --junitxml=tmp/junit-integration.xml \
+            --cov --cov-append --cov-report= \
+            --durations=25 || status=$?
+          # Exit 5 is pytest for "the marker selected nothing", and a scaffold
+          # ships no integration tests. The report is still written, so the
+          # ratchet reads a real zero rather than a missing file.
+          [ "$status" -eq 0 ] || [ "$status" -eq 5 ]
+          python -m coverage xml -o tmp/coverage.xml
 
       - name: Coverage ratchet
         run: python scripts/check_coverage_budget.py --suite unit
 
       - name: Skip budget
-        run: python scripts/check_skip_budget.py --suite unit
+        run: |
+          python scripts/check_skip_budget.py --suite unit --junit tmp/junit-unit.xml
+          python scripts/check_skip_budget.py --suite integration --junit tmp/junit-integration.xml
 
       - name: Workflow drift
         run: python scripts/check_workflow_drift.py
