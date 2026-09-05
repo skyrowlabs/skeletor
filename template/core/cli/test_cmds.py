@@ -196,8 +196,18 @@ def coverage(worst: int) -> None:
     report = TMP_DIR / "coverage.xml"
     report.parent.mkdir(parents=True, exist_ok=True)
     code = run(
-        [sys.executable, "-m", "pytest", "tests/", "-m", "unit", "-q",
-         "--cov", "--cov-report=term-missing", f"--cov-report=xml:{report}"]
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/",
+            "-m",
+            "unit",
+            "-q",
+            "--cov",
+            "--cov-report=term-missing",
+            f"--cov-report=xml:{report}",
+        ]
     ).returncode
     if code == 0:
         code = run([sys.executable, "scripts/check_coverage_budget.py", "--xml", str(report)]).returncode
