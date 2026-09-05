@@ -450,6 +450,7 @@ def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     results.append(check_upgrade_is_noop(tree))
     results.append(check_groups_register(tree))
     results.append(check_script_targets(tree))
+    results.append(check_version_resolves(tree))
     results.append(check_no_baked_paths(tree))
     results.append(check_setup_block_is_self_contained(tree))
     results.append(check_scaffold_is_its_own_repo(tree))
@@ -610,6 +611,62 @@ def check_upgrade_is_noop(tree: Path) -> Result:
         passed,
         time.time() - started,
         output + "\n" + offline_output,
+    )
+
+
+def check_version_resolves(tree: Path) -> Result:
+    """`--version` reports a release, and never a tag that is not one.
+
+    Nothing here exercised the generated tree's `--version`, and it was wrong on
+    every scaffold from the first commit: `git describe --tags --always` returns
+    an abbreviated sha when no tag exists, so a fresh tree reported
+    `version 4f2a91c` while shipping a `VERSION` file that said `0.1.0` — the
+    docstring's own fallback made unreachable by its own arguments.
+
+    A fresh tree is exactly why the gap survived. It has no tags, so the sha path
+    looked like a plausible answer rather than a broken one, and the two states
+    that expose it — a non-release tag, and a release tag — need a repository
+    with a history that no generated tree has. stash.flow found it by tagging
+    `archive/v1` to mark where their v1 left off, and getting
+    `version archive/v1-3-ga363012` back.
+
+    So the gate manufactures the history: no tags, then a non-release tag, then a
+    release tag. All three assertions are needed — with only the first, `--match`
+    is unobservable; with only the last, `--always` is.
+    """
+    started = time.time()
+    # On a COPY. This gate manufactures history — two tags and a commit — and the
+    # tree is shared with every other gate in the sequence, one of which asserts
+    # the scaffold is still at its first commit. It broke that one on the first
+    # run. A gate that mutates shared state is order-dependent by construction,
+    # which is a worse property than the bug it was written to catch.
+    work = tree.parent / f"{tree.name}-version"
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.copytree(tree, work, symlinks=True)
+
+    def version() -> str:
+        return run([f"./{CLI_NAME}", "--version"], cwd=work, env_extra={"PYTHONPATH": str(work)})[1].strip()
+
+    declared = (work / "VERSION").read_text(encoding="utf-8").strip()
+
+    untagged = version()
+    git_in(work, "tag", "archive/v1")
+    git_in(work, "commit", "-q", "--allow-empty", "-m", "chore: past the archive marker")
+    non_release = version()
+    git_in(work, "tag", f"v{declared}")
+    released = version()
+
+    ok = (
+        declared in untagged  # the VERSION fallback is reachable
+        and "archive/v1" not in non_release  # a non-release tag is not a version
+        and declared in non_release
+        and f"v{declared}" in released  # a release tag wins when there is one
+    )
+    return Result(
+        f"--version reports a release, not any tag ({declared})",
+        ok,
+        time.time() - started,
+        f"untagged: {untagged}\nnon-release tag: {non_release}\nreleased: {released}",
     )
 
 

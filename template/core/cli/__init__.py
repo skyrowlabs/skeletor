@@ -25,15 +25,34 @@ except ImportError:  # pragma: no cover - dependency guard
 
 
 def get_version() -> str:
-    """``git describe`` if we are in a checkout, else the VERSION file.
+    """``git describe`` against a RELEASE tag, else the VERSION file.
 
     ``git describe`` is preferred because it says how far past the tag you are —
     ``v1.4.0-5-gabc1234-dirty`` is the difference between "the released code" and
     "something that looks like it".
+
+    Two arguments here are load-bearing and both were wrong.
+
+    ``--match v[0-9]*`` restricts this to release tags. Bare ``--tags`` takes the
+    nearest tag of *any* shape, so a repository that tags anything else — an
+    ``archive/v1`` marker, a ``last-known-good``, an environment pin — reports it
+    as a version. stash.flow hit exactly that: ``version archive/v1-3-ga363012``,
+    which is worse than an obviously wrong answer because nothing about it reads
+    as broken. The pattern is not a house preference: ``release-please`` with
+    ``release-type: simple`` creates ``v${version}``, so this matches the tags
+    this repository's own release machinery makes and skips the ones it does not.
+
+    **``--always`` is gone**, and its absence is what makes the sentence above
+    true. With it, ``git describe`` never fails inside a checkout — it falls back
+    to an abbreviated sha — so the ``VERSION`` fallback was unreachable from any
+    checkout, and a freshly scaffolded tree reported ``version 4f2a91c`` while
+    shipping a ``VERSION`` file that said ``0.1.0``. The function described a
+    fallback its own arguments prevented it from taking, on every tree, from the
+    first commit.
     """
     try:
         described = subprocess.run(
-            ["git", "describe", "--tags", "--always", "--dirty"],
+            ["git", "describe", "--tags", "--match", "v[0-9]*", "--dirty"],
             cwd=str(PROJECT_ROOT),
             capture_output=True,
             text=True,
