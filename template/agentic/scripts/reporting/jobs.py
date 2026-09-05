@@ -118,8 +118,30 @@ class Job:
     first_week_only: bool = False  # monthly jobs ride a weekly lane; see below
     heartbeat_var: Optional[str] = None  # env var holding its dead-man-switch URL
 
+    def needle(self) -> str:
+        """What identifies THIS tree's line for this job in a live crontab.
+
+        A crontab is per-user, not per-repository: every project on the machine
+        has its lines in the same file. `report cron --check` matched a bare
+        `report <key>` against all of `crontab -l`, so a sibling repo running
+        the same job key reported ours installed — a green check whose whole
+        purpose is to catch a job that is registered and not installed.
+
+        Not `command()` either, which is the other obvious answer and is too
+        strict: it pins the redirect, so anybody who sent the log somewhere
+        else, or added a flag, gets told their working crontab is missing the
+        job. A check that cries wolf about a working crontab gets deleted, and
+        then the class it was catching comes back.
+
+        The directory and the wrapper name are what make a line ours, and they
+        are the two things a user has no reason to edit. `command()` builds on
+        this rather than repeating it — the failure above was one question
+        asked in two places, and a second copy here would be the same bug.
+        """
+        return f"cd {CRON_CWD} && ./{{CLI}} report {self.key}"
+
     def command(self) -> str:
-        return f"cd {CRON_CWD} && ./{{CLI}} report {self.key} >> {CRON_LOG} 2>&1"
+        return f"{self.needle()} >> {CRON_LOG} 2>&1"
 
     def cron_line(self) -> str:
         return f"{self.cron} {self.command()}"

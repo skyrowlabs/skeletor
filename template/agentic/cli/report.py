@@ -86,7 +86,9 @@ def cron(print_: bool, check_: bool) -> None:
         if job.key in exempt:
             off.append(f"{job.key}: off (intentional) — {exempt[job.key]}")
             continue
-        if f"report {job.key}" not in live:
+        # `job.needle()`, not a bare key: a crontab holds every project on the
+        # machine, and a sibling repo's line for the same key read as ours.
+        if job.needle() not in live:
             missing.append(job.key)
 
     for entry in off:

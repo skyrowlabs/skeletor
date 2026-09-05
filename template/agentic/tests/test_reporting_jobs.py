@@ -20,6 +20,7 @@ pytestmark = [pytest.mark.unit]
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scanning import scanned  # noqa: E402
 from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 from scripts.reporting.jobs import FIX_POLICIES, JOBS, JOBS_BY_KEY, _allowlisted, crontab_block  # noqa: E402
 
@@ -162,3 +163,29 @@ def test_agent_command_is_documented_for_operators():
 
     env_example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
     assert AGENT_CMD_VAR in env_example
+
+
+def test_a_siblings_crontab_line_is_not_read_as_ours():
+    """A crontab is per-user. Every project on this machine shares one file.
+
+    `report cron --check` matched a bare `report <key>` against all of
+    `crontab -l`, so a sibling repository running the same job key answered for
+    us — a green check whose entire purpose is to catch a job that is registered
+    and **not** installed. The needle is the directory and the wrapper name,
+    which are the two things that make a line ours and the two a user has no
+    reason to edit.
+
+    The third assertion is the one that keeps the other two honest: the forged
+    line must still contain the bare key, because that is what the old
+    predicate matched. Without it a typo in the forgery would make this pass by
+    testing nothing — a plant that did not land is indistinguishable from a
+    gate that works.
+    """
+    for job in scanned(JOBS, "registered jobs"):
+        assert job.needle() in job.cron_line(), f"{job.key}: our own line is not recognised as ours"
+
+        elsewhere = job.cron_line().replace(str(PROJECT_ROOT), "/somewhere/else/another-repo")
+        wrapper = job.cron_line().replace("&& ./", "&& ./other-")
+        for forged, what in ((elsewhere, "another checkout"), (wrapper, "another wrapper")):
+            assert f"report {job.key}" in forged, f"{job.key}: the {what} plant did not land"
+            assert job.needle() not in forged, f"{job.key}: a line from {what} read as ours"
