@@ -1683,6 +1683,62 @@ both directions: a wrapper answering correctly from its own root was always
 green and proves nothing, and a gate running only the cross-tree invocation
 would be satisfied by a wrapper too broken to start.
 
+### An extension point implemented as an edit is not an extension point
+
+`v0.5.7` added `NARRATIVE` to `scripts/paths.py` so an adopter could declare a
+documentation stage without diverging a shipped test. Its comment said so:
+*extending this tuple is a one-line change to a file you own*. True about
+permission, and wrong about the thing that matters.
+
+stash.flow merge-tested it, and this repository reproduced the test in its own
+source with `git merge-file` against a pristine render. Same intent, same
+upstream change, two spellings:
+
+    NARRATIVE = (TODO_DIR, IMPL_DIR, DOCS_DIR / "reports", EXPLORE_DIR)   CONFLICT
+    NARRATIVE += (EXPLORE_DIR,)                                           clean
+
+> **The discriminator is not permission, it is line disjointness.**
+
+`.gitignore` and `.github/DOCS_INDEX.md` merge clean forever not because they are
+blessed but because the adopter's lines and the template's lines are *different
+lines*. Being invited to edit a line changes nothing about what git does when
+upstream edits it too — and an extension point is, by construction, the line
+upstream is most likely to change.
+
+Two sites were shaped this way and both now carry an append slot with the
+measurement beside it. A third, isort's `known_first_party`, cannot be: TOML has
+no append, and saying so at the site is better than pretending the shape is
+uniform.
+
+No gate. Two sites, a comment at each, which is mind.head's arm of this
+repository's own rule — *derive it, or say where it rots* — and a gate for two
+entries is the over-building that teaches people gates are noise. What earns a
+gate is a set large enough to drift unnoticed.
+
+### A default that never rendered the interesting case
+
+`--base-branch` defaults to `develop` and `--release-branch` to `main`, so every
+tree `bin/skeletor-verify` had ever generated carried two distinct names. The
+bug lives entirely where they are equal — which is every repository while it is
+one person, and node-zero's tree. Three workflows rendered `branches: [main,
+main]`, and `AGENTS.md` rendered *never on `main` or `main`*, in the document
+that establishes the rules, which is the file an agent opens first.
+
+The pair is computed once in `substitutions()` now, because the sites cannot
+dedupe it themselves: one is YAML and one is prose, and neither language can ask
+whether two substitutions came out equal.
+
+`branch_gate` asserts both configurations, and the second keeps the first
+honest — a substitution that collapsed unconditionally satisfies "no duplicate"
+while silently dropping the integration branch from every two-branch repo's CI
+triggers. Same fix, failing the other way, with nothing red to say so. Each
+direction was established by planting it.
+
+The general form is the fixture rule this document already states, on the axis
+of defaults rather than of examples: **a flag's default decides which
+configuration your gates have been checking, and the interesting case is
+usually not the default.**
+
 ### Two manifest bugs, opposite signs, one line
 
 They arrived a day apart, from different repositories, with different symptoms,
