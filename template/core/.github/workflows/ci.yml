@@ -25,7 +25,7 @@ on:
     # protection ACCEPTS, and the PR merges having run nothing.
     # tests/test_ci_draft_gate.py fails if it disappears.
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [{{BASE_BRANCH}}, {{RELEASE_BRANCH}}]
+    branches: {{CI_BRANCHES}}
   push:
     # BOTH branches, not just the release one. A repo that commits directly to
     # {{BASE_BRANCH}} — every project does, while it is one person — otherwise
@@ -35,7 +35,7 @@ on:
     # flow tests the merge commit a second time, which is one bounded extra run
     # per merge and is not even pure duplication, since a squash merge is a
     # different commit than the PR head ever tested.
-    branches: [{{BASE_BRANCH}}, {{RELEASE_BRANCH}}]
+    branches: {{CI_BRANCHES}}
   workflow_dispatch:
 
 concurrency:

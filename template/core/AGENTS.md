@@ -96,7 +96,7 @@ one subject line. Full rules in `docs/rules/commits.md`.
 Commit freely as each logical unit lands (tests green, conventions followed) — **no need to
 ask permission**. Once the requested work is fully complete and all checks pass, push the
 branch autonomously. Don't push half-finished work mid-task. **Force-push is permitted on
-your own unreviewed branch** — but never on `{{BASE_BRANCH}}` or `{{RELEASE_BRANCH}}`, and
+your own unreviewed branch** — but never on {{PROTECTED_BRANCHES}}, and
 never from an unattended agent.
 
 **Base branch: `{{BASE_BRANCH}}`.** New branches are cut from it; every PR targets it.

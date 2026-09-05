@@ -191,10 +191,33 @@ def badges(args, slug: str) -> str:
     return f"{release} {ci}\n\n"
 
 
+def long_lived_branches(base: str, release: str) -> List[str]:
+    """The repository's long-lived branches, deduplicated, in order.
+
+    A single-branch project passes the same name twice — which is every repo
+    while it is one person — and every site that spelled the pair rendered it
+    twice: `branches: [main, main]` in three workflows, and "never on `main` or
+    `main`" in `AGENTS.md`, the file an agent reads first. The YAML duplicate is
+    harmless; the sentence is not, because a document that establishes the rules
+    cannot afford to read like a typo.
+
+    Deduplicating here rather than at each site is not tidiness — the sites
+    *cannot* do it. One is YAML and one is prose, and neither language can ask
+    whether two substitutions came out equal. This is the only place that
+    knows.
+
+    The default is `develop`/`main`, so the grid never rendered the equal case
+    and the bug shipped in the one configuration nothing here produced. Found
+    by node-zero, whose tree is single-branch.
+    """
+    return [base] if base == release else [base, release]
+
+
 def substitutions(args) -> Dict[str, str]:
     slug = args.slug or Path(args.target).resolve().name
     cli = args.cli or re.sub(r"[^a-z0-9]", "", slug.lower())[:8] or "run"
     prefix = args.env_prefix or re.sub(r"[^A-Z0-9]", "", cli.upper()) or "APP"
+    branches = long_lived_branches(args.base_branch, args.release_branch)
     return {
         "PROJECT_NAME": args.name or slug.replace("-", " ").replace(".", " ").title(),
         "PROJECT_SLUG": slug,
@@ -206,6 +229,10 @@ def substitutions(args) -> Dict[str, str]:
         "AGENT_PREFIX": slug.replace(".", "-"),
         "BASE_BRANCH": args.base_branch,
         "RELEASE_BRANCH": args.release_branch,
+        # The pair as a set, for the two sites that mean "both of them" rather
+        # than "this one" — see `long_lived_branches`.
+        "CI_BRANCHES": "[" + ", ".join(branches) + "]",
+        "PROTECTED_BRANCHES": " or ".join(f"`{name}`" for name in branches),
         "PY": args.python,
         "PY_NODOT": args.python.replace(".", ""),
         "LINE_LENGTH": str(args.line_length),

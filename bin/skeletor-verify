@@ -1490,6 +1490,86 @@ def populated_tree_gate(tier: str, workdir: Path) -> List[Result]:
     return results
 
 
+def branch_gate(tier: str, workdir: Path) -> List[Result]:
+    """A single-branch repository does not get told a name twice.
+
+    `--base-branch` defaults to `develop` and `--release-branch` to `main`, so
+    every tree this file has ever generated had two distinct names — and the
+    bug lives entirely in the case where they are equal, which is every repo
+    while it is one person. `branches: [main, main]` in three workflows, and
+    "never on `main` or `main`" in `AGENTS.md`. A duplicated YAML entry is
+    harmless. A duplicated clause in the document that establishes the rules
+    reads as a typo, in the file an agent opens first.
+
+    Both configurations are asserted, and the second is the one that keeps the
+    first honest: a substitution that collapsed unconditionally would satisfy
+    "no duplicate" while silently dropping the integration branch from every
+    two-branch repo's CI triggers — the same fix, failing the other way, with
+    nothing red to say so.
+
+    The sites are found by pattern rather than listed. A fifth place that
+    spells the pair would otherwise be exempt by having been written after
+    this gate. Found by node-zero, whose tree is single-branch.
+    """
+    results: List[Result] = []
+    started = time.time()
+
+    def build(name: str, base: str, release: str) -> Optional[Path]:
+        target = workdir / name
+        code, output = run(
+            [sys.executable, str(SCAFFOLDER), str(target), "--name", "Branchy", "--slug", name,
+             "--cli", CLI_NAME, "--tier", tier, "--language", "python",
+             "--base-branch", base, "--release-branch", release],
+            cwd=workdir,
+        )
+        results.append(Result(f"branches: scaffold {base}/{release}", code == 0, time.time() - started, output))
+        return target if code == 0 else None
+
+    def spellings(tree: Path) -> List[str]:
+        """Every rendered line that names a long-lived branch, wherever it is."""
+        found = []
+        for rel in ("AGENTS.md", ".github/workflows/ci.yml", ".github/workflows/docs-validation.yml"):
+            path = tree / rel
+            if not path.exists():
+                continue
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if "branches:" in line or "never on" in line:
+                    found.append(f"{rel}:{n}: {line.strip()}")
+        return found
+
+    single = build("branchy-one", "main", "main")
+    if single is None:
+        return results
+    lines = spellings(single)
+    doubled = [line for line in lines if line.count("main") > 1]
+    results.append(
+        Result(
+            f"branches: a single-branch tree names it once ({len(lines)} site(s))",
+            bool(lines) and not doubled,
+            time.time() - started,
+            ("the scan found no site at all — it is looking in the wrong place\n" if not lines else "")
+            + "\n".join(doubled),
+        )
+    )
+
+    started = time.time()
+    pair = build("branchy-two", "develop", "main")
+    if pair is None:
+        return results
+    both = spellings(pair)
+    missing = [line for line in both if "develop" not in line and "main" not in line]
+    incomplete = [line for line in both if "branches:" in line and ("develop" not in line or "main" not in line)]
+    results.append(
+        Result(
+            f"branches: a two-branch tree still names both ({len(both)} site(s))",
+            bool(both) and not missing and not incomplete,
+            time.time() - started,
+            "\n".join(missing + incomplete) or "",
+        )
+    )
+    return results
+
+
 def rescaffold_gate(tier: str, workdir: Path) -> List[Result]:
     """Scaffold twice into the same tree, and require the manifest not to move.
 
@@ -3383,6 +3463,10 @@ def main() -> int:
         # that gate's fixture cannot reach: a `--force` over a tree skeletor
         # itself made, rather than over decoys.
         for gate in rescaffold_gate(fullest, workdir):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        for gate in branch_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 

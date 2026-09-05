@@ -15,7 +15,7 @@ name: Docs Validation
 
 on:
   pull_request:
-    branches: [{{BASE_BRANCH}}, {{RELEASE_BRANCH}}]
+    branches: {{CI_BRANCHES}}
     paths:
       - 'docs/**'
       - '**.md'
