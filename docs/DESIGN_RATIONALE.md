@@ -849,14 +849,18 @@ case** — so the value of an adoption is not only the bugs it finds. Two of the
 three defects it found here were things no test could have been written for,
 because the thing that was wrong was an implication between two correct files.
 
-The narrower lesson, which is actionable today: this repository's own rule that
-*every rule carries its reason, in the file that states it* pulls against its
-ownership rule that a doc *lives where it changes and is linked, never
-duplicated*. Restating a convention in a second file is how a reason gets
-carried, and it is also how two homes for one claim get created. When a
-docstring is about to argue a general principle that another file owns, link
-that file by name — the two claims then sit close enough that the next reader
-compares them, which is the only mechanism available.
+There is an actionable half, and it is a rule rather than a record — so it does
+not live here. `template/core/docs/rules/docs.md` owns it, under *Where a Claim
+Lives*, which is the file somebody has open while writing the docstring and the
+one that reaches an adopting tree. It resolves the tension that produced this
+defect: *every rule carries its reason, in the file that states it* is what makes
+restating a convention feel correct, and *a claim has one home* is what forbids
+it.
+
+stash.flow caught that this entry originally stated the rule here instead, in the
+imperative, in a document read when deciding whether to drop a mechanism and
+shipped to nobody — the same defect one turn later, and in the paragraph
+prescribing against it.
 
 One thing stash.flow did **not** do is the reason this is a template fix rather
 than an adopter's workaround: they left `max_skipped: 0` alone. Raising it to 1

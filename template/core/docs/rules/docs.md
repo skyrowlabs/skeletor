@@ -279,3 +279,28 @@ python scripts/git/install_merge_drivers.py     # install / repair by hand
 
 Register it in **both** index tables — `AGENTS.md`'s Documentation Reference and
 `.github/DOCS_INDEX.md`. `{{CLI}} check docs` fails if a `docs/*.md` exists in neither.
+
+## Where a Claim Lives — Carry the Reason, Not the Rule
+
+Two rules in this project pull against each other, and the place they meet is a docstring
+about to explain itself:
+
+- **Every rule carries its reason where it is stated**, so it can be evaluated when it
+  becomes inconvenient rather than deleted by whoever trips over it.
+- **A claim has one home** and is linked from anywhere else, never copied.
+
+Carrying the reason is how a convention gets restated in a second file, and a second home
+is how two files come to argue. So: **when you are about to state a general principle that
+another file owns, name that file.** Explain your case, then link the owner — do not
+re-derive the general rule from the case in front of you.
+
+The reason is that nothing will catch you. `{{CLI}} check docs` asks whether a reference
+resolves; no check anywhere asks whether two paragraphs recommend opposite things, and one
+that could would have to understand the claims. The author is the last person positioned
+to notice, because each claim was true about the case that prompted it.
+
+That is not hypothetical. `tests/scanning.py` argues that a scan must refuse to enumerate
+nothing; `tests/test_output_contract.py` argued that the shape of a set, not a guard, is
+what makes an empty enumeration safe. Both true, four directories apart, and read together
+the second licenses deleting the first — which is a guard, deleted silently. It was found
+by an outside adopter applying the rule to a case neither paragraph was written for.
