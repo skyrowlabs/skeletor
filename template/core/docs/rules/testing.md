@@ -122,8 +122,9 @@ swallows input turns the whole suite into a coin flip that always lands green.
 
 Every fixture that creates a record owns its deletion. A cleanup that runs at *startup* is
 not a teardown — it hides the leak for exactly as long as it takes to become someone else's
-problem. Use the fixtures in `tests/fixtures.py`; never construct records against a live
-session by hand.
+problem. Put shared setup in a `yield` fixture in `tests/conftest.py`, where the teardown
+sits in the same function as the creation; never construct records against a live session
+by hand.
 
 ## Budgets Are Ratchets — Update Them in the Same Commit
 

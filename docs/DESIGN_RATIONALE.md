@@ -808,6 +808,46 @@ having compared nothing. Here the truncation is in the reader's own terminal.
 Both are a negative claim sourced from a view that could not have shown the
 positive.
 
+### A gate that only runs in the reader's coordinate system
+
+`docs/rules/testing.md` told every generated tree to *"use the fixtures in
+`tests/fixtures.py`"*. No tier has ever shipped that file. A prescription, in a
+rules file, naming a helper the reader does not have — present since the
+template first existed, found by stash.flow from an adopted tree.
+
+Three gates were in position and **each excluded it by construction**, which is
+the part worth keeping. `test_docs_name_live_code.py` asks whether a doc names a
+callable this tree once defined and no longer does, put to `git log`; a file
+never defined is outside that question, and it is outside it because of the
+decision that makes the gate allowlist-free. Its docstring argues that "every
+backticked thing must resolve" has a false-positive rate that makes it useless —
+which is true of **callables**, and got applied to paths by adjacency.
+`check_source_doc_refs.py` runs source → doc; this is the other direction.
+`check_doc_links.py` reads markdown links; this is a bare backticked path.
+
+The measurement decided the scope, and it took three passes. A naive predicate
+found sixteen dangling paths in an `agentic` tree, of which seven were the
+*predicate's* error — `docs/TODO/README.md` says `../implementations/`, correct
+and unresolvable against the repo root — so paths resolve against the root or
+the citing document's directory. Of the nine left, five were about notation
+rather than code: a git ref (`origin/develop`), an example filename in a skill,
+a report a job will write, two directories the docs rules say to create on
+demand. Restricting to source and config extensions removed all five at once and
+kept the defect, because a document naming a document is usually naming one that
+does not exist *yet* and a `.py` path has no such tense. Final ratio, on fresh
+trees at three tiers: 31–38 citations each, one dangling, **no exemptions**.
+
+The reason it ships in the template rather than living here is stash.flow's, and
+it generalises past this check: **the population is only checkable in the
+reader's coordinate system.** This repository's prose names shipped files the way
+a scaffold sees them — `tests/scanning.py`, not `template/core/tests/scanning.py`
+— because that is how the reader will meet them. Measured at this root the same
+question gives nine references, none dangling, and one exemption needed for a
+placeholder form; that gate was written and abandoned on those numbers. The same
+predicate in a generated tree covers 38 and needs none. A check can be worth
+building at one end of a boundary and not the other, and the coordinate system is
+what decides.
+
 ### The defect that lives in what two files jointly imply
 
 Both of the corrections above were the same shape, which stash.flow named after
