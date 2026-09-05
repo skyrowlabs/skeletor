@@ -1683,6 +1683,63 @@ both directions: a wrapper answering correctly from its own root was always
 green and proves nothing, and a gate running only the cross-tree invocation
 would be satisfied by a wrapper too broken to start.
 
+### Two manifest bugs, opposite signs, one line
+
+They arrived a day apart, from different repositories, with different symptoms,
+and everybody involved — me included — treated them as two items.
+
+**Under-record.** A second `--force` drops four files from the manifest.
+`regen.py`'s outputs are shipped by no overlay, so they enter only by changing
+across `post_copy_steps`; on the second run they already exist with identical
+bytes, regen no-ops, and they leave silently. Measured 126 → 122 into a tree
+skeletor itself had just made, `--agent none`, no adopter content anywhere. The
+absolutes are config-dependent and the file set is not: it is always
+`docs/TODO/README.md`, `docs/implementations/README.md`, `docs/todo_index.json`,
+`docs/implementation_index.json`.
+
+**Over-record.** `add_frontmatter.py` stamps lifecycle frontmatter onto an
+adopter's own plans in `docs/TODO/`, which is its job. Their hashes move across
+the same two snapshots, so documents no render can produce get recorded as
+skeletor's. mind.head measured 124 recorded against a true 105, and every later
+upgrade refused on a *wrong hash* — worse than the surplus-entry refusal
+proto.pilot hit, because a surplus entry can be deleted by hand and a wrong one
+cannot.
+
+Both are `produced = produced_files(written, after_copy, final)`, and the
+diagnosis that makes them one is sky.boss's:
+
+> `produced_files()` asks "did this run write it", where `cross_check` asks
+> "does the base render produce it", and an idempotent generator is exactly
+> where those two questions diverge.
+
+The manifest's question is `cross_check`'s. On a populated target the base
+render is already standing there — `pristine_post_copy` runs the post-copy
+steps against the render alone, precisely so the recorded *hashes* describe
+something reproducible — and it was being consulted for the values while the
+*membership* still came from a walk of the real tree. So `pristine` decides
+membership too, and both signs go at once: it is neither too small on the first
+count nor too large on the second, by construction rather than by correction.
+For an empty target it is `{}` and cannot be consulted, and there the tree *is*
+the render, so the old computation is exact.
+
+`populated_tree_gate` already compared a `--force` manifest against an
+empty-directory one and could see neither. Its populated tree is decoys, and its
+`--force` is a *first* one — the fixture rule again, in the place this document
+already warns about: the tree you reach for first has no skeletor history, and
+the entire defect is about what the second run believes it did. `rescaffold_gate`
+scaffolds twice into one tree with a plan written in between, and its plant
+turns all three assertions red, the independent upgrade reading included.
+
+Worth keeping about the process rather than the code: the first mechanism
+offered for the under-record was the over-record's, reached by a longer road —
+an adopter writing plans between two runs. It was plausible, it was endorsed by
+more than one reader, and it was wrong; the run that falsified it took four
+commands. mind.head stated the risk before either was touched — *if you fix the
+plausible common cause and it is two causes, you will fix one and believe you
+fixed two* — and the answer turned out to be the other way round, which no
+amount of reading would have settled. Two bugs, one line, established by
+reproducing both in a single tree.
+
 ### A guard asking a broader question than it needed refused every adopter
 
 `bin/skeletor-upgrade` renders a tree's base from this checkout, so it refuses
