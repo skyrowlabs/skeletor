@@ -1797,6 +1797,53 @@ resolver now. And `AGENTS.md`'s Rule 14 stated the path in prose, which
 Python. The rule forbidding a second definition of the path contained one; it
 names `state_dir()` and tells the reader to ask it.
 
+### The scaffold's last word was an instruction to run the thing it had broken
+
+`--force` into a repository somebody already works in — which `AGENTS.md` calls
+*the usual case* — left all 105 rendered files **untracked**, and three of the
+tests it had just shipped were red on arrival:
+
+```
+FAILED tests/test_docs_name_real_paths.py::test_the_scan_finds_the_citations
+FAILED tests/test_setup_blocks_agree.py::test_the_scan_finds_blocks_to_compare
+FAILED tests/test_setup_blocks_agree.py::test_the_shared_prefix_has_not_shrunk
+```
+
+Nothing is wrong with those tests. `tests/repo_files.py` enumerates with `git
+ls-files` deliberately — a walk reads `.venv/.../pyright/dist/README.md` and
+makes the verdict depend on what somebody's dependency tree happens to ship — so
+in an untracked render the scanners find nothing and their empty-scope guards
+fire, which is those guards working. `git add -A` in the tree turns three
+failures into six passes, so the whole defect is one command.
+
+The closing advice ends with `./<cli> check pre-push`. **The tool's last word
+was an instruction to run the command it had just broken** — the same family as
+the `--ported` sentence, where the message and the state disagree and the
+message is the one the user acts on.
+
+The fix stages what the scaffolder **produced**, and never commits: the commit
+is the adopter's to make, the printed advice already says to read the diff
+first, and staging is simply what makes `ls-files` answer. `git add -A` would
+have been wrong in a way worth naming — it sweeps the user's own unstaged work
+into a changeset labelled as skeletor's. The manifest already holds exactly the
+right set. Files the adopter's own `.gitignore` excludes are reported rather
+than forced in, because a template file invisible to every check that asks git
+what exists is worth one line of output.
+
+It survived four tags, and the reason is a near miss rather than neglect.
+`--dry-run` shipped in `v0.9.0` and *looks* like it addressed this. It does not,
+and node-zero drew the line: that flag is about **collisions at the moment of
+writing**; this is about the render being **untracked afterwards**. Two moments
+in one command, and the first one landing made the second look handled.
+
+`adopted_repo_gate` is the first gate here to scaffold into an actual
+repository, which is why nothing caught it: every other tree is generated into a
+directory with no `.git`, where the scaffolder inits and commits and the
+question cannot arise. Its second assertion is the load-bearing one — unstage,
+and the same suites must go **red**. Without it the gate would pass on a tree
+that was green for some other reason and would keep passing if the staging were
+deleted.
+
 ### A formatter is a second author with commit rights and no changelog
 
 mind.head's only conflict taking `v0.9.0` was **one blank line** between two

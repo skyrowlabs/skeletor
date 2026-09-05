@@ -949,6 +949,55 @@ def main() -> int:
         print("   `skeletor-upgrade` three-way merges it — a file you kept is a standing")
         print("   merge point, not a one-off.")
 
+    # A scaffold into a repository somebody already works in leaves 105 files
+    # UNTRACKED, and three of the tests it just shipped are red on arrival for
+    # exactly that: `tests/repo_files.py` enumerates with `git ls-files`, on
+    # purpose — a walk reads `.venv/.../pyright/dist/README.md` and makes the
+    # verdict depend on what the dependency tree happens to ship — so in a
+    # `--force` target the scanners find nothing and their empty-scope guards
+    # fire, correctly. `git add -A` in the tree turns three failures into six
+    # passes, and the closing advice below ends with `check pre-push`, which is
+    # the command that fails. This tool's last word was an instruction to run
+    # the thing it had just broken.
+    #
+    # Staged, never committed. The commit is theirs to make and the printed
+    # advice already says to read the diff first; staging is what makes
+    # `ls-files` answer, and it is strictly less surprising than 105 loose
+    # untracked files. Only what skeletor PRODUCED — `git add -A` here would
+    # sweep up the user's own unstaged work into a changeset labelled ours.
+    #
+    # Reported by node-zero from a fresh scaffold and reproduced independently
+    # by skyrow-workspace with unrelated arguments, byte-identical failures. It
+    # survived four tags because `--dry-run` looks like it addressed this and
+    # does not: that flag is about collisions at the moment of writing, this is
+    # about the render being untracked afterwards. Two moments in one command,
+    # and the first one landing made the second look handled.
+    if populated and (target / ".git").exists() and produced:
+        ignored = subprocess.run(
+            ["git", "check-ignore", "--", *sorted(produced)],
+            cwd=str(target), capture_output=True, text=True,
+        ).stdout.split()
+        stageable = sorted(set(produced) - set(ignored))
+        staged = subprocess.run(
+            ["git", "add", "--", *stageable], cwd=str(target), capture_output=True, text=True
+        ) if stageable else None
+        if staged is not None and staged.returncode == 0:
+            print()
+            print(f"→  staged {len(stageable)} file(s) skeletor wrote. Nothing was committed.")
+            print("   Untracked, the suites that enumerate with `git ls-files` find nothing and")
+            print("   their empty-scope guards fire — `check pre-push` is red on a tree nobody")
+            print("   has touched. Unstage with `git reset` if you want them separated.")
+        elif staged is not None:
+            print()
+            print("⚠️  could not stage what was written:")
+            print("   " + (staged.stderr or staged.stdout).strip().replace("\n", "\n   "))
+        if ignored:
+            print()
+            print(f"⚠️  {len(ignored)} file(s) skeletor wrote are excluded by your .gitignore:")
+            for rel in sorted(ignored):
+                print(f"   · {rel}")
+            print("   They are on disk and invisible to every check that asks git what exists.")
+
     committed = False
     if not args.no_git and not (target / ".git").exists():
         subprocess.run(["git", "init", "-q", "-b", args.base_branch], cwd=str(target), check=False)

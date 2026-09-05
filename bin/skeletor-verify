@@ -3128,6 +3128,91 @@ def author_leak_gate(tier: str, workdir: Path) -> Result:
     )
 
 
+def adopted_repo_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """A scaffold into a repository somebody already works in is not red on arrival.
+
+    Every other tree here is scaffolded into a directory with no `.git`, where
+    the scaffolder inits and commits — so the tree is tracked by the time
+    anything reads it. `--force` into an existing repository is the case
+    `AGENTS.md` calls *the usual case*, and there the scaffolder deliberately
+    does not commit: the commit is the adopter's to make.
+
+    The render was then left **untracked**, and three of the tests it had just
+    shipped were red on arrival. `tests/repo_files.py` enumerates with `git
+    ls-files` on purpose — a walk reads `.venv/.../pyright/dist/README.md` and
+    makes the verdict depend on what the dependency tree happens to ship — so
+    the scanners found nothing and their empty-scope guards fired, correctly.
+    The closing advice ends with `check pre-push`, which is the command that
+    fails: the tool's last word was an instruction to run the thing it had just
+    broken.
+
+    It survived four tags partly because `--dry-run` looks like it addressed
+    this. It does not, and the distinction is node-zero's: that flag is about
+    **collisions at the moment of writing**; this is about the render being
+    **untracked afterwards**. Two moments in one command, and the first one
+    landing made the second look handled.
+
+    The plant is the second assertion and it is what makes the first mean
+    anything: unstage, and the same suites must go red. Otherwise this gate
+    passes on a tree that was green for some other reason and would keep passing
+    if the staging were deleted.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    target = workdir / "adopted-repo"
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True)
+    run(["git", "init", "-q", "-b", "main", "."], cwd=target)
+    (target / "README.md").write_text("# Theirs\n\nfrom before.\n", encoding="utf-8")
+    run(["git", "-C", str(target), "add", "-A"], cwd=target)
+    run(["git", "-C", str(target), "commit", "-q", "-m", "pre-existing"], cwd=target)
+
+    code, output = run(
+        [sys.executable, str(SKELETOR / "bin" / "skeletor-new"), str(target),
+         "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--language", "python", "--force"],
+        cwd=SKELETOR,
+    )
+    if code != 0:
+        return [Result("adopted repo: the scaffold failed", False, time.time() - started, output)]
+
+    produced = set(json.loads((target / scaffolder.MANIFEST_NAME).read_text(encoding="utf-8"))["files"])
+    listed = set(run(["git", "-C", str(target), "ls-files"], cwd=target)[1].split())
+    untracked = sorted(produced - listed)
+
+    results = [
+        Result(
+            f"adopted repo: all {len(produced)} produced file(s) are tracked",
+            not untracked,
+            time.time() - started,
+            "\n".join(untracked[:20]) or "",
+        )
+    ]
+
+    # The suite the enumeration feeds, run for real. `-p no:cacheprovider` so a
+    # `.pytest_cache` does not appear in the tree between the two runs below and
+    # make the plant's difference ambiguous.
+    suite = ["-m", "pytest", "-q", "-p", "no:cacheprovider",
+             "tests/test_docs_name_real_paths.py", "tests/test_setup_blocks_agree.py"]
+    green, green_out = run([str(venv_python), *suite], cwd=target)
+    results.append(
+        Result("adopted repo: the suites that enumerate through git pass", green == 0, 0.0, green_out[-1500:])
+    )
+
+    run(["git", "-C", str(target), "reset", "-q"], cwd=target)
+    red, red_out = run([str(venv_python), *suite], cwd=target)
+    results.append(
+        Result(
+            "adopted repo: unstaged, those same suites go red",
+            red != 0,
+            0.0,
+            "They passed with the render unstaged, so staging is not what makes them green and "
+            f"this gate proves nothing:\n{red_out[-1000:]}" if red == 0 else "",
+        )
+    )
+    return results
+
+
 def normalise_gate(workdir: Path) -> List[Result]:
     """A conflict written by the adopter's own formatter is resolved by it.
 
@@ -3967,6 +4052,10 @@ def main() -> int:
         # Beside `populated_tree_gate`, and after it, because it is the case
         # that gate's fixture cannot reach: a `--force` over a tree skeletor
         # itself made, rather than over decoys.
+        for gate in adopted_repo_gate(fullest, workdir, venv_python):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
         for gate in rescaffold_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
