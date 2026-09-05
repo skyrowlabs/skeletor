@@ -79,6 +79,7 @@ bin/skeletor-maintain --agent
 # Carry a template change into an already-scaffolded tree
 bin/skeletor-upgrade ../target --dry-run
 bin/skeletor-upgrade ../target
+bin/skeletor-upgrade ../target --ported   # I resolved the conflicts; advance the base
 ```
 
 There is no test suite for skeletor itself. **The scaffold IS the test**: a
@@ -421,6 +422,31 @@ so what is there afterwards is this run and nothing else. Clearing is the only
 deletion this tool performs, so it is bounded to the two suffixes it writes —
 a file of the user's in that directory survives — and the count is reported
 rather than silent.
+
+**A run that leaves anything pending does not advance the base.** It used to
+copy the head render's manifest verbatim whenever anything applied, which
+recorded the new render's hash for a file the new render had never reached — so
+the next run took that change as already in the base and never offered it again.
+stash.flow hit it live: a conflict on `AGENTS.md`, four files applied, the ref
+moved, and the second run answering "already current — nothing to carry over"
+about a change that had never been made. The manifest is a single-version
+snapshot by construction (`cross_check` is a bijection with the render at
+`skeletor_ref`), so a partially-applied upgrade cannot be described in it at all;
+holding it back is the only sound answer. The applied files then read as edited
+and merge rather than replace, which is clean, because theirs and ours already
+share those hunks.
+
+`--ported` is the escape that state requires, and it ships in the same change
+because the fix is what creates the need: a permanently diverged file would
+otherwise hold a tree's base at the last fully-applied release forever. It is the
+user asserting the tree is now at this version. A flag rather than an inference,
+because nothing can verify a hand-port — a three-way merge cannot tell "already
+applied" from "never applied" — so the tool would be guessing, and the wrong
+guess is the silent loss. The reading that a global `--ported` was *unsound* was
+right about the mechanism and wrong about the baseline: the default was already
+doing it, unnamed. `pending_ref_gate` is its gate, and needed a real version gap
+plus a real conflicting edit, which is the combination `--no-base` cannot
+manufacture and the reason this survived every release.
 
 `bin/skeletor-verify`'s `sidecar_gate` is what would have caught it, and it is
 the first thing here to execute the conflict and collision branches at all:

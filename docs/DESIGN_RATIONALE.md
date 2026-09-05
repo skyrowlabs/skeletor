@@ -1202,6 +1202,110 @@ got** — a control expected green and a plant expected red cannot both be
 satisfied by an empty run.
 
 
+### The manifest advanced past a file it had just refused to touch
+
+A run that applied some files and conflicted on others copied the head render's
+manifest **verbatim**, which recorded the new render's hash for a file the new
+render had never reached. The next run then took that change as already in the
+base, the base→ours diff no longer contained it, and it was never offered again.
+Silent, permanent, and green in every gate.
+
+stash.flow hit it on a real upgrade — a conflict on `AGENTS.md`, four other files
+applied, `.skeletor.json` → v0.6.0 — and ported the patch by hand because they
+had already read the sidecar, which is luck rather than process: `tmp/` is
+gitignored and the next real run clears it before writing. Reproduced here at
+once, and the second run's answer is the whole report:
+
+    ✅ already current — nothing to carry over
+
+about a change that had never been made.
+
+The reason it is not a small bug is the manifest's shape. `cross_check` requires
+its hashes to be **exactly** the render at `skeletor_ref` — that bijection is
+what lets the offline fallback classify at all — so the manifest is a
+single-version snapshot, and a partially-applied upgrade leaves a tree that is
+not at a single version. There is no way to record "these files moved and that
+one did not" in it. Selectively keeping the old hash for the conflicted file
+fails the bijection and every later run refuses.
+
+So the fix is to hold the whole thing back: **a run that leaves anything pending
+does not advance the base.** That is sound in the direction that matters. The
+applied files then differ from their recorded hash, so the next run reads them as
+edited and merges rather than replaces — and that merge is clean, because theirs
+and ours already share exactly the hunks that were applied. A superfluous merge
+is the cheap error; a lost template change is the expensive one.
+
+**The fix creates the state that needs `--ported`**, which is why they ship
+together rather than in sequence. A tree whose divergence is permanent — an
+adopter's `AGENTS.md` they have no intention of surrendering — would otherwise
+hold its base at the last fully-applied release forever, re-offering the same
+conflict at every tag and growing the merge span with each one. `--ported` is the
+user asserting the tree is now at this version: they took our change, or they
+took their own and mean it.
+
+It has to be a flag rather than an inference, and the reason is worth stating
+because it looked at first like a reason not to build it at all. Nothing can
+verify a hand-port: a three-way merge cannot distinguish "already applied" from
+"never applied", since re-merging an applied hunk conflicts exactly like an
+unapplied one. So the tool would be guessing, and the wrong guess is precisely
+the silent loss the default now prevents. Named, with every file it trusts listed
+and the consequence spelled out, it is a decision. Inferred, it is the same bug
+wearing a flag.
+
+The earlier reading here was that a global `--ported` was *unsound* because one
+un-ported file would lose its change. That was right about the mechanism and
+wrong about the baseline: the default path was already doing exactly that, with
+no flag and no assertion. stash.flow's framing is the correct one — **the
+soundness condition was not a new requirement the flag introduced, it was an
+existing invariant the default already violated**, and the flag is the first
+place it can be said out loud.
+
+Two smaller things came with it. The conflict report now says the sidecars are
+the only copy and that the next real run clears them, which converts a silent
+expiry into a decision — stash.flow's tell was that a *stale* sidecar already
+gets a warning while one about to be overwritten unapplied got none, and the two
+look identical on disk. And that paragraph is emitted in two versions, because
+only one is true on any run: under `--ported` the base has already moved past
+them, so re-running will not regenerate them. Printing both would have been this
+document's own invariant 7, in the commit that fixes an instance of it.
+
+### Every gate ran against a tree where the branch could not be reached
+
+`sidecar_gate` already said the conflict and collision branches are unreachable
+from a fresh scaffold, and manufactured them with `--no-base`. That flag cannot
+manufacture *this* one: under it a fresh scaffold matches every recorded hash, so
+nothing applies, and the manifest only moves when something applied **and**
+something did not. The combination needs a real version gap and a real
+conflicting edit, and that is why the bug lived through every release that had
+these gates.
+
+`pending_ref_gate` builds it. Three things about how, each of which was a wrong
+first draft:
+
+**The plant is derived, not quoted.** The same configuration is scaffolded at the
+tag and at HEAD, and the first line where a file's two renders differ is the line
+the template is about to change; the tree gets a third value there. A quotation
+from one release would go stale at the next.
+
+**Both trees take the same final path component.** `--slug`, `--cli` and
+`--env-prefix` all default from the target directory name, so scaffolding into
+`pending-head/` and `pending-scaffold-0/` made the first differing line
+`name: pending-head-documenter` — a difference caused by this gate's own workdir
+layout rather than by the template. It planted there for all 38 tags and
+conflicted against an artefact. *The example you reach for first cannot
+discriminate*, arriving in a derivation rather than a fixture.
+
+**The plant is committed before the upgrade runs.** Otherwise the tree is dirty
+and `refuse_a_dirty_tree` declines, so `conflicted=False, applied=False` on every
+candidate — a gate red for a reason unrelated to its subject. Both of these were
+found by reading the attempt log the gate prints, which is the only reason the
+first green would not have been believed: it names the file and line it planted
+in, so a plant in the wrong place is visible rather than merely unlucky.
+
+Planted the original bug back and required red. Both assertions fire — the ref
+advances, and the second run says "already current".
+
+
 ---
 
 ## CI, cost, and the draft-PR discipline

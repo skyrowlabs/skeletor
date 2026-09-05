@@ -2030,6 +2030,168 @@ def upgrade_applied(tree: Path, manifest_name: str) -> List[str]:
     return [path for path in paths if path != manifest_name and not path.startswith("tmp/")]
 
 
+def pending_ref_gate(workdir: Path) -> List[Result]:
+    """A run that leaves a conflict does not advance the manifest past it.
+
+    The manifest is a single-version snapshot — `cross_check` requires its
+    hashes to be exactly the render at `skeletor_ref` — and a run that applies
+    some files while refusing others leaves a tree that is not at one version.
+    Copying the head manifest regardless recorded the head render's hash for a
+    file the head render never reached, so the next run took that change as
+    already in the base, the base→ours diff no longer contained it, and it was
+    **never offered again**. Silent, permanent, and green in every gate.
+
+    stash.flow reported it from a real upgrade and this gate reproduces it: a
+    conflict on one file, four others applied, the ref advanced, and the second
+    run answering "already current — nothing to carry over" about a change that
+    had never been made. They had ported theirs by hand, from sidecars they
+    happened to have already read — which is luck, not process, since `tmp/` is
+    gitignored and the next real run clears it.
+
+    Every other upgrade gate here runs against a fresh scaffold, where the
+    answer is "already current" and the conflict branch is never reached;
+    `sidecar_gate` manufactures the skew with `--no-base`, which cannot produce
+    this one, because under that flag a fresh scaffold matches every recorded
+    hash and nothing applies. **The manifest only moves when something applied
+    AND something did not** — so this needs a real version gap and a real
+    conflicting edit, and that combination is why the bug lived.
+
+    The plant is derived rather than written: the same configuration is
+    scaffolded at the tag and at HEAD, the first line that differs between a
+    file's two renders is the line the template is about to change, and the tree
+    gets a third value there. That is a conflict by construction at whatever the
+    two versions happen to disagree about, instead of a quotation from one
+    release that goes stale at the next.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    tier = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
+    language = max(scaffolder.LANGUAGE_OVERLAYS, key=lambda name: len(scaffolder.LANGUAGE_OVERLAYS[name].split(",")))
+
+    tags = run(["git", "-C", str(SKELETOR), "tag", "--sort=-creatordate"], cwd=SKELETOR)[1].split()
+    candidates = [
+        tag
+        for tag in tags
+        if run(["git", "-C", str(SKELETOR), "diff", "--quiet", tag, "HEAD", "--", "template/"], cwd=SKELETOR)[0] != 0
+    ]
+    if not candidates:
+        why = "no tags are visible at all — a shallow clone?" if not tags else "no tag differs from HEAD under template/"
+        return [Result(f"pending ref: {why}", False, time.time() - started, f"{len(tags)} tag(s) visible")]
+
+    clean = clean_skeletor(workdir)
+    # Both trees take the SAME final path component, because `--slug`,
+    # `--cli` and `--env-prefix` all default from it — and the plant below is
+    # derived by diffing the two renders. Scaffolded into differently-named
+    # directories, the first differing line is `name: <dir>-documenter`, which
+    # differs for a reason that has nothing to do with the template version, and
+    # a plant there conflicts against an artefact of this gate's own workdir
+    # layout. The convenient site could not discriminate; that was measured, by
+    # watching it pick exactly that line for all 38 tags.
+    head_tree = workdir / "pending-head" / "probe"
+    if not head_tree.exists():
+        run(
+            [sys.executable, str(clean / "bin" / "skeletor-new"), str(head_tree),
+             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
+             "--tier", tier, "--language", language, "--force"],
+            cwd=SKELETOR,
+        )
+
+    attempts: List[str] = []
+    for index, tag in enumerate(candidates):
+        old_checkout = workdir / f"pending-base-{index}"
+        code, output = run(
+            ["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(old_checkout), tag], cwd=SKELETOR
+        )
+        if code != 0:
+            return [Result(f"pending ref: check out {tag}", False, time.time() - started, output)]
+        try:
+            target = workdir / f"pending-scaffold-{index}" / "probe"
+            run(
+                [sys.executable, str(old_checkout / "bin" / "skeletor-new"), str(target),
+                 "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
+                 "--tier", tier, "--language", language, "--force"],
+                cwd=SKELETOR,
+            )
+
+            # Derive the plant: a file both versions ship whose text differs.
+            planted = None
+            for rel in sorted(p.relative_to(target).as_posix() for p in target.rglob("*.md")):
+                old_file, new_file = target / rel, head_tree / rel
+                if not new_file.exists():
+                    continue
+                old_lines = old_file.read_text(encoding="utf-8").splitlines(keepends=True)
+                new_lines = new_file.read_text(encoding="utf-8").splitlines(keepends=True)
+                differing = [
+                    i for i in range(min(len(old_lines), len(new_lines)))
+                    if old_lines[i] != new_lines[i] and old_lines[i].strip()
+                ]
+                if not differing:
+                    continue
+                at = differing[0]
+                old_lines[at] = "A THIRD VALUE, BELONGING TO NEITHER RENDER\n"
+                old_file.write_text("".join(old_lines), encoding="utf-8")
+                planted = (rel, at)
+                break
+            if planted is None:
+                attempts.append(f"{tag}: no shipped markdown file differs between the two renders")
+                continue
+
+            # Committed, or the upgrade refuses the tree as dirty and every
+            # assertion below is about a run that never happened. The first
+            # draft of this gate was red for exactly that, on all 38 tags.
+            run(["git", "-C", str(target), "add", "-A"], cwd=target)
+            run(["git", "-C", str(target), "commit", "-q", "-m", "planted edit"], cwd=target)
+
+            manifest = target / scaffolder.MANIFEST_NAME
+            before = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
+            _, first = run([sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target)], cwd=target)
+            after = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
+            _, second = run(
+                [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--dry-run"], cwd=target
+            )
+        finally:
+            run(["git", "-C", str(SKELETOR), "worktree", "remove", "--force", str(old_checkout)], cwd=SKELETOR)
+
+        rel, at = planted
+        conflicted = "LEFT ALONE" in first
+        applied = "added" in first or "updated" in first
+        attempts.append(f"{tag}: planted {rel}:{at + 1}, conflicted={conflicted}, applied={applied}")
+        if not (conflicted and applied):
+            # Neither outcome is this gate's subject: with nothing applied the
+            # manifest was never going to move, and with nothing conflicted
+            # there is nothing it could move past. Try the next tag.
+            continue
+
+        problems = []
+        if before != after:
+            problems.append(
+                f"the manifest advanced {before} → {after} while {rel} was left alone, so the "
+                "template's change to it is now recorded as this tree's base"
+            )
+        if "already current" in second:
+            problems.append(
+                f"the second run reports 'already current' — the pending change to {rel} was "
+                "silently dropped rather than re-offered"
+            )
+        return [
+            Result(
+                f"pending ref: a conflict holds the manifest at {before}",
+                not problems,
+                time.time() - started,
+                "\n".join(problems) or f"tried: {'; '.join(attempts)}",
+            )
+        ]
+
+    return [
+        Result(
+            "pending ref: no tagged release produces both an applied file and a conflict",
+            False,
+            time.time() - started,
+            "\n".join(attempts),
+        )
+    ]
+
+
 def dirty_ref_gate(workdir: Path) -> List[Result]:
     """A `-dirty` scaffold ref clears on the first upgrade that applies anything.
 
@@ -2686,6 +2848,9 @@ def main() -> int:
             results.append(gate)
 
         for gate in dirty_ref_gate(workdir):
+            results.append(gate)
+
+        for gate in pending_ref_gate(workdir):
             results.append(gate)
 
         for gate in entangled_gate(workdir):

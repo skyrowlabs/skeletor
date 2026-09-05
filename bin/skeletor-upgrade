@@ -608,6 +608,13 @@ def main() -> int:
         help="rewrite the manifest's `files` map from the base render, then stop. "
         "For a manifest written by a version of skeletor that recorded the wrong thing.",
     )
+    parser.add_argument(
+        "--ported",
+        action="store_true",
+        help="assert every conflict and collision is resolved as you want it, and advance "
+        "the recorded base to this skeletor. Without it, a run that leaves anything "
+        "pending holds the base where it is.",
+    )
     args = parser.parse_args()
 
     target = Path(args.target).expanduser().resolve()
@@ -891,6 +898,7 @@ def main() -> int:
                 dropped.append(rel)
 
         # The generated docs are rebuilt, never merged.
+        pending = conflicted + collided
         if not args.dry_run and (added or updated or merged):
             regen = target / "scripts" / "docs" / "regen.py"
             if regen.exists():
@@ -901,7 +909,58 @@ def main() -> int:
             # neither the old render nor the new one, so hashing the tree would
             # record it as pristine and the next run would overwrite the merge.
             # Recording the render's hash makes it read as edited, which it is.
-            shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
+            #
+            # **But not while anything is still pending.** The manifest is a
+            # single-version snapshot — `cross_check` requires its hashes to be
+            # exactly the render at `skeletor_ref` — and a run that applied some
+            # files and refused others leaves a tree that is not at one version.
+            # Copying the head manifest anyway records the head render's hash
+            # for a file the head render never reached, so the next run takes
+            # that change as already in the base, the base→ours diff no longer
+            # contains it, and it is never offered again. Reported by
+            # stash.flow, reproduced here: conflict on AGENTS.md, four other
+            # files applied, ref advanced, and the second run said "already
+            # current — nothing to carry over" for a change that had never been
+            # made. Silent, permanent, and green.
+            #
+            # Holding the ref back is sound in the direction that matters. The
+            # applied files now differ from their recorded hash, so the next run
+            # reads them as edited and merges rather than replaces — and that
+            # merge is clean, because theirs and ours already share exactly the
+            # hunks that were applied. A superfluous merge is the cheap error
+            # here; a lost template change is the expensive one.
+            if pending and not args.ported:
+                say("⏸️ ", f"{MANIFEST_NAME} left at {ref} — {len(pending)} file(s) still pending")
+                detail("Advancing it would record the new render as this tree's base for files")
+                detail("the new render never reached, and their changes would stop being offered.")
+                detail("Port them from tmp/upgrade/, then run this again to advance the base.")
+                detail("Until then the files that DID apply read as edited, which is what they are.")
+                detail()
+                detail("If your version of these IS the resolution — an adopter's file the")
+                detail("template also ships, and you are not taking ours — say so with --ported")
+                detail("and the base advances. That is an assertion nothing can check for you.")
+            else:
+                # `--ported` is the user asserting the tree is now at this
+                # version: they took our change, or they took their own and mean
+                # it. Either way the base is head from here.
+                #
+                # It has to be a flag rather than a default because nothing can
+                # verify a hand-port. A three-way merge cannot tell "already
+                # applied" from "never applied" — re-merging an applied hunk
+                # conflicts exactly like an unapplied one — so the tool would be
+                # guessing, and the wrong guess is the silent loss this whole
+                # branch exists to stop. Named and listed, it is a decision;
+                # inferred, it is the bug wearing a flag.
+                if pending:
+                    say("→", f"--ported: taking {len(pending)} unresolved file(s) on trust")
+                    for rel in pending:
+                        item(rel)
+                    detail()
+                    detail("The base advances to this skeletor. If any of these was NOT resolved,")
+                    detail("its template change is now part of your base and will not be offered")
+                    detail("again — that is what the flag asserts, and it cannot be undone by")
+                    detail("re-running.")
+                shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
 
         # One call, two renderings. It was computed separately for the JSON and
         # for the human report — two call sites for one answer, which is the
@@ -968,6 +1027,30 @@ def main() -> int:
                 detail("A real base→ours patch needs the base text, which this run had no way to get.")
             else:
                 detail("tmp/upgrade/<path>.patch — port it by hand.")
+            if not args.dry_run:
+                # The window in which this is recoverable closes at the next
+                # run, and nothing used to say so at the moment it opened. A
+                # sidecar is the only copy — tmp/ is gitignored — and a real run
+                # clears the directory before writing its own. So the output for
+                # a tree where somebody ports these in the next minute was
+                # identical to the output for a tree that loses them. That a
+                # STALE sidecar gets a warning while an unapplied one about to
+                # be overwritten got none was stash.flow's tell, and it is the
+                # right one: the two look the same on disk.
+                #
+                # The two halves are said separately because only one of them is
+                # true on any given run, and printing both would be this
+                # repository's own invariant 7 — a sentence about a mechanism,
+                # emitted on the path where the mechanism is not operating.
+                detail()
+                detail("These patches are the only copy. tmp/ is not tracked, and the next real")
+                detail("run clears this directory before writing its own.")
+                if args.ported:
+                    detail("--ported already advanced the base past them, so re-running will NOT")
+                    detail("regenerate these: what is in tmp/upgrade/ now is the last copy there is.")
+                else:
+                    detail("Port them before then, or re-run to regenerate them. The base stays")
+                    detail("where it is until they are gone, so nothing expires while you decide.")
 
         if collided:
             say("❌", f"{len(collided)} file(s) you already had where the template now ships one")
