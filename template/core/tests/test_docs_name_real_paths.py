@@ -36,6 +36,22 @@ document's directory. `docs/TODO/README.md` says `../implementations/`, which is
 correct and dangles against the root; seven of the first sixteen findings were
 that, and they were the predicate's error rather than the tree's.
 
+## What it enumerates, and what it refuses to
+
+Tracked files, never a walk of the disk. `rglob` reads `.venv/` and
+`.pytest_cache/` — six documents from other people's packages in stash.flow's
+tree — and the verdict is then **machine-dependent**, which is worse than a
+false positive because the second person to hit it cannot reproduce the first
+person's red. It passed here for a reason no better than luck: pyright ships a
+large bundled README that happens to contain no path-shaped inline code.
+
+Narrative stages are out by role, from `scripts.paths.NARRATIVE`. A plan saying
+*"move `scripts/old_check.py` into `scripts/checks/`"* names a path that must
+not exist once the plan is done, and a resolve-check fires on it for being a
+plan. That set lives in `scripts/paths.py` rather than here because the roles
+are the part a generator cannot know: this template ships `docs/TODO/` and can
+name it; it cannot know an adopter froze their concept work in `explore/`.
+
 ## Why this ships instead of living in the generator
 
 skeletor cannot run it. Its own prose names these files the way a *scaffold*
@@ -61,6 +77,8 @@ pytestmark = [pytest.mark.unit]
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from repo_files import reference_docs  # noqa: E402
+
 from scanning import scanned  # noqa: E402
 from scripts.paths import PROJECT_ROOT  # noqa: E402
 
@@ -76,21 +94,17 @@ _PATHISH = re.compile(r"^[\w.][\w./-]*/[\w./-]+$")
 _CODE = (".py", ".yml", ".yaml", ".json", ".toml", ".cfg", ".ini", ".sh", ".txt")
 
 
-def docs() -> list:
-    """Every markdown file in the tree, plus the agent guide at the root.
-
-    `.claude/` and `.github/` included on purpose: a rule file that ships to an
-    agent is read more often than `docs/`, and nothing else here looks at it.
-    """
-    found = {path for path in PROJECT_ROOT.rglob("*.md") if ".git/" not in str(path)}
-    found |= {path for path in PROJECT_ROOT.glob("*.md")}
-    return sorted(found)
-
-
 def cited_paths() -> dict:
-    """`{cited path: the documents citing it}` for source and config paths."""
+    """`{cited path: the documents citing it}` for source and config paths.
+
+    Enumeration and scoping both come from `tests/repo_files.py` — tracked
+    files only, narrative stages excluded by role. The first version of this
+    gate walked the tree with `rglob` and had neither, which is the same slip
+    twice: the parts of `test_docs_name_live_code.py` that were argued in prose
+    transferred, and the parts that were *implemented* did not.
+    """
     found = {}
-    for doc in docs():
+    for doc in reference_docs():
         for match in _BACKTICKED.finditer(doc.read_text(encoding="utf-8")):
             token = match.group(1).strip()
             if _PATHISH.match(token) and token.endswith(_CODE):

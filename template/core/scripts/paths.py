@@ -63,6 +63,25 @@ IMPL_DIR = DOCS_DIR / "implementations"
 REGULAR_DIR = DOCS_DIR / "reports" / "regular"
 RELEASES_DIR = DOCS_DIR / "reports" / "releases"
 
+#: Documents whose job is to describe a state **other than the present one** —
+#: a plan for work not yet done, a report frozen at a release, research about a
+#: codebase that has since moved. Naming a symbol or a file that no longer
+#: exists is what those sentences are FOR, so every check that asks "does this
+#: still resolve?" excludes them by role.
+#:
+#: It lives here, and not in the checks, because **the roles are the part a
+#: generator cannot know.** A scaffold ships `docs/TODO/` and can enumerate it;
+#: it cannot know that your repository froze its concept work in `explore/`.
+#: Extending this tuple is a one-line change to a file you own; the alternative
+#: was every adopter editing a shipped test, which is a divergence the upgrade's
+#: three-way merge then carries forever. stash.flow named the rule after their
+#: `explore/` — 19 of their 44 tracked documents — reddened a gate that had no
+#: role exclusion at all.
+#:
+#: `reports` is taken at its parent so the regular, release and occasional
+#: editions are covered without naming three constants.
+NARRATIVE = (TODO_DIR, IMPL_DIR, DOCS_DIR / "reports")
+
 # ── Code and configuration ───────────────────────────────────────────────────
 CLI_DIR = PROJECT_ROOT / "cli"
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"

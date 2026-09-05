@@ -848,6 +848,38 @@ predicate in a generated tree covers 38 and needs none. A check can be worth
 building at one end of a boundary and not the other, and the coordinate system is
 what decides.
 
+That gate then shipped with two defects of its own, both found by stash.flow on
+the first adopted tree, and both the same slip: **the parts of the sibling gate
+that were argued in its docstring transferred, and the parts that were
+implemented did not.** `test_docs_name_live_code.py` scopes by `git ls-files`
+and excludes narrative stages by role. The new one walked the disk with `rglob`
+and had no role exclusion at all — while its docstring cited that sibling three
+times.
+
+The `rglob` half is the worse one and not for the obvious reason. It read
+`.venv/lib/.../pyright/dist/README.md` and `.pytest_cache/README.md` — six
+documents from other people's packages, which `.gitignore` already declares are
+not the repository's claim. The verdict is therefore **machine-dependent**: it
+turns on what the dependency tree happens to ship, so one person's red cannot be
+reproduced by the next. That is worse than a false positive everybody sees. It
+passed here for a reason no better than luck — pyright's bundled README is a
+large document that happens to contain no path-shaped inline code.
+
+The role half produced the reusable rule, and it is stash.flow's: **a template
+gate that scans by role needs the role set to live in a file the adopter owns,
+because the roles are the part the generator cannot know.** This template ships
+`docs/TODO/` and can enumerate it; it cannot know that an adopter froze their
+concept work in `explore/` — 19 of their 44 tracked documents, upstream of code,
+describing a codebase that has since moved. Naming files that no longer exist is
+what those documents are *for*. Had the exclusion been a constant in the test,
+every adopter with a frozen stage would carry a divergence the three-way merge
+holds forever; read from `scripts/paths.py`, it is a one-line extension to a file
+that is already theirs. `NARRATIVE` moved there, and both gates read it.
+
+Both scoping questions now have one home in `tests/repo_files.py`, which is the
+`scripts/allowlist.py` lesson arriving for the third time: the second consumer of
+a rule is where a rule that lives inside its first consumer goes wrong.
+
 ### The defect that lives in what two files jointly imply
 
 Both of the corrections above were the same shape, which stash.flow named after
