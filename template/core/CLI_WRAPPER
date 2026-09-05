@@ -37,6 +37,22 @@ unset _abs_path _entries _entry
 SCRIPT_DIR="$( cd "$( dirname "$(realpath "${BASH_SOURCE[0]}")" )" && pwd )"
 export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
+# ...and stop the *cwd* winning anyway. `python -m` prepends the current
+# directory to sys.path ahead of PYTHONPATH, so running this wrapper from
+# inside any directory that happens to contain a `cli/` package imports that
+# one instead of this tree's. The failure is silent and exit 0: the CLI comes
+# up under the other project's name, with the other project's commands, doing
+# the other project's work in this directory. Anything that writes a path —
+# generated units, config, a report header — records the wrong tree.
+#
+# Not hypothetical, and the triggering condition is ordinary: two projects
+# built from the same shell are two `cli/` packages, and one terminal in the
+# wrong directory is the whole bug. PYTHONSAFEPATH is the documented switch
+# (Python 3.11+, the env form of `-P`). An older interpreter ignores it
+# silently and the hazard stands there — the guard is the cheap half, and
+# `--python` is what decides whether you have it.
+export PYTHONSAFEPATH=1
+
 VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python"
 
 # An explicit interpreter override, for reproducing a CI result locally:

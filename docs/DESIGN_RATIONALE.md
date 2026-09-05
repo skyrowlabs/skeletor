@@ -1598,6 +1598,91 @@ now. No new ratchet on the block count, deliberately — a floor there would
 manufacture a red on precisely the trees whose divergence is correct, which is
 the previous finding arriving from the other side.
 
+### The registry that went stale exactly once, and how that was established
+
+`write_manifest` recorded fourteen flags from a hand-written list.
+`--versioning` arrived later, changed what ships, and never reached it — so
+every `--versioning tag` tree recorded arguments that re-render as a
+release-please tree. `cross_check` then refused on four wrong hashes and three
+produced-but-unrecorded files, which means those trees were **permanently
+unupgradable**, `--repair-manifest` included, since it re-derives from the same
+wrong base. Release-please trees were unaffected only because the default
+happened to match. This is Rule 2's own failure mode landing in the file that
+argues Rule 2 three functions away, in `produced_files()`.
+
+node-zero found it and proved it **differentially** rather than by inference:
+the same committed ref, rendered once with the recorded args and once with
+`--versioning tag` added — 4 mismatched and 3 unrecorded against 0 and 0, with
+all 102 hashes reproducing bit-for-bit. That distinction turned out to predict
+correctness better than agreement did on this round: three sources, reasoning
+from the mechanism, had separately concluded that a `-dirty` ref made node-zero's
+base unresolvable, and the one source that re-rendered found the opposite. The
+code they all read past says so, and records that proto.pilot had corrected the
+same point here once before.
+
+**"The list is wrong exactly once" is a measurement, not an inference**, and it
+was made because the one-instance phrasing invites the question a hand-written
+list has no reason to answer. Recomputed over the full set: 17 flags declared,
+14 recorded, 3 declared-but-not-recorded — `--force` and `--no-git`, each read
+once and neither reaching a render, and `--versioning`. So it is the only
+render-affecting flag missing, over the whole set rather than the lucky hit.
+
+The fix is to stop keeping the list. `manifest_args()` derives the record from
+`build_parser()`, so a flag is recorded by existing, and two small maps remain
+for the two things a parser cannot say: which flags do not reach a render, and
+which four record their *derived* value because they default from the target
+directory name and an upgrade re-renders into a different one.
+
+`manifest_args_gate` guards what is left, in both directions — a declared flag
+that is neither recorded nor exempt is the original bug, and an exempt name that
+is no longer a flag is an exemption nobody chose, waiting to pre-exempt whatever
+claims that name next.
+
+**Its scan proves itself differentially rather than against a floor**, and that
+came out of the round too. proto.pilot's first pass at this counted the manifest
+list by reading to the first `]` — which lands after `values["PROJECT_NAME"]` —
+got 1 of 14, and reported 16 missing flags. Their non-vacuity guard passed,
+because one is not zero. A `least=1` floor cannot tell a working scan from a
+93%-blind one; on that scan it actively certified it. So the flags are read
+twice here, out of `parser._actions` and out of the usage line the parser
+prints, and the two sets must be equal. Two readings disagreeing is a fact about
+the reading. One reading clearing a bar is a fact about the bar.
+
+All four branches were planted and required red, and the plant that mattered is
+the one that did not work first time: adding a new flag to the parser passes
+green, because the derivation records it by existing. Reaching the "declared but
+not recorded" branch takes planting the *derivation* skipping a flag — which is
+the old hand-written list, re-created. A plant that reproduces the fixed
+behaviour is not a plant.
+
+(A restore that did not land looked identical to a gate still failing, for the
+same reason and one layer down: `SourceFileLoader` caches bytecode by mtime and
+size, `[a-z]` and `[\w-]` are the same length, and both writes fell in one
+second. The cache is cleared between plants now.)
+
+### Two `cli/` packages and one terminal in the wrong directory
+
+`python -m` prepends the current directory to `sys.path` **ahead of**
+PYTHONPATH, and every scaffold contains a `cli/` package. So a scaffold's
+wrapper run from inside another skeletor tree imported *that* tree's CLI: it
+came up under the other project's name, with the other project's commands,
+operating on the directory it was standing in, exit 0 and not a word. Measured
+rather than argued — two probe scaffolds, `./shadowb` from `shadowa/` printing
+`Usage: shadowa`.
+
+sky.boss found it and had been bitten by the same mechanism before, which is why
+this is gated rather than fixed and forgotten: generating systemd units from
+inside an older checkout wrote every unit with the wrong `WorkingDirectory`,
+successfully and silently. Anything that writes a path is exposed, and the
+triggering condition is a workspace of sibling checkouts, which is ordinary
+rather than a corner.
+
+`export PYTHONSAFEPATH=1` in the wrapper, one line, no render change, and it
+fixes every tree that already exists on its next upgrade. `shadow_gate` asserts
+both directions: a wrapper answering correctly from its own root was always
+green and proves nothing, and a gate running only the cross-tree invocation
+would be satisfied by a wrapper too broken to start.
+
 ---
 
 ## CI, cost, and the draft-PR discipline

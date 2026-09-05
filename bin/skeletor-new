@@ -575,22 +575,7 @@ def write_manifest(target: Path, args, overlays: List[str], files: Dict[str, str
     check that makes the fallback trustworthy fails on every run.
     """
     values = substitutions(args)
-    recorded = [
-        "--name", values["PROJECT_NAME"],
-        "--slug", values["PROJECT_SLUG"],
-        "--cli", values["CLI"],
-        "--env-prefix", values["CLI_ENV_PREFIX"],
-        "--tagline", args.tagline,
-        "--tier", args.tier,
-        "--language", args.language,
-        "--agent", args.agent,
-        "--base-branch", args.base_branch,
-        "--release-branch", args.release_branch,
-        "--python", args.python,
-        "--line-length", str(args.line_length),
-        "--org", args.org,
-        "--timezone", args.timezone,
-    ]
+    recorded = manifest_args(args, values)
     manifest = target / MANIFEST_NAME
     manifest.write_text(
         json.dumps(
@@ -612,7 +597,12 @@ def write_manifest(target: Path, args, overlays: List[str], files: Dict[str, str
     return manifest
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The flags, in one place something else can read.
+
+    Extracted from `main()` so `write_manifest` can derive what to record from
+    the parser rather than repeating it — see `NOT_RENDERED`.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("target", help="directory to create")
     parser.add_argument("--name", help='human name, e.g. "Order Service"')
@@ -663,7 +653,56 @@ def main() -> int:
     # render that must never become one (`skeletor-upgrade`'s base, a probe).
     parser.add_argument("--no-git", action="store_true", help="render a tree that is not a repository at all")
     parser.add_argument("--force", action="store_true", help="write into an existing non-empty directory")
-    args = parser.parse_args()
+    return parser
+
+
+#: Declared, and deliberately not recorded, because neither reaches a render.
+#: `--force` gates the refusal on a populated target and `--no-git` gates
+#: `git init`; re-rendering a base wants neither. Every other flag is recorded
+#: by existing, which is the point — this set is the only thing anybody has to
+#: keep, and `bin/skeletor-verify` fails if an entry stops being a real flag.
+NOT_RENDERED = {"force", "no_git"}
+
+#: Flags whose recorded value is the **derived** one rather than the raw
+#: argument. All four default from the target directory name, and an upgrade
+#: re-renders into a temporary directory with a different one — so recording
+#: `None` here makes a manifest that cannot reproduce its own tree.
+DERIVED_FROM_TARGET = {
+    "name": "PROJECT_NAME",
+    "slug": "PROJECT_SLUG",
+    "cli": "CLI",
+    "env_prefix": "CLI_ENV_PREFIX",
+}
+
+
+def manifest_args(args, values: Dict[str, str]) -> List[str]:
+    """The `args` a manifest records, derived from the parser's own flags.
+
+    This was a hand-written list of fourteen, and it went stale exactly the way
+    Rule 2 says a registry does: `--versioning` was added, changed what ships,
+    and was never added here. Every `--versioning tag` tree therefore recorded
+    arguments that re-render as a release-please tree, so `cross_check` refused
+    four wrong hashes and three unrecorded files, and **every such tree was
+    permanently unupgradable**. Release-please trees were fine only because the
+    default happened to match. Found by node-zero, who proved it differentially
+    — same ref, recorded args versus recorded args plus `--versioning tag`, 4/3
+    against 0/0 with all 102 hashes reproducing.
+
+    A flag is recorded by existing now. `--repair-manifest` was a trap for the
+    affected trees for the same reason and is fixed by the same change: it
+    re-derives from a base render, and the base render was the wrong tree.
+    """
+    recorded: List[str] = []
+    for action in build_parser()._actions:
+        if not action.option_strings or action.dest in NOT_RENDERED or action.dest == "help":
+            continue
+        key = DERIVED_FROM_TARGET.get(action.dest)
+        recorded += [action.option_strings[0], str(values[key] if key else getattr(args, action.dest))]
+    return recorded
+
+
+def main() -> int:
+    args = build_parser().parse_args()
 
     target = Path(args.target).expanduser().resolve()
     populated = target.exists() and any(target.iterdir())

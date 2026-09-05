@@ -26,6 +26,7 @@ import ast
 import hashlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import re
@@ -2079,6 +2080,135 @@ def upgrade_applied(tree: Path, manifest_name: str) -> List[str]:
     return [path for path in paths if path != manifest_name and not path.startswith("tmp/")]
 
 
+def shadow_gate(workdir: Path, venv_python: Path) -> Result:
+    """One scaffold's wrapper, run from inside another, is still itself.
+
+    `python -m` prepends the current directory to `sys.path` **ahead of**
+    PYTHONPATH, and every scaffold contains a `cli/` package — so a wrapper run
+    from inside a second skeletor tree imported that tree's CLI and came up
+    under the other project's name, with the other project's commands, exit 0
+    and not a word. Anything that then wrote a path recorded the wrong tree.
+    sky.boss found it and had been bitten by the same thing once before, which
+    is the reason to gate rather than to fix and move on: their systemd units
+    were all generated with the wrong `WorkingDirectory`, successfully.
+
+    The triggering condition is a workspace of sibling checkouts, which is the
+    ordinary case rather than a corner: two projects from this shell are two
+    `cli/` packages and one terminal in the wrong directory.
+
+    Both directions are asserted. A wrapper that answered correctly from its own
+    root proved nothing about the bug — that is the case that was always green —
+    and a gate that only ran the cross-tree invocation could be satisfied by a
+    wrapper too broken to run at all.
+    """
+    started = time.time()
+    trees = {}
+    for name, cli in (("shadow-a", "shadowa"), ("shadow-b", "shadowb")):
+        target = workdir / name
+        code, output = run(
+            [sys.executable, str(SCAFFOLDER), str(target), "--name", name.title(),
+             "--cli", cli, "--tagline", "t", "--tier", "core"],
+            cwd=SKELETOR,
+        )
+        if code != 0:
+            return Result(f"cli shadowing: scaffold {name}", False, time.time() - started, output)
+        (target / ".venv").symlink_to(venv_python.parents[1])
+        trees[cli] = target
+
+    problems = []
+    for cli, target in trees.items():
+        other = next(path for name, path in trees.items() if name != cli)
+        for where, label in ((target, "its own root"), (other, "the other tree")):
+            code, output = run([str(target / cli), "--help"], cwd=where)
+            if code != 0:
+                problems.append(f"./{cli} from {label} exited {code}: {output.strip()[:200]}")
+            elif f"Usage: {cli}" not in output:
+                problems.append(
+                    f"./{cli} run from {label} announced itself as "
+                    f"{output.splitlines()[0] if output else '(nothing)'} — it imported the "
+                    "wrong tree's cli/ package, and said so only in its own name"
+                )
+
+    return Result(
+        "cli shadowing: a wrapper run from a sibling scaffold is still itself",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
+
+
+def manifest_args_gate() -> Result:
+    """Every render-affecting flag reaches `.skeletor.json` by existing.
+
+    `write_manifest` used a hand-written list of fourteen flags, and it went
+    stale the way Rule 2 says a registry does: `--versioning` arrived, changed
+    what ships, and was never added. Every `--versioning tag` tree recorded
+    arguments that re-render as a release-please tree, so `cross_check` refused
+    on four wrong hashes and three unrecorded files and the tree was
+    **permanently unupgradable** — `--repair-manifest` included, since it
+    re-derives from that same wrong base. Release-please trees were unaffected
+    only because the default happened to match.
+
+    The record is derived from the parser now, so this gate guards the one list
+    that is left: `NOT_RENDERED`, the flags deliberately excluded. Both
+    directions, because an exemption is checked against the thing it exempts —
+    a declared flag that is neither recorded nor exempt is the original bug, and
+    an exempt name that is no longer a flag is an exemption nobody chose,
+    waiting to pre-exempt whatever claims that name next.
+
+    The scan proves itself **differentially** rather than against a floor. The
+    flags are read twice — out of `parser._actions` and out of the usage line
+    the parser prints — and the two sets must be equal. A floor cannot tell a
+    working scan from a mostly-blind one: proto.pilot's first pass at this
+    counted the manifest list by reading to the first `]`, got 1 of 14, reported
+    16 missing flags, and its `assert recorded` non-vacuity check passed,
+    because one is not zero. Two independent readings disagreeing is a fact
+    about the reading; one reading clearing a bar is a fact about the bar.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    parser = scaffolder.build_parser()
+    declared = {a.dest: a.option_strings[0] for a in parser._actions if a.option_strings and a.dest != "help"}
+
+    usage = io.StringIO()
+    parser.print_usage(usage)
+    printed = set(re.findall(r"--[\w-]+", usage.getvalue())) - {"--help"}
+
+    args = parser.parse_args(["probe"])
+    recorded = set(scaffolder.manifest_args(args, scaffolder.substitutions(args))[::2])
+
+    problems = []
+    if printed != set(declared.values()):
+        problems.append(
+            f"the two readings of the flag set disagree: introspection {sorted(declared.values())}, "
+            f"usage line {sorted(printed)} — one of them is blind, so nothing below means anything"
+        )
+    missing = sorted(opt for dest, opt in declared.items() if opt not in recorded and dest not in scaffolder.NOT_RENDERED)
+    if missing:
+        problems.append(
+            f"{missing} are declared but never recorded, and are not in NOT_RENDERED. A tree "
+            "scaffolded with one of them records arguments that re-render as a different tree, "
+            "so cross_check refuses and the tree can never be upgraded."
+        )
+    stale = sorted(dest for dest in scaffolder.NOT_RENDERED if dest not in declared)
+    if stale:
+        problems.append(
+            f"NOT_RENDERED exempts {stale}, which {'is' if len(stale) == 1 else 'are'} no longer a "
+            "flag. Delete the entry: the name can come back for something else and would arrive "
+            "pre-exempted."
+        )
+    recorded_but_exempt = sorted(declared[dest] for dest in scaffolder.NOT_RENDERED if dest in declared and declared[dest] in recorded)
+    if recorded_but_exempt:
+        problems.append(f"{recorded_but_exempt} are exempt from recording and recorded anyway")
+
+    return Result(
+        f"manifest args: {len(recorded)} of {len(declared)} flags recorded, {len(scaffolder.NOT_RENDERED)} exempt",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
+
+
 def pending_ref_gate(workdir: Path) -> List[Result]:
     """A run that leaves a conflict does not advance the manifest past it.
 
@@ -2928,7 +3058,9 @@ def main() -> int:
         # entry points disagree with its README should say so in two seconds
         # rather than after a five-minute grid.
         results.append(entry_point_gate())
+        results.append(manifest_args_gate())
         venv_python = make_venv(workdir, args.quiet)
+        results.append(shadow_gate(workdir, venv_python))
         pyright_ok, pyright_note = warm_pyright(venv_python)
         if not args.quiet:
             print(f"   pyright {pyright_note}" if pyright_ok else f"   ⚠️  pyright unavailable: {pyright_note}")
