@@ -64,6 +64,10 @@ def get_version() -> str:
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         pass
 
+    # No file is the ordinary state under `--versioning tag`, which ships none:
+    # a repository whose version IS its tag has nothing to fall back to before
+    # the first tag exists, and `unknown` is the true answer there. Inventing a
+    # `0.0.0` would be a version nobody chose, reported as though somebody had.
     version_file = PROJECT_ROOT / "VERSION"
     return version_file.read_text().strip() if version_file.exists() else "unknown"
 

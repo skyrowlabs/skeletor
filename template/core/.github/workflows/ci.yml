@@ -104,10 +104,19 @@ jobs:
       # `git log` needs the merge base, so this is in the gate job — the one
       # with `fetch-depth: 0`. The all-zeros SHA is a branch's first push, which
       # has no `before` to diff against; HEAD alone is the honest range there.
-      - name: Commit subjects Release Please can read
+      - name: Commit subjects Release Please can read, if it reads them here
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
+          # SCAFFOLD-OPTIONAL .github/release-please-config.json
+          # Scaffolded with `--versioning tag` there is no release automation,
+          # so nothing parses these subjects and there is no contract to check.
+          # Asked of the FILE and not of a flag: the flag is gone by the time
+          # this runs, and the file is the thing the answer depends on.
+          if [ ! -f .github/release-please-config.json ]; then
+            echo "no Release Please config in this repository — nothing parses commit subjects"
+            exit 0
+          fi
           if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
             echo "no base commit for this event — checking HEAD alone"
             python scripts/check_commit_subjects.py
@@ -386,7 +395,25 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      # SCAFFOLD-OPTIONAL .github/release-please-config.json
+      # SCAFFOLD-OPTIONAL .github/.release-please-manifest.json
+      # The config is absent under `--versioning tag`, where the annotated git
+      # tag IS the version and no bot owns it. The job still runs and still
+      # REPORTS, which is deliberate: a required status context that never
+      # reports blocks a pull request forever, and this file says so at the top.
+      # It just has nothing to do.
+      - uses: actions/checkout@v7
+      - name: Is there a release config
+        id: config
+        run: |
+          if [ -f .github/release-please-config.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Release Please::not configured here — this repository versions by git tag"
+          fi
       - uses: googleapis/release-please-action@v5
+        if: steps.config.outputs.present == 'true'
         with:
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json

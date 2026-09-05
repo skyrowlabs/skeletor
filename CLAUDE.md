@@ -533,6 +533,43 @@ renders into a temporary directory with a different one. A manifest that cannot
 reproduce its own tree makes every later upgrade a diff against the wrong base
 — which is worse than no upgrade, because it looks like it worked.
 
+**`--versioning tag` is the one flag that changes what ships**, and it is a
+*subtraction and nothing else* — the Release Please config and manifest,
+`VERSION`, and the release-train skill, which is a state machine for a release
+PR nobody will open. That shape is the rule, not a coincidence: the scaffold is
+this repository's only test, so a mode that wrote files *differently* would need
+a verification grid it cannot afford, and it would put a conditional into every
+doc describing the workflow.
+
+The question it answers is a fact about the project rather than a taste — **does
+anything install this?** A published artifact needs a tracked `VERSION`, because
+a tarball carries no git history. A repository run from a checkout has the tag,
+and `VERSION` is then a second home for a number `git describe` already knows,
+kept in step by a bot. skeletor itself is the `tag` case, which is why there is
+no `VERSION` file here.
+
+Two mechanisms make the subtraction safe, and both key on **the tree rather than
+the flag** — the flag is gone by the time anything reads them:
+
+- `drop_absent_prose` removes markdown blocks marked `<!-- SCAFFOLD-IF <path> -->`
+  when that path is absent, and `SCAFFOLD-IF-NOT` is the inverse. The pair
+  exists because subtraction alone leaves a lie behind: `tag` still *has* a
+  release procedure — `git tag -a` — so a `## Releases` heading with nothing
+  under it would be worse than the wrong paragraph. It ships the true half of
+  each alternative, never a sentence hedged to be true in both. Markdown only,
+  because `<!-- -->` is a syntax error in YAML; workflows ask the same question
+  with a file test in the step, which is that language's spelling of it.
+- Workflow steps guard on `[ -f .github/release-please-config.json ]`. The
+  release job still runs and still *reports*, because a required context that
+  never reports blocks a pull request forever — it simply has nothing to do.
+
+Those two files name a path that may not exist, which is indistinguishable to a
+path-checking gate from sending a reader somewhere that is not there. They say
+which they are, at the site, with `SCAFFOLD-OPTIONAL <path>` — and the
+tier-composition gate checks both staleness directions, so a declaration for a
+path that ships everywhere, or one whose file stopped mentioning it, is red.
+That is the only exemption mechanism the gate has, and it is two entries.
+
 **Pins are reported, never bumped automatically.** `bin/skeletor-check-pins`
 discovers every pinned version by pattern and asks the registries what is
 current; `.github/workflows/pins.yml` puts the result in one issue, weekly.

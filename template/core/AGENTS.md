@@ -212,4 +212,10 @@ Load on-demand only. Full mapping in `.github/DOCS_INDEX.md`.
 
 `feat` / `fix` / `perf` / `docs` / `refactor` / `chore` / `ci` / `test` / `build`
 
+<!-- SCAFFOLD-IF .github/release-please-config.json -->
 > `docs:` for `docs/**` changes only — never `feat:`. Release Please owns `CHANGELOG.md`.
+<!-- /SCAFFOLD-IF -->
+<!-- SCAFFOLD-IF-NOT .github/release-please-config.json -->
+> `docs:` for `docs/**` changes only — never `feat:`. These subjects are the only
+> changelog this repository has.
+<!-- /SCAFFOLD-IF -->

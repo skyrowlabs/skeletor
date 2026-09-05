@@ -939,6 +939,117 @@ def agentless_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     return results
 
 
+def versioning_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """`--versioning tag` produces a tree that passes its own gates.
+
+    The flag is a **subtraction and nothing else**, which is the only shape a
+    scaffold flag gets here: the scaffold is skeletor's only test, so a mode
+    that wrote files differently would need a verification grid this repository
+    cannot afford, and it would put a conditional in every doc describing the
+    workflow. What it removes is the machinery that owns a version — the Release
+    Please config and manifest, `VERSION`, and the release-train skill, which is
+    a state machine for a release PR nobody will open.
+
+    Three things are asserted and the second is the one that would otherwise rot:
+
+    * The omitted files are gone, **and present in the default mode**. Without
+      the second half an empty omit set passes the first trivially, which is
+      this repository's own rule about a negative over an empty set.
+    * The prose swapped rather than merely shrank. `--versioning tag` still HAS
+      a release procedure — `git tag -a`, which is how skeletor itself is
+      versioned — so a `## Releases` heading with nothing under it would be a
+      worse outcome than the wrong paragraph. `drop_absent_prose` ships the true
+      half of each alternative.
+    * The tree is green: `check docs`, and the unit suite, which is where a
+      dangling link or a doc-table row for a file nobody shipped surfaces.
+
+    Tier composition covers the references across all 36 configurations and
+    cannot cover these: it asks whether a path resolves, not whether the
+    sentence around it is true, and not whether the tree still runs.
+    """
+    results: List[Result] = []
+    scaffolder = load_scaffolder()
+    omitted = sorted(scaffolder.VERSIONING["tag"])
+
+    started = time.time()
+    target = workdir / "versioning-tag"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(target), "--name", "Tagged", "--slug", "tagged",
+         "--cli", CLI_NAME, "--tier", tier, "--language", "python", "--versioning", "tag"],
+        cwd=workdir,
+    )
+    if code != 0:
+        return [Result("--versioning tag: scaffold", False, time.time() - started, output)]
+    results.append(Result("--versioning tag: scaffold", True, time.time() - started, output))
+
+    started = time.time()
+    default = workdir / "versioning-default"
+    run(
+        [sys.executable, str(SCAFFOLDER), str(default), "--name", "Default", "--slug", "defaulted",
+         "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
+        cwd=workdir,
+    )
+    present = [rel for rel in omitted if (target / rel).exists()]
+    missing_by_default = [rel for rel in omitted if not (default / rel).exists()]
+    results.append(
+        Result(
+            f"--versioning tag: omits {len(omitted)} file(s) the default ships",
+            bool(omitted) and not present and not missing_by_default,
+            time.time() - started,
+            f"still present under tag: {present}\nnever shipped by default: {missing_by_default}",
+        )
+    )
+
+    # The swap, not the shrink. Both directions, because a `drop_absent_prose`
+    # that dropped every block would leave the heading bare and pass a check
+    # that only looked for the absence of the wrong words.
+    started = time.time()
+    development = (target / "docs" / "DEVELOPMENT.md").read_text(encoding="utf-8")
+    default_dev = (default / "docs" / "DEVELOPMENT.md").read_text(encoding="utf-8")
+    swapped = (
+        "Release Please" not in development
+        and "git tag -a" in development
+        and "Release Please" in default_dev
+        and "git tag -a" not in default_dev
+    )
+    results.append(
+        Result(
+            "--versioning tag: the release prose swapped, it did not just vanish",
+            swapped,
+            time.time() - started,
+            f"tag tree names Release Please: {'Release Please' in development}\n"
+            f"tag tree names `git tag -a`: {'git tag -a' in development}\n"
+            f"default tree names Release Please: {'Release Please' in default_dev}",
+        )
+    )
+
+    (target / ".venv").symlink_to(venv_python.parents[1])
+    for command, label in (
+        (["check", "docs"], "check docs"),
+        (["test", "unit"], "unit suite"),
+    ):
+        started = time.time()
+        code, output = run([f"./{CLI_NAME}", *command], cwd=target, env_extra={"PYTHONPATH": str(target)})
+        results.append(Result(f"--versioning tag: {label}", code == 0, time.time() - started, output))
+
+    # `unknown` is the honest answer before the first tag, and the tag after it.
+    # A tree with no VERSION file to fall back on is exactly where `get_version`
+    # had been describing a fallback it could not take.
+    started = time.time()
+    before = run([f"./{CLI_NAME}", "--version"], cwd=target)[1].strip()
+    git_in(target, "tag", "-a", "v0.3.0", "-m", "first")
+    after = run([f"./{CLI_NAME}", "--version"], cwd=target)[1].strip()
+    results.append(
+        Result(
+            "--versioning tag: --version is `unknown` until tagged, then the tag",
+            before.endswith("unknown") and after.endswith("v0.3.0"),
+            time.time() - started,
+            f"untagged: {before}\ntagged:   {after}",
+        )
+    )
+    return results
+
+
 def badge_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     """`--org` decides whether the README carries badges, and the default is none.
 
@@ -1476,39 +1587,60 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
 #: path segments are preceded by `/`.
 _TREE_REF = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.[A-Za-z]\w*)")
 
+#: A file declaring that it HANDLES a path's absence, rather than sending a
+#: reader to it:
+#:
+#:     # SCAFFOLD-OPTIONAL .github/release-please-config.json
+#:
+#: The two are indistinguishable to a predicate over paths — `[ ! -f X ]` and
+#: "see X" both mention X — and the difference is the whole finding. So the file
+#: says which it is, at the site, in the comment syntax it already has.
+#:
+#: Beside a list here because that is the shape every other exemption in this
+#: session settled on: an exemption held somewhere else is a question somebody
+#: can finish without answering, and it goes stale where nobody is looking. Both
+#: staleness directions are checked below, so a declaration cannot outlive its
+#: reason quietly.
+_OPTIONAL = re.compile(r"SCAFFOLD-OPTIONAL\s+(\S+)")
 
-def configurations(scaffolder) -> List[Tuple[str, str, str]]:
-    """Every (tier, language, agent) this scaffolder can produce.
 
-    Read from its own maps. `--agent none` is a configuration a user is
-    documented to pick, so a reference that only resolves when the vendor
-    directory ships is the same defect one axis over.
+def configurations(scaffolder) -> List[Tuple[str, str, str, str]]:
+    """Every (tier, language, agent, versioning) this scaffolder can produce.
+
+    Read from its own maps, so an axis added to `bin/skeletor-new` is covered by
+    this gate on the next run rather than the next time somebody remembers. Each
+    one is a configuration a user is documented to pick, and a reference that
+    only resolves when the omitted files ship is the same defect one axis over —
+    which is how `--agent none` was found routing readers into `.claude/`.
     """
     return [
-        (tier, language, agent)
+        (tier, language, agent, versioning)
         for tier in sorted(scaffolder.TIERS)
         for language in sorted(scaffolder.LANGUAGE_OVERLAYS)
         for agent in sorted(scaffolder.AGENTS)
+        for versioning in sorted(scaffolder.VERSIONING)
     ]
 
 
-def superset_of(scaffolder, a: Tuple[str, str, str], b: Tuple[str, str, str]) -> bool:
+def superset_of(scaffolder, a: Tuple[str, str, str, str], b: Tuple[str, str, str, str]) -> bool:
     """Does configuration `b` ship everything `a` does, and more?
 
-    Composition is cumulative in all three axes, so this is containment of the
-    overlay lists — never a hand-written ordering, which would go stale the day
-    a tier is inserted in the middle.
+    Containment of what each axis contributes — never a hand-written ordering,
+    which would go stale the day a tier is inserted in the middle. Versioning is
+    the one axis expressed as a SUBTRACTION, so its containment runs the other
+    way: `b` ships more when it omits less.
     """
     if a == b:
         return False
-    a_tier, a_lang, a_agent = a
-    b_tier, b_lang, b_agent = b
+    a_tier, a_lang, a_agent, a_version = a
+    b_tier, b_lang, b_agent, b_version = b
     tiers = set(scaffolder.TIERS[a_tier]) <= set(scaffolder.TIERS[b_tier])
     langs = set(scaffolder.LANGUAGE_OVERLAYS[a_lang].split(",")) <= set(
         scaffolder.LANGUAGE_OVERLAYS[b_lang].split(",")
     )
     agents = scaffolder.AGENTS[a_agent] is None or scaffolder.AGENTS[a_agent] == scaffolder.AGENTS[b_agent]
-    return tiers and langs and agents
+    versions = scaffolder.VERSIONING[b_version] <= scaffolder.VERSIONING[a_version]
+    return tiers and langs and agents and versions
 
 
 def tier_composition_gate(workdir: Path) -> List[Result]:
@@ -1556,9 +1688,9 @@ def tier_composition_gate(workdir: Path) -> List[Result]:
     scaffolder = load_scaffolder()
     configs = configurations(scaffolder)
 
-    trees: Dict[Tuple[str, str, str], Path] = {}
-    for tier, language, agent in configs:
-        name = f"compose-{tier}-{language}-{agent}"
+    trees: Dict[Tuple[str, str, str, str], Path] = {}
+    for tier, language, agent, versioning in configs:
+        name = f"compose-{tier}-{language}-{agent}-{versioning}"
         target = workdir / name
         code, output = run(
             [
@@ -1577,12 +1709,14 @@ def tier_composition_gate(workdir: Path) -> List[Result]:
                 language,
                 "--agent",
                 agent,
+                "--versioning",
+                versioning,
             ],
             cwd=workdir,
         )
         if code != 0:
             return [Result(f"tier composition: scaffold {name}", False, time.time() - started, output)]
-        trees[(tier, language, agent)] = target
+        trees[(tier, language, agent, versioning)] = target
 
     def shipped(root: Path) -> set:
         return {
@@ -1594,6 +1728,7 @@ def tier_composition_gate(workdir: Path) -> List[Result]:
     files = {config: shipped(root) for config, root in trees.items()}
 
     findings: Dict[str, List[str]] = {}
+    declarations: Dict[str, set] = {}
     scanned_refs = 0
     for config, root in trees.items():
         mine = files[config]
@@ -1606,13 +1741,32 @@ def tier_composition_gate(workdir: Path) -> List[Result]:
                 text = path.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
                 continue
+            handled = set(_OPTIONAL.findall(text))
+            for declared in handled:
+                declarations.setdefault(declared, set()).add(rel)
             for match in _TREE_REF.finditer(text):
                 ref = match.group(1)
                 scanned_refs += 1
-                if ref in mine or ref not in elsewhere:
+                if ref in mine or ref not in elsewhere or ref in handled:
                     continue
                 where = "/".join(config)
                 findings.setdefault(f"{ref}  (missing at {where})", []).append(rel)
+
+    # Every declaration is checked against the thing it exempts, both ways. One
+    # naming a path no configuration omits is describing a hazard that no longer
+    # exists; one naming a path its own file never mentions is describing a
+    # reference somebody deleted. Both are stale, and a stale exemption is worse
+    # than none — the path can come back for something else and arrive
+    # pre-exempted, which is an exemption nobody chose.
+    everywhere = set.intersection(*files.values()) if files else set()
+    stale = []
+    for declared, sites in sorted(declarations.items()):
+        if declared in everywhere:
+            stale.append(f"{declared} — shipped in every configuration, so nothing to handle")
+        for site in sorted(sites):
+            holder = next(root for cfg, root in trees.items() if site in files[cfg])
+            if declared not in (holder / site).read_text(encoding="utf-8", errors="ignore"):
+                stale.append(f"{declared} — declared in {site}, which does not mention it")
 
     # A negative over an empty scan is a tautology: a `_TREE_REF` that matched
     # nothing would report every configuration clean. The trees hold hundreds of
@@ -1624,11 +1778,13 @@ def tier_composition_gate(workdir: Path) -> List[Result]:
     )
     return [
         Result(
-            f"tier composition: every reference resolves where it is read ({len(configs)} configs, {scanned_refs} refs)",
-            not findings and enumerated,
+            f"tier composition: every reference resolves where it is read "
+            f"({len(configs)} configs, {scanned_refs} refs, {len(declarations)} handled)",
+            not findings and not stale and enumerated,
             time.time() - started,
             (f"extracted only {scanned_refs} references — the extractor is broken\n" if not enumerated else "")
-            + ("a shipped file names a file that is not shipped in that configuration:\n" + report if findings else ""),
+            + ("a shipped file names a file that is not shipped in that configuration:\n" + report if findings else "")
+            + ("\nstale SCAFFOLD-OPTIONAL declaration(s):\n  " + "\n  ".join(stale) if stale else ""),
         )
     ]
 
@@ -2270,6 +2426,9 @@ def main() -> int:
         # puts `governed` after `agentic`, which would have quietly gated the
         # wrong tree.
         fullest = max(tiers, key=lambda t: len(scaffolder.TIERS[t]))
+        for gate in versioning_gate(fullest, workdir, venv_python):
+            results.append(gate)
+
         for gate in agentless_gate(fullest, workdir, venv_python):
             results.append(gate)
 

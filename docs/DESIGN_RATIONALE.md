@@ -841,6 +841,43 @@ either direction, and the badge section below is downstream of the same fact —
 it says "a third home for a number whose first two are the git tag and
 `VERSION`", and for an uninstalled project the second of those should not exist.
 
+#### The flag, and the shape a flag gets here
+
+`--versioning tag|release-please` is the one install-time flag that changes what
+ships, and it took a long time to build because the shape mattered more than the
+feature. **A flag may subtract a file set. It may never reconfigure one.** The
+scaffold is this repository's only test, so every mode multiplies the
+verification grid; a mode that wrote files *differently* would need a grid this
+project cannot afford, and it would push a conditional into every document
+describing the workflow — which is how `CONTRIBUTING.md` and the README setup
+block would end up generated.
+
+So `tag` removes four paths and changes nothing else. What that leaves behind is
+the interesting part: prose. Subtraction alone produces a `## Releases` heading
+with nothing under it, which is *worse* than the wrong paragraph, because the
+`tag` mode does have a release procedure — `git tag -a`, the one this repository
+uses on itself. `<!-- SCAFFOLD-IF <path> -->` and its inverse ship the true half
+of each alternative, keyed on whether the path arrived rather than on the flag.
+Keying on the flag is the version that rots: a renamed overlay or a new mode
+keeps prose about a directory nobody shipped, and no gate can tell, because the
+paths still resolve in the configuration the author happened to be looking at.
+
+That mechanism was not designed for this. It was one hard-coded `.claude/` case,
+written the same afternoon because the tier-composition gate caught `--agent
+none` shipping an index that routed readers to three paths inside a directory
+that flag exists to remove. `--versioning` is what showed it was general.
+
+And the flag validates itself, because the composition gate reads its axes out
+of `bin/skeletor-new`: adding `VERSIONING` to that map put every `tag`
+configuration into a grid of 36 on the next run, with no gate edited to admit
+it. It immediately found the two files that name the Release Please config in
+order to *handle its absence* — a `[ ! -f ]` test and a guarded `Path`. To a
+predicate over paths those look exactly like a dangling citation, and the
+difference is the entire finding, so the files declare which they are at the
+site with `SCAFFOLD-OPTIONAL`, checked for staleness in both directions. Two
+entries, both of them about the notation rather than about code the predicate
+mis-shaped, which is the line this repository already draws.
+
 ### Badges
 
 Two, and only when `--org` names a real owner. Neither one *stores* a value,

@@ -55,6 +55,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.output import detail, emit, fail, item, ok, warn  # noqa: E402
 from scripts.paths import GITHUB_DIR, PROJECT_ROOT  # noqa: E402
 
+#: SCAFFOLD-OPTIONAL .github/release-please-config.json
+#: Absent under `--versioning tag`, where the git tag is the version and nothing
+#: parses these subjects. This file NAMES that path in order to handle its
+#: absence, which is a different act from sending a reader to it.
 RELEASE_CONFIG = GITHUB_DIR / "release-please-config.json"
 
 #: `type(scope)!: description` — the conventional-commit subject, as Release

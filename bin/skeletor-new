@@ -48,6 +48,36 @@ LANGUAGE_OVERLAYS = {"python": "python", "node": "node", "both": "python,node"}
 #: flag, and `--agent none` would silently ship a tree with no testing rules.
 AGENTS = {"claude": "agent-claude", "none": None}
 
+#: Versioning mode -> the relative paths it does NOT ship. `release-please` is
+#: the default and omits nothing.
+#:
+#: The question this answers is a fact about the project rather than a taste:
+#: **does anything install this?** A published artifact needs a tracked
+#: `VERSION`, because a tarball carries no git history and has no other way to
+#: say what it is. A repository run from a checkout has the tag, and `VERSION`
+#: is then a second home for a number whose first home is `git describe` — the
+#: copy this project refuses everywhere else, kept in step by a bot.
+#:
+#: It is a **subtraction and nothing else**, which is the only shape a flag here
+#: gets. Nothing is reconfigured, no file is written differently, and every
+#: sentence and workflow step that depends on one of these paths is guarded on
+#: the path rather than on the flag — see `drop_absent_prose` and the
+#: `if this repository has one` steps in `ci.yml`. A mode that edited files
+#: would need a verification grid this repository cannot afford, and would put a
+#: conditional in every doc describing the workflow.
+VERSIONING: Dict[str, Set[str]] = {
+    "release-please": set(),
+    "tag": {
+        ".github/release-please-config.json",
+        ".github/.release-please-manifest.json",
+        "VERSION",
+        # The release train is a Release Please state machine — open a release
+        # PR, babysit it, stop for a human to merge. With no release PR to open
+        # it is a procedure for machinery that is not here.
+        ".claude/skills/release/SKILL.md",
+    },
+}
+
 MANIFEST_NAME = ".skeletor.json"
 
 #: The literal `--org` default. A badge is a claim about a repository that
@@ -124,10 +154,21 @@ def badges(args, slug: str) -> str:
     if args.org == ORG_UNSET:
         return ""
     repo = f"{args.org}/{slug}"
-    release = (
-        f"[![Release](https://img.shields.io/github/v/release/{repo}?sort=semver)]"
-        f"(https://github.com/{repo}/releases)"
-    )
+    if args.versioning == "tag":
+        # `git tag -a` creates a TAG, not a GitHub Release — that object only
+        # exists when somebody makes one, and Release Please is what was making
+        # them. A `v/release` badge on a tag-versioned repository is therefore
+        # grey forever, which is this file's own rule about a broken badge:
+        # a gate red on arrival wearing a cosmetic hat.
+        release = (
+            f"[![Tag](https://img.shields.io/github/v/tag/{repo}?sort=semver&label=tag)]"
+            f"(https://github.com/{repo}/tags)"
+        )
+    else:
+        release = (
+            f"[![Release](https://img.shields.io/github/v/release/{repo}?sort=semver)]"
+            f"(https://github.com/{repo}/releases)"
+        )
     ci = (
         f"[![Release CI](https://img.shields.io/github/actions/workflow/status/{repo}/ci.yml"
         f"?branch={args.release_branch}&label=release%20ci)]"
@@ -172,12 +213,29 @@ def render(text: str, values: Dict[str, str]) -> str:
     return re.sub(r"\{\{(\w+)\}\}", replace, text)
 
 
-def copy_overlay(source: Path, target: Path, values: Dict[str, str], cli_name: str, report: List[str]) -> None:
+def copy_overlay(
+    source: Path,
+    target: Path,
+    values: Dict[str, str],
+    cli_name: str,
+    report: List[str],
+    omit: Set[str] = frozenset(),
+) -> None:
+    """Render one overlay into `target`, appending what it wrote to `report`.
+
+    `omit` subtracts at COPY time rather than deleting afterwards, and the
+    difference is the manifest: `report` is what `.skeletor.json` records, so a
+    file copied and then removed would be recorded as skeletor output that no
+    render produces — and `cross_check` refuses exactly that, permanently, on
+    every later upgrade. Never shipping it keeps the record true by construction.
+    """
     for path in sorted(source.rglob("*")):
         if path.is_dir():
             continue
         relative = path.relative_to(source)
         if "__pycache__" in relative.parts or relative.suffix == ".pyc":
+            continue
+        if relative.as_posix() in omit:
             continue
         # The wrapper is named after the project's CLI, so it cannot live in the
         # template under its final name.
@@ -233,40 +291,104 @@ def register_shipped_docs(target: Path, values: Dict[str, str]) -> None:
     index.write_text(text, encoding="utf-8")
 
 
-#: Delimiters around prose that only makes sense when a vendor overlay shipped.
-#: A pair, so the block can be removed without a second copy of the file: a
-#: `.github/DOCS_INDEX.md` in the agent overlay would replace core's wholesale,
-#: and two copies of a routing table is the drift the table exists to prevent.
-VENDOR_BLOCK = ("<!-- SCAFFOLD-VENDOR:", "<!-- /SCAFFOLD-VENDOR -->")
+#: Delimiters around prose that only holds when a given path shipped. The opener
+#: NAMES the path, so the condition is a fact about the tree rather than a flag:
+#:
+#:     <!-- SCAFFOLD-IF .github/release-please-config.json -->
+#:     ... prose about the release train ...
+#:     <!-- /SCAFFOLD-IF -->
+#:
+#: `<!-- SCAFFOLD-IF-NOT <path> -->` is the same marker inverted, and it exists
+#: because subtraction alone leaves a lie behind. `--versioning tag` removes the
+#: release machinery and a "## Releases" heading with nothing under it is worse
+#: than the wrong paragraph — the mode still HAS a release procedure, it is just
+#: `git tag -a` by hand. So the pair ships the true half of every alternative,
+#: never a sentence hedged to be true in both, which helps nobody in either.
+#:
+#: This started as one hard-coded `.claude/` case for `--agent none`, and
+#: `--versioning tag` is what showed the shape: the question is never "which
+#: flag was passed", it is "did those files arrive". Keying on the flag means a
+#: renamed overlay or a new mode silently keeps prose about a directory nobody
+#: shipped, and there is then no gate that can tell — the paths still resolve in
+#: the configuration the author was looking at.
+CONDITIONAL_OPEN = "<!-- SCAFFOLD-IF "
+CONDITIONAL_OPEN_NOT = "<!-- SCAFFOLD-IF-NOT "
+CONDITIONAL_CLOSE = "<!-- /SCAFFOLD-IF -->"
 
 
-def drop_vendor_prose(target: Path) -> None:
-    """Remove vendor-only routing blocks when no vendor directory is present.
+def drop_absent_prose(target: Path) -> None:
+    """Remove every marked block whose named path is not in this tree.
 
-    Keyed on **the tree**, not on `--agent`, which is the same reason the other
-    post-copy steps read what is on disk: the question is "did those files
-    arrive", and asking the flag instead means a renamed overlay silently keeps
-    prose about a directory nobody shipped.
+    A doc describing machinery a configuration omitted is not merely untidy: the
+    index tables and the rules files are ROUTING, so a surviving block is a
+    promise that a path is here, and `check_doc_tables.py` states why that is
+    worse than a shorter table — it implies the subject is still covered.
 
     Found by `bin/skeletor-verify`'s tier-composition gate on the axis it was
-    nearly not given. `--agent none` is documented, tested for having no
-    `.claude/` anywhere, and shipped an index routing readers to three paths
-    inside it. The tree's own `check_doc_tables.py` cannot see this: it walks
+    nearly not given. `--agent none` is documented, is tested for having no
+    `.claude/` anywhere, and shipped a `.github/DOCS_INDEX.md` routing readers to
+    three paths inside it. The tree's own gate cannot see that one: it walks
     `docs/`, and `.claude/` is not in `docs/`.
+
+    Blocks are dropped, never reworded, because these are all-or-nothing: the
+    machinery is entirely present or entirely absent, and a sentence hedged to be
+    true either way is one that helps nobody in either.
+
+    **Markdown only.** The delimiter is an HTML comment, which is a comment in
+    markdown and plain text everywhere else — a `<!-- -->` in a YAML workflow is
+    a syntax error, not a marker. Workflows answer the same question with a file
+    test in the step itself (`if this repository has one`), which is the same
+    condition in the language that file speaks.
     """
-    if any(root.is_dir() for root in (target / ".claude",)):
-        return
-    index = target / ".github" / "DOCS_INDEX.md"
-    if not index.exists():
-        return
-    text = index.read_text(encoding="utf-8")
-    opener, closer = VENDOR_BLOCK
-    while opener in text:
-        start = text.index(opener)
-        end = text.index(closer, start) + len(closer)
-        # The trailing newline goes with the block, or removal leaves a widow.
-        text = text[:start] + text[end:].lstrip("\n")
-    index.write_text(text, encoding="utf-8")
+    for path in sorted(target.rglob("*")):
+        if not path.is_file() or path.suffix != ".md":
+            continue
+        try:
+            original = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if CONDITIONAL_OPEN not in original and CONDITIONAL_OPEN_NOT not in original:
+            continue
+
+        lines = original.splitlines(keepends=True)
+        out: List[str] = []
+        index = 0
+        while index < len(lines):
+            line = lines[index]
+            if CONDITIONAL_OPEN not in line and CONDITIONAL_OPEN_NOT not in line:
+                out.append(line)
+                index += 1
+                continue
+
+            inverted = CONDITIONAL_OPEN_NOT in line
+            opener = CONDITIONAL_OPEN_NOT if inverted else CONDITIONAL_OPEN
+            needed = line.split(opener, 1)[1].split("-->")[0].strip()
+            close = index + 1
+            while close < len(lines) and CONDITIONAL_CLOSE not in lines[close]:
+                close += 1
+            if close >= len(lines):
+                raise SystemExit(f"❌ {path}: `{CONDITIONAL_OPEN}{needed}` has no closing marker")
+
+            if (target / needed).exists() is not inverted:
+                # Keep the body, drop the scaffolder's bookkeeping. A leftover
+                # marker in a generated tree invites somebody to add a second by
+                # hand, in a tree this scaffolder will never run against again.
+                out.extend(lines[index + 1 : close])
+            else:
+                # Take one blank line with the block when it is surrounded by
+                # them, or the removal leaves a double blank that `prettier`
+                # reformats on the first commit — a scaffold whose first hook
+                # run rewrites a file it just wrote.
+                while (
+                    close + 1 < len(lines)
+                    and not lines[close + 1].strip()
+                    and out
+                    and not out[-1].strip()
+                ):
+                    close += 1
+            index = close + 1
+
+        path.write_text("".join(out), encoding="utf-8")
 
 
 def skeletor_ref() -> str:
@@ -355,7 +477,7 @@ def post_copy_steps(tree: Path, values: Dict[str, str]) -> None:
     live here.
     """
     register_shipped_docs(tree, values)
-    drop_vendor_prose(tree)
+    drop_absent_prose(tree)
     subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(tree), capture_output=True)
 
 
@@ -480,6 +602,17 @@ def main() -> int:
     parser.add_argument("--env-prefix", help="env-var prefix, e.g. ORD (defaults from the CLI name)")
     parser.add_argument("--tagline", default="<one line: what this project is>")
     parser.add_argument("--tier", choices=sorted(TIERS), default="core")
+    parser.add_argument(
+        "--versioning",
+        choices=sorted(VERSIONING),
+        default="release-please",
+        help=(
+            "release-please (default): a bot owns the version, writes CHANGELOG.md and bumps "
+            "VERSION. tag: the annotated git tag is the only version, and none of that ships. "
+            "Pick by asking whether anything INSTALLS this project — a tarball has no git "
+            "history and needs the file; a checkout has the tag and the file is a second copy."
+        ),
+    )
     parser.add_argument("--language", choices=["python", "node", "both", "none"], default="python")
     parser.add_argument(
         "--agent",
@@ -546,7 +679,7 @@ def main() -> int:
         if not source.exists():
             print(f"❌ missing overlay: {source}")
             return 1
-        copy_overlay(source, target, values, cli_name, written)
+        copy_overlay(source, target, values, cli_name, written, omit=VERSIONING[args.versioning])
 
     (target / cli_name).chmod(0o755)
     (target / "tmp").mkdir(exist_ok=True)

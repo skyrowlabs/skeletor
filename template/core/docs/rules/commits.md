@@ -24,7 +24,13 @@ commits wearing one hat, and the changelog generator will take only the first.
 5. **Commit without asking; push when the work is complete.** Make the commit as soon as a
    logical unit is done and its checks pass — do not pause to request permission. When the
    whole task is complete and checks pass, push autonomously. Never push half-finished work.
+<!-- SCAFFOLD-IF .github/release-please-config.json -->
 6. **Never hand-edit `CHANGELOG.md`** — Release Please generates it from these commits.
+<!-- /SCAFFOLD-IF -->
+<!-- SCAFFOLD-IF-NOT .github/release-please-config.json -->
+6. **These subjects are the changelog.** Nothing generates one here, so
+   `git log <old-tag>..<new-tag> --format='%s'` is what a reader gets.
+<!-- /SCAFFOLD-IF -->
 7. **`docs:` for changes under `docs/**` only** — never `feat:`, which would trigger a
    version bump for a prose edit.
 
@@ -58,8 +64,14 @@ Commit after each **independent logical idea**, not after finishing everything:
 ## Branching
 
 - **Base branch: `{{BASE_BRANCH}}`.** New branches are cut from it and every PR targets it.
+<!-- SCAFFOLD-IF .github/release-please-config.json -->
 - **Never commit directly to `{{RELEASE_BRANCH}}`** — that is the release branch, and
   Release Please owns it.
+<!-- /SCAFFOLD-IF -->
+<!-- SCAFFOLD-IF-NOT .github/release-please-config.json -->
+- **Never commit directly to `{{RELEASE_BRANCH}}`** — that is the release branch. It
+  moves by merge from `{{BASE_BRANCH}}`, and releases are tagged on it.
+<!-- /SCAFFOLD-IF -->
 - **Force-push is permitted on your own unreviewed branch** — amending or squashing your own
   in-flight work is how four CI runs become one — but **never** on `{{BASE_BRANCH}}` or
   `{{RELEASE_BRANCH}}`, and never from an unattended agent.

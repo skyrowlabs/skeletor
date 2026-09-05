@@ -83,7 +83,12 @@ Full rules: [`docs/rules/testing.md`](rules/testing.md).
 | Ready PR → `{{BASE_BRANCH}}`, docs-only | `CI Gate` alone               | ~1   |
 | Ready PR → `{{BASE_BRANCH}}`, code      | `CI Gate` + `Unit Tests`      | ~5   |
 | Ready PR opened by Dependabot  | **everything** — deliberately exempt   | full |
+<!-- SCAFFOLD-IF .github/release-please-config.json -->
 | Push to `{{RELEASE_BRANCH}}`   | **everything** + Release Please        | full |
+<!-- /SCAFFOLD-IF -->
+<!-- SCAFFOLD-IF-NOT .github/release-please-config.json -->
+| Push to `{{RELEASE_BRANCH}}`   | **everything**                         | full |
+<!-- /SCAFFOLD-IF -->
 
 Three things about this table are load-bearing:
 
@@ -98,8 +103,21 @@ Three things about this table are load-bearing:
 
 ## Releases
 
+<!-- SCAFFOLD-IF .github/release-please-config.json -->
 Versioning is Conventional Commits → Release Please. Commit types decide the
 bump; `CHANGELOG.md` and `VERSION` are generated. **Never hand-edit either.**
+<!-- /SCAFFOLD-IF -->
+<!-- SCAFFOLD-IF-NOT .github/release-please-config.json -->
+Versioning is the annotated git tag and nothing else. There is no `VERSION`
+file and no `CHANGELOG.md`: a repository run from a checkout already has the
+answer in `git describe`, and a file would be a second home for it — kept in
+step by hand, wrong the first time somebody forgets.
+
+Cut a release with `git tag -a vX.Y.Z -m "what moved"` and **push the tag** — an
+unpushed tag names a version only your machine can resolve, and `{{CLI}} --version`
+reads exactly this. Conventional commit subjects are still the rule; they are
+what a reader of `git log` between two tags gets instead of a changelog.
+<!-- /SCAFFOLD-IF -->
 
 A release closes the report window: in-flight reports under
 `docs/reports/regular/` freeze into `docs/reports/releases/<tag>/`. See
