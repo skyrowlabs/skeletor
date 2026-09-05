@@ -1038,6 +1038,30 @@ def main() -> int:
             regen = target / "scripts" / "docs" / "regen.py"
             if regen.exists():
                 subprocess.run([sys.executable, str(regen)], cwd=str(target), capture_output=True)
+
+        # `advanced` is set by the write itself, a few lines down, and every
+        # sentence in this run that claims the base moved reads it. It used to
+        # be inferred from `args.ported` at the far end of the report, and the
+        # deed and the claim were then gated on different conditions: the write
+        # sat inside `(added or updated or merged)` above, and a conflict is in
+        # none of those three. So an upgrade where **nothing applied and one
+        # file conflicted** — the ordinary shape of a small upgrade, and the
+        # shape this fleet had never had — printed "--ported already advanced
+        # the base past them, so re-running will NOT regenerate these" while the
+        # manifest sat untouched. Told not to re-run, which was the one action
+        # that would have got the sidecars back; and the port unrecorded, so the
+        # same conflict returns for ever.
+        #
+        # mind.head stated the general form after finding the same shape in a
+        # gate that printed ❌ and exited 0: **a report and the deed it reports
+        # must not be separated by a condition**, and when they are the failure
+        # is always in the same direction, because the reporting path is the
+        # cheap one to reach and the acting path is the guarded one. The remedy
+        # is not a matching condition — that is the bug with a second copy — but
+        # to let the acting path produce the message. The advance knows whether
+        # it advanced; nothing outside it does.
+        advanced = False
+        if not args.dry_run and (added or updated or merged or pending):
             # The head render's manifest, verbatim — the hashes recorded are of
             # what skeletor PRODUCES, never of what is on disk. The difference
             # decides whether the next upgrade destroys work: a merged file is
@@ -1072,7 +1096,12 @@ def main() -> int:
                 detail("Not a plain re-run: a three-way merge cannot tell an applied hunk from an")
                 detail("unapplied one, so a hand-ported file conflicts again and the base never")
                 detail("moves. The dirty tree the porting leaves is expected and not refused.")
-                detail("Until then the files that DID apply read as edited, which is what they are.")
+                if added or updated or merged:
+                    # Conditional because this block is now reached with nothing
+                    # applied — which is the case that carried the bug above —
+                    # and a sentence about "the files that DID apply" is then a
+                    # claim about an empty set, printed as reassurance.
+                    detail("Until then the files that DID apply read as edited, which is what they are.")
                 detail()
                 detail("If your version of these IS the resolution — an adopter's file the")
                 detail("template also ships, and you are not taking ours — say so with --ported")
@@ -1099,6 +1128,7 @@ def main() -> int:
                     detail("again — that is what the flag asserts, and it cannot be undone by")
                     detail("re-running.")
                 shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
+                advanced = True
 
         # One call, two renderings. It was computed separately for the JSON and
         # for the human report — two call sites for one answer, which is the
@@ -1188,7 +1218,7 @@ def main() -> int:
                 detail()
                 detail("These patches are the only copy. tmp/ is not tracked, and the next real")
                 detail("run clears this directory before writing its own.")
-                if args.ported:
+                if advanced:
                     detail("--ported already advanced the base past them, so re-running will NOT")
                     detail("regenerate these: what is in tmp/upgrade/ now is the last copy there is.")
                 else:

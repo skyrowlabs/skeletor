@@ -1722,6 +1722,72 @@ name it. **The manifest bug, in the warning about the manifest bug**, found by
 building the thing that predicts it. The two are one set now, which is what
 makes the prediction worth anything.
 
+### A report and the deed it reports, separated by a condition
+
+`--ported` is the user asserting a pending file is resolved, so the base may
+advance past it. The advance sat inside `if not args.dry_run and (added or
+updated or merged)`; the sentence announcing it — *"--ported already advanced
+the base past them, so re-running will NOT regenerate these"* — sat eighty-nine
+lines further on, keyed on `args.ported` alone. A conflict is in none of those
+three groups. So an upgrade where **nothing applied and one file conflicted**
+printed the claim over a manifest that had not moved.
+
+Every consequence of that is bad in the same direction. The port is unrecorded,
+so the identical conflict returns on every future run, permanently. And the
+false sentence *disables the recovery*: `tmp/upgrade/` is gitignored and cleared
+by the next real run, so a reader told the sidecars are the last copy will not
+do the one thing — re-run — that regenerates them.
+
+**The discriminating variable is that nothing applied, not that everything
+pending is a conflict**, and the two are easy to confuse because they coincide
+in the small cases. proto.pilot forced a real conflict on a real tree and the
+base advanced correctly, because two unrelated files applied alongside it; their
+run reads as a refutation until you notice which half of the guard it turned.
+node-zero ran the controlled version — add one cleanly-applying file to the same
+batch and the failure disappears.
+
+Nobody in the fleet had met it, and the reason is the same coincidence: while a
+template is weeks old and changing daily, every upgrade carries clean applies
+that hold the guard true. **A conflict-only upgrade is the ordinary shape of a
+mature one, so this defect gets more likely as the tool settles.**
+
+`pending_ref_gate` could not see it either, and that is the sharper lesson. It
+`continue`s to the next tag unless `conflicted and applied` — it selects for
+exactly the safe side of the boundary the bug lives on. **A gate that requires
+two things to be true cannot find a bug that fires when only one of them is.**
+
+mind.head named the class, having found the same shape in a gate that printed ❌
+and exited 0 — a discarded return code separating the report from the result:
+
+> **A report and the deed it reports must not be separated by a condition.**
+
+The failure runs in one direction, because the reporting path is the cheap one
+to reach and the acting path is the guarded one, so the message survives when
+the deed does not and the tool claims more than happened. Two instances shipped
+here inside a fortnight and both failed toward claiming more.
+
+The remedy is not a second copy of the condition, which leaves the shape intact
+and two places to keep in step. **The acting path produces the message**: the
+write sets `advanced`, and every sentence claiming the base moved reads it. The
+advance knows whether it advanced; nothing outside it does. That is this
+release's `--xml` fix generalised — a shared assumption makes two things equal,
+a returned fact makes them connected, and connected survives one side drifting.
+
+The fix carried a second defect out with it. The instruction naming `--ported`
+lived on the branch that holds the base back, which was inside the same guard —
+so a user meeting a real conflict was told to port by hand and **never told the
+flag that records the port**. They port, re-run, get the identical conflict
+(re-merging an applied hunk conflicts exactly like an unapplied one), and
+conclude the tool is stuck.
+
+Method, and it is the round's most transferable result: gap 5 stayed open for
+four fleet upgrades of *upgrade and report what happened*, and closed in about
+fifteen minutes once node-zero **constructed** the input — a scratch commit
+against a clone — rather than waiting for a template release to produce the
+shape. **For a behaviour that only fires on a rare input, waiting for the input
+is not a test strategy.** That is the plant-and-require-red rule this repository
+already applies to its own gates, applied to how the defect is reached.
+
 ### An extension point implemented as an edit is not an extension point
 
 `v0.5.7` added `NARRATIVE` to `scripts/paths.py` so an adopter could declare a

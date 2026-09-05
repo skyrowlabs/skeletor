@@ -3006,6 +3006,147 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
     return results
 
 
+def ported_only_conflict_gate(workdir: Path) -> List[Result]:
+    """`--ported` advances the base when a conflict is the ONLY pending work.
+
+    The advance and the sentence announcing it were gated on different
+    conditions. The write sat inside `if not args.dry_run and (added or updated
+    or merged)`; the claim — *"--ported already advanced the base past them, so
+    re-running will NOT regenerate these"* — sat 89 lines further on, keyed on
+    `args.ported` alone. A conflict is in none of `added`, `updated`, `merged`,
+    so an upgrade where **nothing applied and one file conflicted** printed the
+    claim and left the manifest where it was. Permanent: the port is unrecorded,
+    the same conflict returns every run, and the reader has been told not to
+    re-run, which was the one action that would have got the sidecars back.
+
+    `pending_ref_gate` could not see it, and the reason is this repository's own
+    recurring lesson rather than an oversight — it `continue`s to the next tag
+    unless `conflicted and applied`, so it selects for precisely the safe side of
+    the boundary the bug lives on. **A gate that requires two things to be true
+    cannot find a bug that fires when only one of them is.**
+
+    Nor could the fleet: every real upgrade any adopter had run carried clean
+    applies alongside the conflict, so the guard was always true. node-zero found
+    it by *constructing* the input — a scratch commit touching one template
+    file — instead of waiting for a template release to produce that shape, and
+    then ran the controlled version, adding a second file that applies cleanly
+    and watching the failure disappear. The window is exact.
+
+    **The discriminating variable is that nothing applied, not that everything
+    pending is a conflict.** proto.pilot forced a real conflict on a real tree
+    and the base advanced correctly, because two other files applied alongside
+    it — a negative result that reads as a refutation until you notice which
+    half of the guard it turned. This gate asserts on the applied groups for
+    that reason, and would be testing proto.pilot's scenario without it.
+
+    The severity rises as the template settles: today's upgrades are large
+    because the template is weeks old and changing daily, and a conflict-only
+    upgrade is the ordinary shape of a mature one.
+
+    So this gate manufactures the shape rather than hunting for a tag that has
+    it. One scratch commit against a clone, one divergent edit in the tree, and
+    the two assertions that matter: nothing applied (a plant that landed on the
+    safe side would pass every assertion below while proving nothing), and the
+    claim agrees with the deed.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    tier = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
+    language = max(scaffolder.LANGUAGE_OVERLAYS, key=lambda name: len(scaffolder.LANGUAGE_OVERLAYS[name].split(",")))
+
+    clean = clean_skeletor(workdir)
+    scratch = workdir / "ported-only-skeletor"
+    if not scratch.exists():
+        run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(scratch)], cwd=workdir)
+
+    def scaffold(name: str) -> Path:
+        tree = workdir / name / "probe"
+        if tree.exists():
+            shutil.rmtree(tree.parent)
+        run(
+            [sys.executable, str(scratch / "bin" / "skeletor-new"), str(tree),
+             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
+             "--tier", tier, "--language", language, "--force"],
+            cwd=SKELETOR,
+        )
+        return tree
+
+    # Both trees are scaffolded BEFORE the scratch commit, so their recorded ref
+    # is the pre-scratch HEAD and the base render resolves to it.
+    taken, left = scaffold("ported-only-taken"), scaffold("ported-only-left")
+
+    # The file to diverge on is derived, not named: any markdown the core overlay
+    # ships that this configuration renders. A path written into this gate would
+    # be a second home for a fact `template/` already states, and would go stale
+    # silently the day that file moved.
+    core = scratch / "template" / "core"
+    subject = next(
+        (
+            rel
+            for rel in sorted(path.relative_to(core).as_posix() for path in core.rglob("*.md"))
+            if (taken / rel).exists()
+        ),
+        None,
+    )
+    if subject is None:
+        return [Result("ported-only: no core markdown file renders into the tree", False, time.time() - started, "")]
+
+    (core / subject).write_text(
+        (core / subject).read_text(encoding="utf-8") + "\nA SCRATCH LINE FROM THE TEMPLATE.\n", encoding="utf-8"
+    )
+    git_in(scratch, "commit", "--quiet", "-am", "scratch: one template file")
+    head_ref = run(["git", "-C", str(scratch), "describe", "--tags", "--always", "--dirty"], cwd=scratch)[1].strip()
+
+    for tree in (taken, left):
+        (tree / subject).write_text(
+            (tree / subject).read_text(encoding="utf-8") + "\nA THIRD VALUE, BELONGING TO NEITHER.\n", encoding="utf-8"
+        )
+        run(["git", "-C", str(tree), "commit", "--quiet", "-am", "local edit"], cwd=tree)
+
+    def ref_of(tree: Path) -> str:
+        return str(json.loads((tree / scaffolder.MANIFEST_NAME).read_text(encoding="utf-8"))["skeletor_ref"])
+
+    before = ref_of(taken)
+    _, with_flag = run([sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(taken), "--ported"], cwd=taken)
+    _, without = run([sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(left)], cwd=left)
+
+    problems = []
+    # The plant, asserted before anything is read from it. A scratch commit that
+    # happened to add a file as well would put an `added` in the batch, the guard
+    # would be true for the ordinary reason, and every assertion below would pass
+    # against the scenario this gate exists to avoid.
+    if "LEFT ALONE" not in with_flag:
+        problems.append(f"the plant did not conflict — {subject} was not left alone:\n{with_flag}")
+    for word in ("added", "updated", "merged cleanly"):
+        if f") {word}" in with_flag:
+            problems.append(f"the plant applied something — {word} — so the guard is true for the ordinary reason")
+    if not problems:
+        if ref_of(taken) == before:
+            problems.append(
+                f"--ported left the manifest at {before} with a conflict as the only pending work; "
+                f"the head render is {head_ref} and the run said it had advanced"
+            )
+        if "already advanced the base" in with_flag and ref_of(taken) == before:
+            problems.append("the claim and the deed disagree: it announced an advance it did not perform")
+        # The other half of the same defect. The instruction naming `--ported`
+        # lives on the branch that holds the base back, which before this fix
+        # could not fire when nothing applied — so a user meeting a real conflict
+        # was told to port by hand and never told the flag that records it.
+        if "--ported" not in without:
+            problems.append("a plain conflict run never names --ported, the flag that resolves it")
+        if ref_of(left) != before:
+            problems.append(f"a plain conflict run advanced the base {before} → {ref_of(left)}")
+
+    return [
+        Result(
+            f"ported-only: a lone conflict holds the base, --ported moves it to {head_ref}",
+            not problems,
+            time.time() - started,
+            "\n".join(problems) or f"diverged on {subject}",
+        )
+    ]
+
+
 def entangled_gate(workdir: Path) -> List[Result]:
     """A clean file that imports a conflicted one is named, not left quiet.
 
@@ -3589,6 +3730,9 @@ def main() -> int:
             results.append(gate)
 
         for gate in pending_ref_gate(workdir):
+            results.append(gate)
+
+        for gate in ported_only_conflict_gate(workdir):
             results.append(gate)
 
         for gate in entangled_gate(workdir):
