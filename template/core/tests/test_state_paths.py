@@ -26,14 +26,28 @@ pytestmark = [pytest.mark.unit]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scanning import scanned  # noqa: E402
-from scripts.paths import CLI_DIR, PROJECT_ROOT, SCRIPTS_DIR, STATE_SLUG, state_dir  # noqa: E402
+from scripts.paths import (  # noqa: E402
+    CLI_DIR,
+    PROJECT_ROOT,
+    SCRIPTS_DIR,
+    STATE_ROOT_DEFAULT,
+    STATE_ROOT_ENV,
+    STATE_SLUG,
+    state_dir,
+)
 
 #: The one module allowed to name the root. Everything else asks it.
 RESOLVER = SCRIPTS_DIR / "paths.py"
 
 #: What a second definition looks like: the directory name, or the environment
 #: variable, written somewhere that is not the resolver.
-ROOT_TOKENS = re.compile(r"sl-agent-logs|SL_AGENT_LOGS")
+#:
+#: **Read out of the resolver, not repeated here.** A literal pattern is the
+#: second definition this test exists to forbid, wearing the costume of the test
+#: that forbids it — and it fails in the safe-looking direction, because a root
+#: that was renamed stops matching and the check goes quietly green over a tree
+#: full of stale copies.
+ROOT_TOKENS = re.compile("|".join(re.escape(token) for token in (STATE_ROOT_ENV, STATE_ROOT_DEFAULT.name)))
 
 
 def _sources():
@@ -65,7 +79,7 @@ def test_the_slug_is_not_the_directory_name():
 
 def test_the_override_is_honoured_when_the_path_is_used(monkeypatch, tmp_path):
     """A constant would freeze this at import, and the knob would be a comment."""
-    monkeypatch.setenv("SL_AGENT_LOGS", str(tmp_path))
+    monkeypatch.setenv(STATE_ROOT_ENV, str(tmp_path))
     assert state_dir("ledger").parent == tmp_path / STATE_SLUG
 
 

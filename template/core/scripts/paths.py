@@ -130,13 +130,22 @@ TMP_DIR = PROJECT_ROOT / "tmp"
 
 
 # ── State: the record, outside the checkout ──────────────────────────────────
-#: The workspace-wide root for the agentic record — transcripts, ledgers,
-#: per-job memory, the payloads agent stages read. Deliberately **not** under
-#: `PROJECT_ROOT`, and that is the whole point: it outlives any one checkout, is
-#: shared by every worktree of this repo, and cannot be reached by
-#: `git clean -fdx`. See `~/skyrow.labs/sl-agent-logs/README.md`.
-STATE_ROOT_ENV = "SL_AGENT_LOGS"
-STATE_ROOT_DEFAULT = Path.home() / "skyrow.labs" / "sl-agent-logs"
+#: The root for the agentic record — transcripts, ledgers, per-job memory, the
+#: payloads agent stages read. Deliberately **not** under `PROJECT_ROOT`, and
+#: that is the whole point: it outlives any one checkout, is shared by every
+#: worktree of this repo, and cannot be reached by `git clean -fdx`.
+#:
+#: The default is a shared root with `STATE_SLUG` below it, not a private one,
+#: so several projects on a machine land side by side and a retention sweep has
+#: one directory to walk. `~/.local/state` because that is where a state file
+#: that is neither cache nor config belongs on a Linux box, and `agent-logs`
+#: because the name has to be distinctive enough for `test_state_paths.py` to
+#: recognise a second definition of it.
+#:
+#: Point it somewhere else with the environment variable — one root shared by
+#: every project you run, or a scratch path in a test.
+STATE_ROOT_ENV = "{{CLI_ENV_PREFIX}}_STATE_ROOT"
+STATE_ROOT_DEFAULT = Path.home() / ".local" / "state" / "agent-logs"
 
 #: This project's directory under that root. Written in rather than taken from
 #: `PROJECT_ROOT.name`, because a **linked worktree's directory is not the

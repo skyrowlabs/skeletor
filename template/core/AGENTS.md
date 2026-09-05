@@ -177,9 +177,12 @@ rules in `docs/rules/output.md`.
 ### 14. Agent State Goes Through the Resolver
 
 Transcripts, ledgers, per-job memory and the payloads agent stages read live under
-`~/skyrow.labs/sl-agent-logs/{{PROJECT_SLUG}}/`, never in this checkout. A record that
-lives in a working tree is one `git clean -fdx` from gone, and is invisible to every
-other worktree of this repo.
+`state_dir()`, never in this checkout. A record that lives in a working tree is one
+`git clean -fdx` from gone, and is invisible to every other worktree of this repo.
+
+Where that resolves to is `scripts/paths.py`'s answer and is deliberately not written
+here: a path in this file is a second definition, and this rule is the one forbidding
+those. Run `python -c "from scripts.paths import state_dir; print(state_dir())"`.
 
 Reach it with `state_dir()` from `scripts/paths.py`. **Never a literal path, and never
 a second definition of one.** The second is the one that looks fine in review: split

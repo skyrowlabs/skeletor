@@ -26,11 +26,11 @@ pytestmark = [pytest.mark.unit]
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.paths import STATE_SLUG  # noqa: E402
+from scripts.paths import STATE_ROOT_ENV, STATE_SLUG  # noqa: E402
 from scripts.reporting.run_ledger import ledger_path  # noqa: E402
 
 
 def test_the_ledger_goes_through_the_resolver(monkeypatch, tmp_path):
     """Not merely 'is outside the repo' — actually derived from `state_dir`."""
-    monkeypatch.setenv("SL_AGENT_LOGS", str(tmp_path))
+    monkeypatch.setenv(STATE_ROOT_ENV, str(tmp_path))
     assert ledger_path().is_relative_to(tmp_path / STATE_SLUG)

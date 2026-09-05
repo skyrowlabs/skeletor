@@ -1722,6 +1722,56 @@ name it. **The manifest bug, in the warning about the manifest bug**, found by
 building the thing that predicts it. The two are one set now, which is what
 makes the prediction worth anything.
 
+### The default that every tree able to see it was structurally unable to see
+
+`scripts/paths.py` shipped
+
+```python
+STATE_ROOT_ENV = "SL_AGENT_LOGS"
+STATE_ROOT_DEFAULT = Path.home() / "skyrow.labs" / "sl-agent-logs"
+```
+
+in `template/core/`, so **every tier** — a scaffold made by anybody, anywhere,
+put its transcripts and ledgers under a directory named after somebody else's
+company, and read an environment variable whose prefix is that company's
+initials. Neither is a preference that happened to be wrong; both are one
+workspace's local convention published as a generator's default.
+
+What makes it worth a section is why nobody caught it. mind.head measured their
+own tree and reported the thing they could not have found by running it: the
+default **resolves correctly there**, because that tree lives under
+`~/skyrow.labs` and the path exists. Their four gates pass. So do everyone
+else's — stash.flow, node-zero, proto.pilot and sky.boss are all siblings under
+the same root.
+
+> **The five trees best placed to report this are the five that cannot.**
+
+That is the workspace's seam rule arriving from the other side. A suite cannot
+find a disagreement about an artifact when its writer and its reader share the
+mistake, and here the template learned the convention *from* the neighbourhood
+it was then tested in. Four green adoption reports are evidence about a great
+many things and no evidence at all about this line. It is the emptiest kind of
+green: not unexamined, but examined by parties who agree by construction.
+
+The replacement is a shared root with `STATE_SLUG` below it, unchanged in shape:
+`~/.local/state/agent-logs`, where a state file that is neither cache nor config
+belongs, with a distinctive tail because `test_state_paths.py` has to recognise
+a second definition of it by name. The environment variable takes the project's
+own prefix and stays the **first** thing checked — mind.head's condition, and
+the right one: an override is how an adopter whose environment disagrees with
+the default fixes it without diverging the file, and a file nobody has diverged
+is where a template change arrives as a silent clean apply.
+
+Two second homes came out with it. The test's `ROOT_TOKENS` was a literal
+`r"sl-agent-logs|SL_AGENT_LOGS"` — the second definition this test exists to
+forbid, wearing the costume of the test that forbids it, and failing in the
+reassuring direction: rename the root and the pattern matches nothing, so the
+check goes green over a tree full of stale copies. It is read out of the
+resolver now. And `AGENTS.md`'s Rule 14 stated the path in prose, which
+`test_state_paths.py` cannot see because it scans `cli/` and `scripts/` for
+Python. The rule forbidding a second definition of the path contained one; it
+names `state_dir()` and tells the reader to ask it.
+
 ### A report and the deed it reports, separated by a condition
 
 `--ported` is the user asserting a pending file is resolved, so the base may
