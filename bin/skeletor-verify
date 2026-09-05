@@ -1302,6 +1302,173 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
     return results
 
 
+def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """The footer that tells a reader not to verify an upgrade by counting.
+
+    proto.pilot's v0.3.6 → v0.4.2 run collected 633 tests before and after, and
+    five had changed — five removed, five added, the equality a coincidence. A
+    total is a negative assertion over a set wearing a number's clothes, which
+    is the rule `scanned()` states for enumerations, and nothing in the upgrade
+    output said so.
+
+    Three things are asserted, and the second and third are why this is a gate
+    rather than a line of prose somebody eyeballed once:
+
+    * A real run that wrote under `tests/` prints it, naming the target's HEAD
+      **as it was before the run** — the value of the line is that it is
+      paste-able, and a footer naming the wrong commit is worse than none.
+    * A run that wrote nothing under `tests/` does not. Always-on prose in this
+      output gets skimmed, and this instruction earns attention by being rare.
+    * A dry run does not, for the reason the sidecar rule exists: a dry run must
+      not send anybody to inspect a state it did not produce.
+
+    The skew is `sidecar_gate`'s, one classification over. An `updated` needs the
+    recorded hash to MATCH what is on disk — the user touched nothing — while the
+    head render differs, so the tamper is to edit the file *and* record the edit.
+    Editing without recording is a conflict, which is written nowhere and would
+    reach none of this.
+
+    ## Why the recipe is executed and not read
+
+    The first draft of that footer printed a pipeline that fails silently, which
+    is the joke this gate exists to stop repeating: a wrong interpreter path or a
+    collection error leaves `grep` writing an empty file, `diff` reports no
+    change, and the reader takes a clean bill off two files containing nothing.
+    A negative assertion over an empty set — delivered by the command whose whole
+    purpose is to say that counting is not looking.
+
+    Reading the block would not have caught it and did not. Running it did, on
+    the first try, and the fix is a `wc -l` line in the printed recipe. So the
+    gate extracts the commands the tool actually printed and executes them,
+    requiring a non-empty collection. `$PY` is repointed at the shared venv,
+    which is the one substitution: a verify tree never runs the README's setup,
+    so it has no `.venv` of its own.
+    """
+    results: List[Result] = []
+    manifest_name = load_scaffolder().MANIFEST_NAME
+    upgrade_bin = clean_skeletor(workdir) / "bin" / "skeletor-upgrade"
+
+    def manufacture(tree: Path, rel: str) -> None:
+        """Make `rel` read as "the template moved it, the user did not"."""
+        path = tree / rel
+        path.write_text(path.read_text(encoding="utf-8") + "\n# theirs, from the base render\n", encoding="utf-8")
+        manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
+        manifest["files"][rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+        (tree / manifest_name).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    def written_marker(output: str) -> bool:
+        return "do not verify by counting" in output
+
+    started = time.time()
+    result, tree = scaffold(tier, "python", workdir, name="collect-diff")
+    results.append(Result(f"collect-diff: {result.label}", result.ok, result.seconds, result.output))
+    if not result.ok:
+        return results
+
+    manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
+    test_file = next(r for r in sorted(manifest["files"]) if r.startswith("tests/") and r.endswith(".py"))
+    manufacture(tree, test_file)
+
+    # Dry run first, while the tree is still dirty — a dry run is never refused.
+    code, dry_output = run([sys.executable, str(upgrade_bin), str(tree), "--no-base", "--dry-run"], cwd=tree)
+    reached = test_file in dry_output
+
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "-m", "tamper")
+    # The commit the footer must name: the scaffold's first commit is also
+    # sitting right there, so naming *a* sha proves nothing.
+    head = run(["git", "-C", str(tree), "rev-parse", "HEAD"], cwd=tree)[1].strip()
+
+    real_code, real_output = run([sys.executable, str(upgrade_bin), str(tree), "--no-base"], cwd=tree)
+    results.append(
+        Result(
+            "collect-diff: a real run that touched tests/ names the pre-upgrade commit",
+            reached
+            and written_marker(real_output)
+            and head in real_output
+            and not written_marker(dry_output)
+            and "--allow-dirty" not in real_output,
+            time.time() - started,
+            f"the manufacture reached the tool: {reached}\n"
+            f"real run printed it: {written_marker(real_output)}\n"
+            f"named HEAD {head[:12]}: {head in real_output}\n"
+            f"dry run stayed silent: {not written_marker(dry_output)}\n"
+            f"--- dry ---\n{dry_output}\n--- real ---\n{real_output}",
+        )
+    )
+
+    # The recipe, run. Its lines are the ones the tool printed, with `$PY`
+    # repointed at the shared venv — a verify tree never runs the README's setup.
+    started = time.time()
+    recipe = [
+        line.strip()
+        for line in real_output.splitlines()
+        if line.startswith("     ") and not line.strip().startswith("#") and line.strip()
+    ]
+    # `/tmp/` is the recipe's own suggestion and is wrong for a gate — two trees
+    # would collide on it. Everything else is executed as printed.
+    scratch = workdir / "collect-diff-run"
+    scratch.mkdir(exist_ok=True)
+
+    # The interpreter is NOT substituted. `$(pwd)/.venv/bin/python` is a path the
+    # recipe names out loud, and a gate that swapped it in would be unable to
+    # catch the one thing that actually went wrong first — a path pointing at
+    # nothing. A verify tree never runs the README's setup, so the venv is
+    # symlinked to the shared one and the line is executed exactly as printed.
+    if not (tree / ".venv").exists():
+        (tree / ".venv").symlink_to(venv_python.parent.parent)
+
+    def rehome(line: str) -> str:
+        """The recipe's own two scratch files, moved out of a shared `/tmp/`.
+
+        By name, not by prefix: a blanket `/tmp/` rewrite also caught the
+        interpreter path, since a verify workdir lives under `/tmp/` too. The
+        gate then ran nothing and reported a clean comparison — the failure mode
+        under test, arriving inside the thing testing for it.
+        """
+        for name in ("before.txt", "after.txt"):
+            line = line.replace(f"/tmp/{name}", str(scratch / name))
+        return line
+
+    script = "\n".join(rehome(line) for line in recipe)
+    code, ran = run(["bash", "-c", script], cwd=tree)
+    before = scratch / "before.txt"
+    collected = [ln for ln in before.read_text().splitlines() if "::" in ln] if before.exists() else []
+    results.append(
+        Result(
+            f"collect-diff: the printed recipe runs and collects something ({len(collected)} ids)",
+            code == 0 and len(collected) > 0 and len(recipe) >= 5,
+            time.time() - started,
+            f"{len(recipe)} command line(s) extracted, exit {code}, {len(collected)} collected ids\n"
+            f"--- script ---\n{script}\n--- output ---\n{ran}",
+        )
+    )
+
+    # And the other direction, which is the one an unconditional footer passes.
+    started = time.time()
+    result, other = scaffold(tier, "python", workdir, name="collect-diff-none")
+    if not result.ok:
+        results.append(Result(f"collect-diff: {result.label}", False, result.seconds, result.output))
+        return results
+
+    manifest = json.loads((other / manifest_name).read_text(encoding="utf-8"))
+    doc = next(r for r in sorted(manifest["files"]) if r.endswith(".md") and not r.startswith("tests/"))
+    manufacture(other, doc)
+    git_in(other, "add", "-A")
+    git_in(other, "commit", "-m", "tamper")
+
+    code, output = run([sys.executable, str(upgrade_bin), str(other), "--no-base"], cwd=other)
+    results.append(
+        Result(
+            "collect-diff: a run that touched no test file stays quiet",
+            doc in output and not written_marker(output),
+            time.time() - started,
+            f"the manufacture reached the tool: {doc in output}\n{output}",
+        )
+    )
+    return results
+
+
 def clean_skeletor(workdir: Path) -> Path:
     """A committed clone of this checkout, cloned once and reused.
 
@@ -1969,6 +2136,10 @@ def main() -> int:
             results.append(gate)
 
         for gate in sidecar_gate(fullest, workdir):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        for gate in collect_diff_gate(fullest, workdir, venv_python):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 

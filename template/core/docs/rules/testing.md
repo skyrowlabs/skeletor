@@ -27,6 +27,18 @@ virtual display, and that setup belongs in that job.
 `tests/test_ci_runs_every_suite.py` fails if a suite the CLI offers is run by
 nothing.
 
+**If nothing here is marked `ui`, delete the job** — set `scheduled=False,
+unscheduled="empty"` on the row in `cli/test_cmds.py` and remove the job from
+`ci.yml`. Nothing else references it, and `tests/test_workflow_job_graph.py`
+holds that: a `needs:` naming a deleted job is a `startup_failure`, which is
+zero jobs and no logs rather than a red check.
+
+An exemption has to say **which kind** it is, because the two expire
+differently. `unattended` is a fact about the suite and keeps. `empty` is a fact
+about this tree's contents, and the moment somebody marks a test the row is
+false with nothing red — so the registry implies an emptiness assertion and the
+suite writes it for you.
+
 `tests/test_marker_coverage.py` fails the unit suite if a test file declares no marker.
 
 **Never** add a per-feature CI step, a `run_tests.sh` case, or a CLI entry for a new test

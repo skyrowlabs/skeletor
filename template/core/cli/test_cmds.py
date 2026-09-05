@@ -42,14 +42,38 @@ class Suite(NamedTuple):
     #: otherwise requires a workflow here to select every marker this file
     #: offers.
     #:
-    #: Both fields default to the answer that is safe to get wrong, which is
+    #: Both booleans default to the answer that is safe to get wrong, which is
     #: what makes them defaults rather than a question quietly skipped. Omit
     #: this one and the new suite is OBLIGED to have a job, so forgetting is a
     #: red gate naming the marker; write `scheduled=False` and you have made a
     #: claim somebody can read. The other direction — a suite CI ignores by
     #: default — is the silent hole this whole file exists to close.
     scheduled: bool = True
+    #: Required when `scheduled=False`, and one of `UNSCHEDULED`. See there for
+    #: why an exemption has to say which kind it is.
+    unscheduled: str = ""
 
+
+#: The two ways a suite can be excused from CI, which have different lifetimes
+#: — proto.pilot's distinction, and the reason the exemption is not a bare
+#: `False`.
+#:
+#: `unattended` is a fact about the suite: it cannot run without money or a
+#: person, and that stays true however many tests it gains. `empty` is a fact
+#: about the tree's *contents*, and contents change — mark one test with the
+#: marker and the row is false with no edit to it, no workflow change, and
+#: nothing red anywhere. That is the hole this file was rewritten to close,
+#: reappearing under its own exemption and therefore past the gate built to
+#: catch it.
+#:
+#: Which is why the two are spelled apart rather than commented apart: an
+#: `empty` row implies an emptiness assertion, and
+#: `tests/test_ci_runs_every_suite.py` writes it for free from this map. Nobody
+#: has to notice they needed one.
+UNSCHEDULED = {
+    "unattended": "cannot run without money or a person — true whatever tests it gains",
+    "empty": "nothing carries this marker yet — asserted, and it expires when something does",
+}
 
 #: The suites, and the whole of the table. A test file joins one by declaring
 #: the marker; nothing here is a file list.
@@ -59,7 +83,11 @@ SUITES = {
     # Costs money or needs a person. The one row CI is not expected to run, and
     # the reason that is a field rather than an `if marker != "manual"` in two
     # places, which is what it used to be.
-    "manual": Suite("never in scheduled CI — E2E, live third-party, paid APIs", scheduled=False),
+    "manual": Suite(
+        "never in scheduled CI — E2E, live third-party, paid APIs",
+        scheduled=False,
+        unscheduled="unattended",
+    ),
     # Empty in a headless tree and that is fine — an empty suite is green, and
     # the row costs nothing until something fills it. It exists as a row rather
     # than as a `--ui` overlay because what a TUI, a browser and an Electron

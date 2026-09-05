@@ -188,6 +188,27 @@ def uncommitted(target: Path, *, untracked: bool = False) -> Optional[List[str]]
     return sorted(line[3:] for line in result.stdout.splitlines() if line.strip())
 
 
+def head_commit(target: Path) -> Optional[str]:
+    """The target's HEAD, or None if git cannot say.
+
+    Worth recording because this tool refuses a dirty tree: on an ordinary run
+    HEAD is the pre-upgrade state *exactly*, and this is the only moment anybody
+    gets that for free. By the time the footer's reader acts on it they have
+    committed the upgrade and possibly a fixup, and the answer has become
+    `HEAD~2` if they can remember how many. proto.pilot's point, and it is the
+    difference between a procedure somebody reconstructs and one they paste.
+
+    Nothing here commits, so HEAD does not move during a run and reading it
+    early is tidiness rather than correctness. `uncommitted()` beside it is the
+    opposite: writing makes the tree dirty, so that one must be read first or it
+    answers about this run's own output.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(target), "rev-parse", "HEAD"], capture_output=True, text=True
+    )
+    return result.stdout.strip() or None if result.returncode == 0 else None
+
+
 def refuse_a_dirty_base(base: Path, writing: str) -> None:
     """A base render nobody can reproduce must not be written into a manifest.
 
@@ -582,6 +603,11 @@ def main() -> int:
 
     if not (args.dry_run or args.repair_manifest or args.allow_dirty):
         refuse_a_dirty_tree(target)
+
+    pre_upgrade = head_commit(target)
+    # This one before a single byte is written, or it answers about the upgrade's
+    # own output rather than about work that was already here.
+    interleaved = bool(args.allow_dirty and uncommitted(target))
 
     manifest = read_manifest(target)
     recorded = manifest.get("args") or []
@@ -981,6 +1007,42 @@ def main() -> int:
             for rel in dropped:
                 item(rel)
             detail("Delete them yourself if you agree. This never removes your files.")
+
+        # Only when this run actually wrote a test file, and only on a real run.
+        # Always-on prose in this output gets skimmed, and this instruction earns
+        # attention precisely because it is rare — proto.pilot's point, and the
+        # reason it is conditional rather than a standing line in the footer.
+        touched_tests = sorted(r for r in added + updated + merged if r.startswith("tests/"))
+        if touched_tests and not args.dry_run:
+            say("ℹ️ ", f"{len(touched_tests)} file(s) under tests/ changed — do not verify by counting")
+            detail()
+            detail("A collected-test total is a negative assertion over a set wearing a number's")
+            detail("clothes. The one measured case came back 633 before and 633 after, with five")
+            detail("tests removed and five added. Diff the collected IDs instead:")
+            detail()
+            commit = pre_upgrade or "<the commit you were on before this run>"
+            detail("  PY=$(pwd)/.venv/bin/python          # the worktree gets none of its own")
+            detail(f"  git worktree add ../pre-upgrade {commit}")
+            detail("  $PY -m pytest --collect-only -q | grep :: | sort > /tmp/after.txt")
+            detail("  (cd ../pre-upgrade && $PY -m pytest --collect-only -q | grep :: | sort) > /tmp/before.txt")
+            detail("  wc -l /tmp/before.txt /tmp/after.txt   # two zeros = neither collection ran")
+            detail("  diff /tmp/before.txt /tmp/after.txt")
+            detail()
+            detail("That `wc` is not decoration. If the interpreter path is wrong or collection")
+            detail("errors, `grep` writes an empty file, `diff` reports no change, and you have")
+            detail("read a clean bill off two files that contain nothing — which is this")
+            detail("paragraph's own mistake, committed by the command meant to prevent it.")
+            detail()
+            detail("EXPECT REMOVALS, and read the list rather than its length. A guard moving")
+            detail("into a wrapper deletes the companion test that used to stand beside it, and")
+            detail("that is this upgrade working correctly — in the measured case three of five")
+            detail("removals were exactly that and a fourth was a relocation. Somebody running")
+            detail("this expecting a clean bill either panics or decides the check is noisy, and")
+            detail("the second one costs more.")
+            if interleaved:
+                detail()
+                detail("--allow-dirty: the commit above is the last COMMIT, not the tree this run")
+                detail("started from. Your own uncommitted edits are in that diff too.")
 
         if not any((added, updated, merged, conflicted, collided, declined, dropped)):
             say("✅", "already current — nothing to carry over")

@@ -603,6 +603,53 @@ took the identical code path, and the gate would not have noticed either way.
 It discovers the set from the tree's own registry now — and fails on an empty
 one, because a loop over nothing passes every assertion inside it.
 
+#### The exemption had the same shape as the bug
+
+The fix shipped and proto.pilot took it the same day — and took the exemption,
+which is the option the fix invented and therefore the least exercised half of
+it. Nothing in their tree is marked `ui`, so `scheduled=False` and delete the
+job, exactly as documented. Two things were wrong with that path.
+
+**The template made the documented act break the workflow.** `release-please`
+shipped `needs: [lint, unit-tests, integration, ui]`, so removing the job left a
+dangling reference — and GitHub validates the job graph *before* scheduling, so
+that is not a red job. It is a `startup_failure`: zero jobs, no logs,
+`gh run view --log-failed` answering "log not found", and nothing on the commit
+naming the line. Every local gate was green, because about a suite with no
+marker and no job the registry and the workflows agree perfectly.
+
+`actionlint` catches it, and could not have helped: it runs in skeletor's
+verifier against what skeletor ships, where the job is still there. **The
+failure happens in a tree that has edited the file**, which is the one place
+only the shipped checks can reach. `tests/test_workflow_job_graph.py` is the
+answer, and it generalises past this case — removing a job is ordinary, and the
+reference that outlives it is never in the block you edited. It also covers
+`needs.<job>` in an `if:`, where the same mistake is quieter: an unknown context
+is not an error, it is null, so the condition is false, the job is skipped, and
+branch protection accepts a skipped required check.
+
+**And `scheduled=False` was two claims wearing one spelling.** `manual` is
+unscheduled because it *cannot* run unattended, which stays true however many
+tests it gains. proto.pilot's `ui` was unscheduled because the suite was
+*empty* — a fact about contents, and contents change. Mark one test and the row
+is false with no edit to it, no workflow change, and nothing red anywhere: the
+original bug, reintroduced under its own exemption and therefore past the gate
+built to catch it.
+
+So the reason is data. `UNSCHEDULED` has two entries, a row must name one, and
+naming `empty` implies an emptiness assertion that the suite writes from the
+registry — free in a tree that made no such claim, which is every fresh
+scaffold. It is the `ships_tests`/`scheduled` split again on a third pair of
+questions, and the tell was the same: **a flag that has never been observed to
+disagree with another flag is undistinguished, not confirmed.** Three rows are
+not enough to tell two booleans apart; the fourth row is where the coincidence
+shows.
+
+Ground truth is pytest's own collection, not a scan for `pytestmark`. A single
+`@pytest.mark.ui` on one function is invisible to a source scan and perfectly
+visible to the runner — and it is exactly what somebody writes on the day the
+exemption stops being true.
+
 ---
 
 ## CI, cost, and the draft-PR discipline

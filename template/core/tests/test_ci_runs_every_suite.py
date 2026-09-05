@@ -30,6 +30,7 @@ tree learned it the expensive way.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -41,12 +42,17 @@ pytestmark = [pytest.mark.unit]
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cli.test_cmds import SUITES  # noqa: E402
+from cli.test_cmds import SUITES, UNSCHEDULED  # noqa: E402
 from scanning import scanned  # noqa: E402
 from scripts.paths import GITHUB_DIR  # noqa: E402
 from scripts.yaml_text import read_uncommented  # noqa: E402
 
 WORKFLOWS = GITHUB_DIR / "workflows"
+TESTS_DIR = Path(__file__).resolve().parent
+
+#: `-p no:cacheprovider` because this runs inside a pytest run: a nested
+#: collection must not write to the outer run's cache directory.
+COLLECT = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "--collect-only", "-q"]
 
 #: A marker expression, as it appears after `pytest` on a command line. The
 #: anchor is `pytest` and not the start of the line, because every invocation
@@ -131,4 +137,56 @@ def test_an_unscheduled_suite_is_not_quietly_running():
     assert not running, (
         f"{running} declare `scheduled=False` in cli/test_cmds.py but a workflow selects them: "
         f"{ {m: selected_markers()[m] for m in running} }. Fix the row or the workflow."
+    )
+
+
+def test_an_unscheduled_suite_says_which_kind_and_a_scheduled_one_does_not():
+    """`scheduled=False` is two different claims and only one of them keeps.
+
+    `manual` cannot run unattended, which stays true whatever tests it gains.
+    A suite can also be excused because nothing carries its marker *yet*, and
+    that expires the moment somebody writes one — silently, since the row is
+    not edited and no workflow changes. The row has to say which it is, or a
+    reader cannot tell and neither can the check below.
+
+    Both directions, because a guard that outlives its premise is the failure
+    this is about: an unscheduled suite must name a reason, and a scheduled one
+    must not still be carrying a stale one from when it was excused.
+    """
+    unexplained = sorted(m for m, s in SUITES.items() if not s.scheduled and s.unscheduled not in UNSCHEDULED)
+    stale = sorted(m for m, s in SUITES.items() if s.scheduled and s.unscheduled)
+
+    assert not unexplained, (
+        f"{unexplained} set `scheduled=False` without saying which kind of exemption it is. "
+        f"Pick one of {sorted(UNSCHEDULED)} — they have different lifetimes, and `empty` is the "
+        "one that expires without anybody touching the row."
+    )
+    assert not stale, (
+        f"{stale} are scheduled and still name an `unscheduled` reason. Clear it: the reason "
+        "outlived the exemption, and a stale reason is read as a live one."
+    )
+
+
+def test_a_suite_excused_as_empty_is_actually_empty():
+    """The assertion an `empty` exemption implies, written from the registry.
+
+    Free in a tree with no such row, which is every fresh scaffold — the loop is
+    over the rows that made the claim, so nobody pays for a claim they did not
+    make. pytest's own collection is the ground truth here rather than a scan
+    for `pytestmark`: a single `@pytest.mark.<suite>` on one function is invisible
+    to a source scan and perfectly visible to the runner, and it is exactly what
+    somebody writes on the day this exemption stops being true.
+    """
+    claimed = sorted(m for m, s in SUITES.items() if s.unscheduled == "empty")
+    populated = {}
+    for marker in claimed:
+        result = subprocess.run([*COLLECT, str(TESTS_DIR), "-m", marker], capture_output=True, text=True)
+        # 5 is pytest for "the marker selected nothing", which is the claim.
+        if result.returncode != 5:
+            populated[marker] = [ln for ln in result.stdout.splitlines() if "::" in ln][:10]
+
+    assert not populated, (
+        f"these suites are excused from CI as empty and are not: {populated}. Nothing runs them, "
+        "so those tests are collected by no job and every check is green over a smaller set. "
+        "Set `scheduled=True` and add a job, or move the tests to a suite that runs."
     )

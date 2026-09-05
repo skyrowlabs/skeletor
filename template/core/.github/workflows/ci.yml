@@ -289,6 +289,11 @@ jobs:
   # needs its driver installed; an Electron window needs a virtual display
   # (`xvfb-run`). Add that here — this job failing for want of a display is the
   # intended way to find out, and is the whole point of it not being silent.
+  #
+  # Or DELETE this job, if nothing here is marked `ui`: set `scheduled=False`
+  # with `unscheduled="empty"` on the row in cli/test_cmds.py and no other file
+  # references this one. `tests/test_workflow_job_graph.py` is what makes that
+  # claim checkable rather than remembered.
   ui:
     name: UI Tests
     needs: gate
@@ -340,10 +345,17 @@ jobs:
           fi
 
   # ── Release automation ──────────────────────────────────────────────────
+  # `ui` is deliberately NOT in `needs` below, and this is the reason: that job
+  # is the one job here documented as removable — a repo with nothing marked
+  # `ui` sets `scheduled=False` on the row and deletes it. A `needs:` entry
+  # naming a job that is gone is not a red job, it is a `startup_failure`: zero
+  # jobs, no logs, and nothing on the commit naming the line. proto.pilot pushed
+  # exactly that and got an empty run to stare at. `manual` is absent for the
+  # same reason, one step further along — it never had a job at all.
   release-please:
     name: Release Please
     if: github.event_name == 'push' && github.ref == 'refs/heads/{{RELEASE_BRANCH}}'
-    needs: [lint, unit-tests, integration, ui]
+    needs: [lint, unit-tests, integration]
     runs-on: ubuntu-latest
     permissions:
       contents: write

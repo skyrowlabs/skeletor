@@ -112,6 +112,23 @@ up in [`docs/DESIGN_RATIONALE.md`](docs/DESIGN_RATIONALE.md): a marker is how a
 test joins a suite and equally how it leaves CI, and only one of those is
 visible.
 
+Its **exemption** then had the same shape as the bug, twice over, and both are
+worth knowing before touching that registry. `release-please` carried `ui` in
+its `needs:` while the docs said to delete the job — and a `needs:` naming a
+job that is gone is a `startup_failure`, so zero jobs run, no logs exist, and
+nothing on the commit names the line. `actionlint` catches it here and cannot
+help there: the failure happens in a tree that edited the file, which only a
+shipped check reaches. And `scheduled=False` meant both *cannot run* and
+*nothing to run yet*, which expire differently — the second silently. The reason
+is data now, and naming `empty` makes the tree assert its own emptiness.
+
+The generalisation, proto.pilot's and the reason two of these are one class:
+**a flag that has never been observed to disagree with another flag is
+undistinguished, not confirmed.** Three registry rows cannot tell two booleans
+apart; the fourth is where the coincidence shows. Both splits here —
+`ships_tests` out of `scheduled`, and the reason out of `scheduled=False` —
+were made on that row.
+
 The two newest are the **setup path**, which this file's own gates had never
 once executed. Everything above verifies a tree that is already installed —
 `make_venv` builds one shared venv and symlinks it in — so the commands a reader
