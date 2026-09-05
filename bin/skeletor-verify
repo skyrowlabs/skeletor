@@ -51,7 +51,13 @@ SCAFFOLDER = SKELETOR / "bin" / "skeletor-new"
 #: here that no generated tree installs. It checks what skeletor SHIPS rather
 #: than what a tree runs on itself — see `actionlint_gate`. Pinned, so
 #: `bin/skeletor-check-pins` reports it going stale like every other pin.
-EXTRA_PACKAGES = ["pytest", "pytest-timeout", "click", "actionlint-py==1.7.12.24"]
+#: `pytest-cov` is here for the same reason as `pytest-timeout` and a sharper
+#: one: `coverage_gate` runs the tree's own `test coverage`, which is the
+#: command that could not pass in any tree. Without the plugin that gate fails
+#: on a missing argument rather than on the thing it is asking about, which is
+#: a false red — and a false red on a gate about a false green is the worst
+#: possible pair to be reading at once.
+EXTRA_PACKAGES = ["pytest", "pytest-timeout", "pytest-cov", "click", "actionlint-py==1.7.12.24"]
 
 #: Lint hooks whose args are read out of the generated tree's own
 #: `.pre-commit-config.yaml` rather than repeated here. Copying the args would
@@ -2137,6 +2143,67 @@ def shadow_gate(workdir: Path, venv_python: Path) -> Result:
     )
 
 
+def coverage_gate(workdir: Path, venv_python: Path) -> Result:
+    """`<cli> test coverage` passes, and fails when the budget is breached.
+
+    It could not pass in any tree, and the reason it survived is the second
+    half. `coverage` asked pytest for `term-missing` only while
+    `check_coverage_budget.py` three lines below looked for `tmp/coverage.xml`
+    — two literals in one function that did not match, the checker's own
+    docstring giving the correct invocation. So the ratchet had nothing to read
+    and said so, **and the command exited 0 anyway**, because `sys.exit(code)`
+    carried pytest's result and the checker's was discarded.
+
+    That ordering is the lesson: a gate reporting its own failure as success is
+    worse than one that never runs, since the output says it looked. And with
+    nothing to measure, the ratchet never disagreed — so nothing ever tested
+    whether disagreement was reported. The first bug is why the second was
+    invisible.
+
+    Both halves are asserted, and the breach is planted by raising the tree's
+    own baseline above what it measures. A green run alone would pass on a
+    command that had stopped checking anything, which is exactly the state this
+    was in.
+    """
+    started = time.time()
+    target = workdir / "coverage-probe"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(target), "--name", "Probe",
+         "--cli", CLI_NAME, "--tagline", "t", "--tier", "core"],
+        cwd=SKELETOR,
+    )
+    if code != 0:
+        return Result("coverage: scaffold", False, time.time() - started, output)
+    (target / ".venv").symlink_to(venv_python.parents[1])
+
+    code, output = run([str(target / CLI_NAME), "test", "coverage"], cwd=target)
+    if code != 0:
+        return Result(
+            "coverage: `test coverage` passes on a fresh tree", False, time.time() - started,
+            f"exited {code}\n{output[-1500:]}",
+        )
+    report = target / "tmp" / "coverage.xml"
+    if not report.exists():
+        return Result(
+            "coverage: the run wrote the report the ratchet reads", False, time.time() - started,
+            f"{report} was not written, so the ratchet measured nothing and the command still passed",
+        )
+
+    budget = target / "tests" / "coverage_budget.json"
+    data = json.loads(budget.read_text(encoding="utf-8"))
+    assert "unit" in data.get("suites", {}), f"no unit suite in {budget} — the plant would prove nothing"
+    data["suites"]["unit"]["baseline_pct"] = 99.9
+    budget.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    breached, output = run([str(target / CLI_NAME), "test", "coverage"], cwd=target)
+
+    return Result(
+        "coverage: `test coverage` measures, and a breach is reported",
+        breached != 0,
+        time.time() - started,
+        "" if breached else "a baseline raised to 99.9% still exited 0 — the checker's result is discarded",
+    )
+
+
 def dirty_scope_gate(workdir: Path) -> Result:
     """Only dirt a render reads refuses an upgrade; the rest is not the tool's business.
 
@@ -3123,6 +3190,7 @@ def main() -> int:
         venv_python = make_venv(workdir, args.quiet)
         results.append(shadow_gate(workdir, venv_python))
         results.append(dirty_scope_gate(workdir))
+        results.append(coverage_gate(workdir, venv_python))
         pyright_ok, pyright_note = warm_pyright(venv_python)
         if not args.quiet:
             print(f"   pyright {pyright_note}" if pyright_ok else f"   ⚠️  pyright unavailable: {pyright_note}")

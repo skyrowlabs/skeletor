@@ -14,6 +14,7 @@ from typing import NamedTuple
 import click
 
 from cli.helpers import PROJECT_ROOT, run, shell, skip, step, summarize
+from scripts.paths import TMP_DIR
 
 #: pytest's exit code for "the marker you asked for selected nothing".
 NO_TESTS_COLLECTED = 5
@@ -177,10 +178,27 @@ def coverage(worst: int) -> None:
 
     The list is the point: it tells you where a new test buys the most, which is
     a better question than "what is the number".
+
+    **The report path is one variable, passed to both.** It was two literals
+    three lines apart that did not match: pytest was asked for
+    `term-missing` only, and `check_coverage_budget.py` then looked for
+    `tmp/coverage.xml` and found nothing. Its own docstring gives the correct
+    invocation, so the file that knows the answer was the one being told.
+
+    **And the checker's exit code was discarded**, which is the worse half and
+    was hidden by the first: `sys.exit(code)` carried pytest's result, so this
+    command printed the ratchet's ❌ and returned **0**. A gate that reports its
+    own failure as success is worse than one that never runs — the output says
+    it looked. Both are one fix, and the second is why the first survived: with
+    nothing to measure the ratchet never disagreed, so nothing ever tested
+    whether disagreement was reported.
     """
+    report = TMP_DIR / "coverage.xml"
+    report.parent.mkdir(parents=True, exist_ok=True)
     code = run(
-        [sys.executable, "-m", "pytest", "tests/", "-m", "unit", "-q", "--cov", "--cov-report=term-missing"]
+        [sys.executable, "-m", "pytest", "tests/", "-m", "unit", "-q",
+         "--cov", "--cov-report=term-missing", f"--cov-report=xml:{report}"]
     ).returncode
     if code == 0:
-        run([sys.executable, "scripts/check_coverage_budget.py"])
+        code = run([sys.executable, "scripts/check_coverage_budget.py", "--xml", str(report)]).returncode
     sys.exit(code)
