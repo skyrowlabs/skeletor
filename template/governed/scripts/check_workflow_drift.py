@@ -1,10 +1,33 @@
 #!/usr/bin/env python3
-"""Every job that stands up the stack does it the same way.
+"""Every job that stands up the stack carries the steps that make it work.
 
 The bug this exists for: two workflows both booted the stack, one of them was
 missing a setup step the other had, and three tests failed **every** run for two
 days while the same tests passed in the other workflow. Nobody looked, because
 each job's history was internally consistent.
+
+**Read `REQUIRED_STEPS` before trusting this.** It is the whole of what is
+compared, and it is deliberately short — this asks whether each enrolled job
+carries the steps below, not whether the jobs are identical. A field outside
+that dict can diverge silently and this stays green.
+
+That distinction is not pedantry. A gate answering a narrower question than its
+name is worse than no gate, because the green is read as covering the wider one
+— which is why `check_doc_tables.py` reports what it enumerated. jam.sense lost
+a run to precisely this one layer along: a workflow declaring itself a mirror of
+another in a comment, with a test that compared runner, interpreter,
+dependencies, marker, commands and both budget checks — and not
+`timeout-minutes`. The mirrored job raised its own 10 to 20; nothing carried it;
+the mirror was killed at 10m0s having printed `8528 passed` and reported
+`failure`, which is the signal two unattended jobs gate on. **The comment said
+"mirror" and the test defined what "mirror" meant, and the two disagreed about
+one field.**
+
+So: adding a field here is cheap, and widening the *claim* without widening the
+dict is the mistake. If you need real equality between two jobs, assert it
+against the other job's text rather than against a value written down twice —
+a literal is a second copy, and keeping the copy in sync is the thing that does
+not happen.
 
 Two design choices are load-bearing:
 
