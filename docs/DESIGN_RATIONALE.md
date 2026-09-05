@@ -1762,6 +1762,31 @@ the right one: an override is how an adopter whose environment disagrees with
 the default fixes it without diverging the file, and a file nobody has diverged
 is where a template change arrives as a silent clean apply.
 
+`bin/skeletor-verify` gates it now, because inspection found this one and
+nothing stopped the next. **The homogeneity that hid it would equally hide a bad
+fix** — in a tree under `~/skyrow.labs` a correct substitution and a hardcoded
+literal produce the same string, so verifying there is vacuous, and the outside
+coordinate has to be manufactured. `author_leak_gate` derives who this checkout
+belongs to from the machine and the remote — the directories above it, the home
+directory's name, `origin`'s owner, the committer's email — and asserts a
+rendered tree contains none of them. A population, not a list of the leaks
+somebody already found; comparison on alphanumerics only, so `skyrow.labs`,
+`skyrow-labs` and `skyrowlabs` are one token. `GENERIC_PATH_WORDS` is the
+definition of that population rather than an exemption from it: `runner` and
+`work` are in it because GitHub checks out to `/home/runner/work/<repo>/<repo>`
+and would otherwise supply two tokens that appear in any tree mentioning
+Actions.
+
+Two things it is careful about, both this repository's own rules. It refuses to
+run on an empty token set instead of passing — a scan for nothing is green and
+worth nothing — and it plants in **both** directions, requiring the detector to
+find a synthetic leak and to stay silent on text naming nobody, because a
+normaliser that stripped too much would match everything and pass the first
+check alone. And it does not claim initials: `SL_AGENT_LOGS` leaked the same
+organisation in a form no derivation produces without guessing, and a gate that
+guessed would be a list wearing a pattern's clothes. That half is closed by the
+fix, and saying so beats implying otherwise.
+
 Two second homes came out with it. The test's `ROOT_TOKENS` was a literal
 `r"sl-agent-logs|SL_AGENT_LOGS"` — the second definition this test exists to
 forbid, wearing the costume of the test that forbids it, and failing in the

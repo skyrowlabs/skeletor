@@ -3006,6 +3006,128 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
     return results
 
 
+#: Path components that name a machine or a hosting convention rather than a
+#: person or an organisation, so `author_leak_gate` does not treat them as
+#: identifying. Not an exemption list — nothing is being excused. It is the
+#: definition of the token population, and every entry is a word a CI runner or
+#: a filesystem layout supplies for reasons that have nothing to do with who
+#: wrote the template. `runner` and `work` are here because GitHub checks out to
+#: `/home/runner/work/<repo>/<repo>`, and without them this gate would derive
+#: two tokens on CI that appear all over any tree that mentions Actions.
+GENERIC_PATH_WORDS = {
+    "code", "data", "dev", "git", "home", "local", "media", "mnt", "opt", "projects", "repos", "root",
+    "run", "runner", "src", "srv", "tmp", "usr", "users", "var", "work", "workspace",
+}
+
+
+def author_tokens() -> List[str]:
+    """Who this checkout belongs to, as strings a render must not contain.
+
+    Derived from the machine and the remote, never listed: the directories above
+    this checkout, the home directory's name, the owner in `origin`'s URL, and
+    the local part of the committer's email. Anything identifying is in at least
+    one of those by construction, which is what makes this a population rather
+    than a list of the leaks somebody already found.
+
+    Comparison is on alphanumerics only, both sides, so `skyrow.labs`,
+    `skyrow-labs` and `skyrowlabs` are one token. The checkout's own name is
+    excluded — a scaffold says `skeletor` all over, correctly.
+    """
+    raw = {Path.home().name}
+    raw.update(part for part in SKELETOR.resolve().parts if part != SKELETOR.name)
+    origin = run(["git", "-C", str(SKELETOR), "remote", "get-url", "origin"], cwd=SKELETOR)[1].strip()
+    match = re.search(r"[/:]([^/:]+)/[^/]+?(?:\.git)?$", origin)
+    if match:
+        raw.add(match.group(1))
+    email = run(["git", "-C", str(SKELETOR), "config", "user.email"], cwd=SKELETOR)[1].strip()
+    if "@" in email:
+        raw.add(email.split("@", 1)[0])
+    tokens = {
+        re.sub(r"[^a-z0-9]", "", word.lower())
+        for word in raw
+        if word.lower() not in GENERIC_PATH_WORDS and word not in ("/", "")
+    }
+    return sorted(token for token in tokens if len(token) >= 4)
+
+
+def author_leak_gate(tier: str, workdir: Path) -> Result:
+    """A rendered tree names nobody's home directory, company or account.
+
+    `template/core/scripts/paths.py` shipped `Path.home() / "skyrow.labs" /
+    "sl-agent-logs"` as the default state root, in the tier every scaffold gets.
+    Five adopters ran it and none could see it: all five live under
+    `~/skyrow.labs`, so the default resolves, the state lands where it should,
+    and every gate passes. **The trees best placed to report it are the ones
+    that agree with it by construction.**
+
+    The same homogeneity would hide a bad fix, which is node-zero's point and
+    the reason this gate exists rather than a second inspection: in a tree under
+    `~/skyrow.labs`, a correct substitution and a hardcoded literal produce the
+    same string, so verifying there is vacuous. The outside coordinate has to be
+    manufactured, and the only one available is the render itself, read by
+    something that knows whose machine it was made on.
+
+    stash.flow drew the line the shipped test cannot cross: `test_state_paths.py`
+    enforces that the root is named in exactly one place, which is a good rule
+    and is silent on whether that one place is right. **One definition and one
+    correct definition are different properties, and only the first is checkable
+    from inside.**
+
+    What it does not claim: initials. `SL_AGENT_LOGS` leaked the same
+    organisation in a form no derivation from `skyrow.labs` produces without
+    guessing, and a gate that guessed would be a list again. That half is
+    covered by the fix rather than by a check, and saying so is better than
+    implying otherwise.
+    """
+    started = time.time()
+    tokens = author_tokens()
+    if not tokens:
+        return Result(
+            "author leak: no identifying token could be derived from this checkout",
+            False,
+            time.time() - started,
+            "Nothing above the checkout, in origin's URL or in the committer's email survived "
+            f"{sorted(GENERIC_PATH_WORDS)}. A scan for an empty token set is green and worth nothing.",
+        )
+
+    def leaks(text: str) -> List[str]:
+        flat = re.sub(r"[^a-z0-9]", "", text.lower())
+        return [token for token in tokens if token in flat]
+
+    # The plant, and it is about the matcher rather than the tree: a detector
+    # that found nothing is indistinguishable from one that cannot find
+    # anything. Both halves are checked, because a normaliser that stripped too
+    # much would match everything and this would still pass on the first.
+    if not leaks(f"root = Path.home() / \"{tokens[0][:3]}.{tokens[0][3:]}\" / \"logs\""):
+        return Result("author leak: the detector does not find a planted token", False, time.time() - started, "")
+    if leaks("a tree that names nobody"):
+        return Result("author leak: the detector fires on text naming nobody", False, time.time() - started, "")
+
+    tree = workdir / f"{tier}-python"
+    if not tree.exists():
+        return Result(f"author leak: no {tier} tree to read", False, time.time() - started, "")
+
+    findings = []
+    for path in sorted(tree.rglob("*")):
+        rel = path.relative_to(tree).as_posix()
+        if not path.is_file() or rel.startswith((".git/", ".venv/", "node_modules/", "tmp/")):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
+            for token in leaks(line):
+                findings.append(f"{rel}:{number} names `{token}`: {line.strip()[:90]}")
+
+    return Result(
+        f"author leak: nothing in the {tier} tree names {', '.join(tokens)}",
+        not findings,
+        time.time() - started,
+        "\n".join(findings[:20]),
+    )
+
+
 def ported_only_conflict_gate(workdir: Path) -> List[Result]:
     """`--ported` advances the base when a conflict is the ONLY pending work.
 
@@ -3731,6 +3853,10 @@ def main() -> int:
 
         for gate in pending_ref_gate(workdir):
             results.append(gate)
+
+        leak = author_leak_gate(fullest, workdir)
+        leak.label = f"{fullest}: {leak.label}"
+        results.append(leak)
 
         for gate in ported_only_conflict_gate(workdir):
             results.append(gate)
