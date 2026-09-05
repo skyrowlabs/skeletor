@@ -769,6 +769,45 @@ selection cannot skip it. `tests/test_ci_ratchet_inputs.py` reads the report
 named **on the invocation** in preference to the script's default, because
 otherwise the correct workflow would have been the red one.
 
+### Two rules that came out of this and are not about ratchets
+
+The first is the one the empty parametrize taught, and it has to be stated with
+both halves or it does damage: **when an enumeration can legitimately be empty,
+ask what makes the empty case carry no information before reaching for an
+assertion about it.** Here it is a partition — the exempt and runnable sets are
+complements, so a missed declaration lands in the other one and fails loudly,
+and a guard would add nothing. That is the *narrow* case. `tests/scanning.py` is
+the wide one: most scans have no complement to fall into, so an empty result is
+indistinguishable from a broken pattern and `scanned()` is what says so.
+
+Stated one-sidedly it invites the wrong deletion, and the tree ships both rules,
+so the docstring now carries the complement and names `scanning.py`. stash.flow
+supplied the counter-example by applying the rule to a read-only surface pin and
+getting the opposite answer: there the set not growing *is* the invariant, so
+the guard is doing the work. A reader who only ever meets the partition case
+will delete a guard that was load-bearing.
+
+The second is about reporting rather than testing, and it arrived as a
+near-miss. Checking the ratchet gate from their own tree, stash.flow read
+
+    E   assert 0 <= -1
+
+and began writing up a gate that bites correctly and explains nothing. It was
+`-q` plus a `tail` cutting the message off; the full output names the workflow,
+the job, the script and the artifact. They checked before sending, and the rule
+is worth more than the non-bug:
+
+> **A report about an absent explanation has to be made against unabridged
+> output, because the tooling that abridges it is indistinguishable from the
+> code that never wrote it.**
+
+That is the same shape as the `wc -l` line in `skeletor-upgrade`'s collected-ID
+recipe, one layer up: there, a wrong interpreter leaves `grep` writing empty
+files and `diff` reporting no change, so the pipeline reports "nothing changed"
+having compared nothing. Here the truncation is in the reader's own terminal.
+Both are a negative claim sourced from a view that could not have shown the
+positive.
+
 One thing stash.flow did **not** do is the reason this is a template fix rather
 than an adopter's workaround: they left `max_skipped: 0` alone. Raising it to 1
 would have recorded a claim about their tree that was false — they had no

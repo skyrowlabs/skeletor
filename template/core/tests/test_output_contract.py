@@ -179,6 +179,15 @@ def test_a_host_exemption_is_still_true():
     script that cannot answer and fails loudly. That is why
     `test_there_are_checkers_to_check` can guard the other two sets and not this
     one, and why it does not need to.
+
+    **Do not generalise that into "enumerations do not need guards."** It is the
+    narrow case, and `tests/scanning.py` is the wide one: most scans here have no
+    complement to fall into, so an empty result is indistinguishable from a
+    broken pattern and `scanned()` is what says so. The question to ask of an
+    empty enumeration is what makes emptiness *carry no information* — a
+    partition, as here, or nothing, in which case the guard is doing real work
+    and deleting it re-opens the hole. stash.flow asked it of a read-only surface
+    pin and got the opposite answer: there the set not growing IS the invariant.
     """
     for script in _host_exempt():
         result = _run(script, "--json")
