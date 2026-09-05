@@ -26,60 +26,115 @@ jobs:
   # carried 11-31 line bodies apiece and `gh release list` was empty, so anybody
   # who had not cloned the repo saw no release notes at all. The tag body was
   # only readable by somebody who already knew the `--format` incantation.
+  # A tag here is an **upgrade anchor**, not an announcement, and the two want
+  # opposite frequencies. `skeletor_ref()` writes `git describe` into every
+  # scaffold's `.skeletor.json` and `bin/skeletor-upgrade` re-renders a tree's
+  # base from that ref, so CLAUDE.md says to tag after any change a user would
+  # scaffold against — which produced 34 of the first 41 tags in two days.
+  # GitHub ties Releases to tags and invites the conflation; publishing all of
+  # them would be ~17 releases a day on a public repository.
+  #
+  # So a release is a minor boundary, `vX.Y.0`, and the patch tags behind it are
+  # rolled up into its notes. Rolling them up is what keeps this honest: the
+  # reason this job exists at all is that tag annotations were unreachable
+  # without a clone, and simply skipping 35 of them would restore that for
+  # everything below a minor.
+  #
+  # The obvious alternative filter was measured and discarded: every one of the
+  # 41 tags touched `template/` or `bin/`, so "the consumer surface moved"
+  # publishes all of them.
   publish:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      # `fetch-depth: 0` because both halves of the note need history the tag
-      # ref alone does not carry: the annotation body, and the *previous* tag,
-      # which is what the template-file count is measured against.
+      # `fetch-depth: 0` because every input is history the tag ref alone does
+      # not carry: this annotation, the previous *minor* tag, the annotations of
+      # the patch tags between them, and the diff against that boundary.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      # The notes are assembled from git rather than fetched by `gh
-      # --notes-from-tag`, which would read the annotation and nothing else. The
-      # computed line is the point: two of the three releases before this
-      # workflow existed changed **zero** files under `template/`, and a reader
-      # deciding whether to run `bin/skeletor-upgrade` was made to infer that
-      # from prose. It is a fact about the artifact, so it is measured here
-      # instead of claimed in the body.
-      - name: Assemble the notes from the tag annotation
+      # Assembled from git rather than by `gh --notes-from-tag`, which reads one
+      # annotation and nothing else. The roll-up and the computed line both need
+      # more than that, and the computed line is the point: a reader deciding
+      # whether to run `bin/skeletor-upgrade` was otherwise made to infer it
+      # from prose. It is a fact about the artifact, so it is measured and the
+      # command to re-measure it is printed, rather than asked to be trusted.
+      - name: Assemble the notes
+        id: notes
         env:
           TAG: ${{ github.ref_name }}
         run: |
+          RELEASE='^v[0-9]+\.[0-9]+\.0$'
+          if ! printf '%s' "$TAG" | grep -qE "$RELEASE"; then
+            echo "$TAG is a patch tag — an upgrade anchor, not a release."
+            echo "It will be rolled up into the notes for the next vX.Y.0."
+            echo "publish=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "publish=yes" >> "$GITHUB_OUTPUT"
+
           git tag -l --format='%(contents)' "$TAG" > notes.md
           if [ ! -s notes.md ]; then
             echo "::error::$TAG has no annotation — a lightweight tag carries no note to publish."
             exit 1
           fi
-          PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+
+          # The previous *release*, not the previous tag: that is the boundary a
+          # reader is crossing, so it is what the diff and the roll-up span.
+          PREV=$(git tag --sort=v:refname | grep -E "$RELEASE" \
+                 | awk -v t="$TAG" '$0==t{exit} {p=$0} END{print p}')
+
           {
             echo
             echo "---"
-            if [ -n "$PREV" ]; then
-              COUNT=$(git diff --name-only "$PREV".."$TAG" -- template/ | wc -l)
-              echo "\`template/\` files changed since \`$PREV\`: **$COUNT**"
-              echo
-              if [ "$COUNT" -eq 0 ]; then
-                echo "Nothing a scaffold ships moved, so \`bin/skeletor-upgrade\` has nothing"
-                echo "to carry for an existing tree. Verify it yourself rather than trusting"
-                echo "this line: \`git diff --name-only $PREV..$TAG -- template/\`."
-              else
-                echo "Carry it into an existing tree with \`bin/skeletor-upgrade <target> --dry-run\`,"
-                echo "which reports what changed *for that tree* rather than in general."
-              fi
+            if [ -z "$PREV" ]; then
+              echo "First release — no predecessor to measure against."
+              exit 0
+            fi
+            COUNT=$(git diff --name-only "$PREV".."$TAG" -- template/ | wc -l)
+            echo "\`template/\` files changed since \`$PREV\`: **$COUNT**"
+            echo
+            if [ "$COUNT" -eq 0 ]; then
+              echo "Nothing a scaffold ships moved, so \`bin/skeletor-upgrade\` has nothing"
+              echo "to carry for an existing tree. Verify it yourself rather than trusting"
+              echo "this line: \`git diff --name-only $PREV..$TAG -- template/\`."
             else
-              echo "First tag — no predecessor to measure \`template/\` against."
+              echo "Carry it into an existing tree with \`bin/skeletor-upgrade <target> --dry-run\`,"
+              echo "which reports what changed *for that tree* rather than in general."
+            fi
+
+            # Every tag between the two boundaries, so nothing published here
+            # leaves an annotation unreachable. Each stays a resolvable
+            # `skeletor_ref`, which is the job the tag was cut for.
+            INNER=$(git tag --sort=v:refname | grep -E '^v[0-9]' \
+                    | awk -v a="$PREV" -v b="$TAG" '$0==b{exit} f{print} $0==a{f=1}')
+            if [ -n "$INNER" ]; then
+              echo
+              echo "### Upgrade anchors in this release"
+              echo
+              echo "Tagged between \`$PREV\` and \`$TAG\`. Each is a base"
+              echo "\`bin/skeletor-upgrade\` can render from; none was published on its own."
+              echo
+              for t in $INNER; do
+                # Most of these subjects open by repeating their own version, so
+                # the bullet would read "- `v0.5.2` — v0.5.2 — a ratchet…". The
+                # bullet already names the tag; strip the echo rather than ask
+                # 41 existing annotations to have been written differently.
+                SUBJECT=$(git tag -l --format='%(contents:subject)' "$t" \
+                          | sed -E 's/^v[0-9]+\.[0-9]+\.[0-9]+ (—|–|-) //')
+                printf -- '- `%s` — %s\n' "$t" "$SUBJECT"
+              done
             fi
           } >> notes.md
 
       # Skipped rather than failed when the release is already there: a workflow
       # re-run is not a defect, and `gh release create` cannot overwrite. A
       # genuine failure still reddens, because unlike the site dispatch below,
-      # this artifact is the one a reader is being sent to.
+      # this artifact is the one a reader is sent to.
       - name: Publish the release
+        if: steps.notes.outputs.publish == 'yes'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -90,6 +145,10 @@ jobs:
           fi
           gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
 
+  # Unconditional, unlike `publish` above, and the asymmetry is the point: the
+  # site shows which version this project is *at*, which is a fact about the
+  # newest tag, while a Release announces that something is worth reading. A
+  # patch tag moves the first and not the second.
   notify:
     runs-on: ubuntu-latest
     steps:
