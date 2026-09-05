@@ -1352,6 +1352,24 @@ upgrade gates reach branches with something to report, so all three test the
 legitimately empty — and that is the common branch, precisely because most runs
 have nothing to do.
 
+That is not a lapse, and stash.flow put the mechanism harder than "the natural
+way to write a gate": **you reach a branch by manufacturing an input that makes
+it fire, so every gate you write tests, by construction, the end where something
+is present.** The empty-finding branch cannot be reached that way — there is
+nothing to manufacture. You have to arrange for *nothing to happen* and then
+assert about it, which does not occur to anybody writing a gate for a bug they
+just watched. Expect it of any gate suite here until somebody names it, which is
+what this paragraph is for.
+
+The prose rule that got corrected has the same shape as a defect this repository
+already knows in code. **A rule that cannot be wrong is a rule that cannot
+help** — and *"a structural gate you had to allowlist five things to ship is
+describing the wrong shape"* is that property in the other medium, a predicate
+that accommodates every case having stopped discriminating. The difference is
+that the code version leaves a receipt: the allowlist accumulates and you can
+count it. Prose accumulates nothing, so the only tell is that the rule keeps
+getting confirmed and never bites — which reads as evidence for it.
+
 The same line had a second defect, and it cost one string: **"already current"
 named no version.** The run compares the tree against a render of skeletor's
 HEAD, so that is the claim — but the manifest is re-copied only by a run that
