@@ -28,8 +28,11 @@ look optional to anybody not using that tool.
 ./{{CLI}} check health     # is the local stack up? (SCAFFOLD: wire the probes)
 ```
 
-These are rendered from the same source as the README's Setup block, and every
-one of them exists. An earlier version of this file opened with `./{{CLI}} setup`
+**Every one of them exists** — that is the claim this paragraph is making, and it
+is the one worth checking. The install lines came from the same source as the
+README's Setup block when this repository was scaffolded; nothing keeps them
+together now, and the three lines after them belong to this file alone. An
+earlier version of this file opened with `./{{CLI}} setup`
 and `./{{CLI}} service up`, which the CLI has never implemented — and `setup`
 could not be implemented, because the CLI cannot run until the install it would
 be performing has already put `click` in the venv. A quick start that fails on

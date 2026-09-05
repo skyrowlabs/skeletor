@@ -936,6 +936,22 @@ interlock, and which you cannot understand from one file:
    Both were found by stash.flow, from an adopted tree, which is where they are
    visible and here is where they are not.
 
+   **The dangerous form is that clause conjoined to a verifiable one**, which is
+   the sweep's third find and the reason the first two survived review. `AGENTS.md`
+   said *"These are rendered from the same source as the README's Setup block, **and
+   every one of them exists**."* The second half is true, checkable, and the point
+   of the paragraph — its whole subject is an earlier version that opened with
+   commands the CLI never had. So a reader who accepts the invitation to verify
+   runs the three commands, finds them, and banks the conjunction. The check that
+   would have caught the sentence is the one the sentence recruits.
+
+   That one was also **over-claimed while the mechanism was still live**:
+   `{{SETUP_COMMANDS}}` is two lines and the block has five, so "these are
+   rendered from the same source" was false about three of them on the day it was
+   written, before any boundary existed to cross. Expect the two failure modes
+   together — the wider claim is easy to write precisely because the mechanism
+   feels like it covers the whole block.
+
 ---
 
 ## Conventions in this repo

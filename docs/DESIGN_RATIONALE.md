@@ -1011,6 +1011,84 @@ positives that cannot be predicated away. The defect is fixed; the gate is not
 built.
 
 
+### The false clause rides on a true one
+
+The fix above missed `AGENTS.md`, which carried the identical sentence and is the
+first file an agent reads in any generated tree. stash.flow's sweep found it, and
+it is a better instance than the one that got fixed, for two reasons that are
+worth separating.
+
+**It was over-claimed while the mechanism was still live.** `{{SETUP_COMMANDS}}`
+renders two lines. The Quick Start block has five — `check pre-push`, `test unit`
+and `check health` come from nowhere but that file. So *"**These** are rendered
+from the same source as the README's Setup block"* was false about three of the
+five on the day it was written, in this repository, before any generation boundary
+existed to cross. The spent-guarantee failure and the over-claim are not
+independent: you write the wider claim *because* the mechanism feels like it
+covers the whole block, so expect them together.
+
+**And the false clause was conjoined to a true one.** The full sentence is
+*"...rendered from the same source, **and every one of them exists**."* That
+second half is checkable and correct — all three commands resolve in a fresh
+`agentic` tree — and it is the half the paragraph exists for, since its entire
+subject is an earlier version of the file opening with `setup` and `service up`,
+which the CLI never had. A reader who accepts the paragraph's own invitation to
+verify runs the commands, finds them working, and banks the conjunction.
+
+That sharpens the tell one more turn, and it is the part that goes in the
+invariant:
+
+> The dangerous form is not only a present-tense claim about a one-time act. It
+> is that clause **conjoined to a verifiable one** — where confirming the
+> conjunction confirms only the half that can be confirmed.
+
+Three verbs catch the clause. Nothing catches the conjunction, and the
+conjunction is what makes a false sentence survive review, because the sentence
+*is* partly true and the true part is the part a careful reader tests. The fix
+keeps the live clause and leads with it, so the paragraph now claims exactly what
+it can support.
+
+### The gate that cannot fail here and matters there
+
+Removing the rendering sentence made a real gap visible: three files carry the
+setup steps — `AGENTS.md`, `README.md`, `docs/DEVELOPMENT.md` — and nothing
+compares them. `docs/DEVELOPMENT.md` now says out loud "nothing will tell you if
+you miss one", in a tree whose own conventions say something should. stash.flow's
+reading of that is right and general: **the rendering sentence was standing in
+for the check.** "These come from one source" is what you write *instead of*
+enrolling the pair, and it discharges the requirement by assertion. Remove it
+correctly and the requirement becomes visible and unmet.
+
+Their measurement — 3 blocks, 2 lines identical across all three, 0 exemptions,
+enrolment by fenced `bash` block rather than by a notation guess — is a better
+ratio than either gate declined above. And the gate still does not belong in
+`bin/skeletor-verify`, for a reason neither of us had until the template was
+checked: **all three files carry `{{SETUP_COMMANDS}}`.** One `re.sub` substitutes
+one string into three places, so upstream those lines cannot disagree. A gate
+here would be asserting that a regex substituted the same value three times — it
+cannot go red, which is the one thing this repository refuses to ship.
+
+In an adopted tree the placeholder is gone, the three blocks are static text, and
+drift is not only possible but permanent. So the check belongs in the template, as
+a test the tree runs on itself.
+
+This is the coordinate-system rule on its other face. The path gate was worth
+building in the reader's tree because the *population* is larger there — 38
+citations against nine. This one is worth building there because the *failure
+mode does not exist here at all*. Same conclusion, and it would be easy to
+generalise the first argument into "measure at the far end", which would be
+wrong: the question is where the thing can go wrong, and volume is only one
+symptom of that.
+
+It also retires the sentence that prompted it. Once the tree checks its own setup
+blocks, `docs/DEVELOPMENT.md` stops saying "nothing will tell you if you miss one"
+and names the test — which is a present-tense mechanism claim that is *true in the
+reader's tree*, because the mechanism ships with the prose and runs beside it.
+That is the honest half of invariant 7, and the contrast worth keeping: a claim
+about CI, made by a file CI runs, is checkable by the reader; a claim about a
+generator that has left is not.
+
+
 ---
 
 ## CI, cost, and the draft-PR discipline
