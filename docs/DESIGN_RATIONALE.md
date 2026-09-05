@@ -1797,6 +1797,73 @@ resolver now. And `AGENTS.md`'s Rule 14 stated the path in prose, which
 Python. The rule forbidding a second definition of the path contained one; it
 names `state_dir()` and tells the reader to ask it.
 
+### A formatter is a second author with commit rights and no changelog
+
+mind.head's only conflict taking `v0.9.0` was **one blank line** between two
+imports, placed by `ruff check --fix` during adoption. They never decided it and
+did not know it was there; `v0.9.0` rewrote the import immediately below it, the
+two edits were adjacent, and the merge refused.
+
+That is the third size of the collision class in three trees — a five-line
+comment, a single `#:` separator, one blank line — and the smallest one breaks
+the guidance shipped for the other two. *Audit per line* is correct and it is
+not sufficient, because **the population an adopter is asked to inspect is not
+the population they wrote.** No amount of care about where you put your own
+comment reaches a line a program put there.
+
+The counterfactual was measured in their tree and reproduced here: the merge as
+shipped conflicts, and the merge with both **rendered** sides run through their
+formatter is clean and correct. Reproducing it took one correction worth
+recording — the divergence has to be *produced by the adopter's own formatter
+config*, not planted by hand. A hand-planted line that the tree's formatter
+would remove is the opposite case, and normalising correctly fails to match it.
+The first version of this repository's gate planted the line by hand and proved
+nothing.
+
+The result is stronger than a smaller conflict count. `normalise(base)` came out
+byte-identical to the user's file, so the classification is not "merged
+cleanly" but **"never touched"** — there is nothing to merge at all.
+
+Two objections had held this back and both were checkable rather than
+arguable:
+
+- *A tree-supplied command is a new trust boundary.* **False as stated.** The
+  upgrade already runs the target's own `scripts/docs/regen.py` as a subprocess;
+  the boundary was crossed before this existed. What ships crosses it more
+  narrowly — not an arbitrary command string, but the hooks the tree already
+  declares in `.pre-commit-config.yaml`, run with the tree's own config file.
+- *`--repair-manifest` and the offline fallback would have to agree about "the
+  base render".* **Dissolves under the scope**, once the scope is stated: this
+  touches **merge inputs only**, never a hash. `cross_check` and the `--no-base`
+  classification both compare `sha256` of the raw render, so neither can
+  disagree with a normalised merge, because neither sees one. A normalised
+  render is not a normalised record.
+
+It is opt-in, and it advertises itself, which is the part that makes an opt-in
+worth having: a plain run that conflicts re-tries those files normalised and
+says so when it would have worked. The cost is one formatter pass over the set
+that already went wrong, and the population that needs the flag is exactly the
+population that has never read the help text.
+
+What is deliberately **not** here is a curated subset of rules. mind.head first
+attributed their 20 mechanical divergences to PEP-585 (`UP`), then re-measured
+per rule family and found **zero** files reproduced by `UP` alone — import
+ordering was the largest contributor, and their actual conflict was `I`. A
+normalisation scoped to a "safe" typing subset would have dissolved none of
+them. The general form of that mistake is worth more than the number:
+
+> **A description attached to a verified number inherits its credibility without
+> inheriting its verification.** Nobody re-derives the label sitting next to a
+> figure they checked.
+
+`Normaliser` never touches the user's file. Reformatting the one thing in a
+three-way merge that nobody else authored would be this tool editing a file it
+was not asked to edit, and it would destroy the very divergence it is trying to
+read. A missing formatter is skipped on **both** sides, symmetrically, and named
+in the output — silence about a tool is not coverage by it — and `--normalise`
+under `--no-base` says outright that it did nothing, because a run that
+normalises nothing looks exactly like a run whose normalisation found nothing.
+
 ### A report and the deed it reports, separated by a condition
 
 `--ported` is the user asserting a pending file is resolved, so the base may

@@ -79,6 +79,7 @@ import argparse
 import ast
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -668,6 +669,121 @@ def repair_manifest(target: Path, manifest: dict, base_files: Dict[str, Path], a
     return 0
 
 
+#: How to run a formatter over one file, keyed by the hook id a tree declares in
+#: `.pre-commit-config.yaml`. Not a policy list and not an allowlist — it is a
+#: capability map, and there is nothing to derive it from: knowing that `isort`
+#: takes `--settings-path` and `black` takes `--config` is not a fact any
+#: repository states about itself. A hook that is not here is reported by name
+#: rather than ignored, so an adopter who swapped their formatter learns that
+#: their files are not being normalised instead of assuming they are.
+#:
+#: `--config`/`--settings-path` is what keeps this out of the tree: the file
+#: being formatted lives in a scratch directory, so a dry run writes nothing
+#: into somebody's repository, and the tool still reads their settings rather
+#: than inventing defaults.
+FORMATTERS = {
+    "isort": lambda exe, cfg, path: [exe, "--settings-path", str(cfg), str(path)],
+    "black": lambda exe, cfg, path: [exe, "--config", str(cfg), "--quiet", str(path)],
+    "ruff-format": lambda exe, cfg, path: [exe, "format", "--config", str(cfg), str(path)],
+    "ruff": lambda exe, cfg, path: [exe, "check", "--fix", "--config", str(cfg), str(path)],
+}
+
+#: Where each tool's settings live, in preference order. A tree that has none of
+#: them for a declared hook is one this cannot normalise, and says so.
+CONFIG_FILES = {
+    "isort": (".isort.cfg", "setup.cfg", "pyproject.toml"),
+    "black": ("pyproject.toml",),
+    "ruff-format": ("ruff.toml", ".ruff.toml", "pyproject.toml"),
+    "ruff": ("ruff.toml", ".ruff.toml", "pyproject.toml"),
+}
+
+
+class Normaliser:
+    """The adopter's own formatters, applied to the two sides skeletor renders.
+
+    **A formatter is a second author with commit rights and no changelog.**
+    mind.head's only conflict taking `v0.9.0` was a single blank line between
+    two imports, written by `ruff check --fix` during adoption — never decided,
+    never noticed, and adjacent to the line the template then rewrote. Measured
+    both ways in that tree and reproduced here: the merge as shipped conflicts,
+    and the merge with both *rendered* sides run through their formatter is
+    clean and correct.
+
+    What it does is narrower than it sounds, and the narrowness is what makes it
+    safe. It touches **merge inputs only** — never a hash, never the manifest.
+    `cross_check` and the `--no-base` fallback both compare `sha256` of the raw
+    render, so neither can disagree with a normalised merge, because neither
+    sees one. That was the second of two reasons this was held back, and it
+    dissolves once the scope is stated: a normalised *render* is not a
+    normalised *record*.
+
+    The first reason was that running a command out of the target tree is a new
+    trust boundary, and that was simply wrong — the upgrade already runs the
+    target's own `scripts/docs/regen.py` as a subprocess. The boundary was
+    crossed before this existed, and this crosses it more narrowly: not an
+    arbitrary command string, but the hooks that tree already declares.
+
+    Opt-in via `--normalise`, and advertised rather than silent: a plain run that
+    conflicts re-tries those files normalised, and says so when it would have
+    worked. An opt-in flag nobody hears about is a feature that never runs, and
+    the counterfactual costs one formatter pass over the conflicted set.
+    """
+
+    def __init__(self, target: Path, workdir: Path) -> None:
+        self.workdir = workdir
+        self.steps: List[Tuple[str, str, Path]] = []
+        self.unsupported: List[str] = []
+        self.reason = ""
+        config = target / ".pre-commit-config.yaml"
+        if not config.exists():
+            self.reason = "the tree declares no .pre-commit-config.yaml"
+            return
+        declared = re.findall(r"^\s*-?\s*id:\s*([\w.-]+)", config.read_text(encoding="utf-8"), re.MULTILINE)
+        for hook in dict.fromkeys(declared):
+            if hook not in FORMATTERS:
+                continue
+            exe = self._executable(target, hook.split("-")[0])
+            settings = next((target / name for name in CONFIG_FILES[hook] if (target / name).exists()), None)
+            if exe and settings:
+                self.steps.append((hook, exe, settings))
+            else:
+                self.unsupported.append(f"{hook} ({'no config' if exe else 'not installed'})")
+        if not self.steps and not self.reason:
+            self.reason = "no formatter the tree declares is runnable here"
+
+    @staticmethod
+    def _executable(target: Path, name: str) -> Optional[str]:
+        local = target / ".venv" / "bin" / name
+        if local.exists():
+            return str(local)
+        return shutil.which(name)
+
+    def __bool__(self) -> bool:
+        return bool(self.steps)
+
+    def applies(self, rel: str) -> bool:
+        return rel.endswith(".py")
+
+    def __call__(self, text: str, rel: str) -> str:
+        """The text a formatter would leave. Unchanged if anything goes wrong.
+
+        Failing closed matters more here than reporting: a normalisation that
+        half-ran would put one side of a three-way merge through a tool the
+        other side never saw, which manufactures exactly the divergence this
+        exists to remove.
+        """
+        if not self.applies(rel):
+            return text
+        scratch = self.workdir / "normalise" / rel
+        scratch.parent.mkdir(parents=True, exist_ok=True)
+        scratch.write_text(text, encoding="utf-8")
+        for _hook, exe, settings in self.steps:
+            command = FORMATTERS[_hook](exe, settings, scratch)
+            if subprocess.run(command, capture_output=True).returncode not in (0, 1):
+                return text
+        return scratch.read_text(encoding="utf-8")
+
+
 def read(path: Optional[Path]) -> Optional[str]:
     if path is None or not path.exists():
         return None
@@ -721,6 +837,11 @@ def main() -> int:
         action="store_true",
         help="upgrade into a tree with uncommitted changes. The result will be interleaved "
         "with your work in `git diff`, and reverting it discards both.",
+    )
+    parser.add_argument(
+        "--normalise",
+        action="store_true",
+        help="run the tree's own formatters over both rendered sides before merging",
     )
     parser.add_argument("--json", action="store_true", help="emit the result on stdout as well")
     parser.add_argument(
@@ -896,6 +1017,19 @@ def main() -> int:
                     detail("no file this scaffold ships. Nothing below is an artefact of them.")
 
         added, updated, merged, conflicted, collided, declined, dropped = [], [], [], [], [], [], []
+        #: Conflicts that a run of the tree's own formatters over both rendered
+        #: sides would have resolved. Reported, never acted on without the flag.
+        formatting_only: List[str] = []
+        normaliser = Normaliser(target, workdir)
+        if args.normalise and not normaliser:
+            die(f"--normalise: {normaliser.reason}")
+        if args.normalise and args.no_base:
+            # Silence here would be the flag's own failure mode: a run that
+            # normalises nothing looks exactly like a run whose normalisation
+            # found nothing to do. There is no base TEXT in this mode, only
+            # recorded hashes, and a hash of the raw render is what those are.
+            say("⚠️ ", "--normalise needs the base render's text, which --no-base does not have")
+            detail("Classification here is by recorded hash, so nothing was normalised.")
         patches = target / "tmp" / "upgrade"
         # A dry run writes nothing, `tmp/upgrade/` included — so it must not be
         # allowed to imply otherwise. It reads what is there instead, and says
@@ -1004,6 +1138,12 @@ def main() -> int:
                     sidecar.write_text(ours, encoding="utf-8")
                 continue
 
+            if args.normalise and normaliser.applies(rel):
+                # Both rendered sides, never the user's file. Theirs is the one
+                # thing here nobody else authored, and reformatting it would be
+                # this tool editing a file it was not asked to edit.
+                base, ours = normaliser(base, rel), normaliser(ours, rel)
+
             edited = theirs != base
             changed = ours != base
             if not changed:
@@ -1017,6 +1157,14 @@ def main() -> int:
             resolved = merge(base, theirs, ours, workdir)
             if resolved is None:
                 conflicted.append(rel)
+                # The counterfactual, computed only for a file that already
+                # failed, so the cost is bounded by the thing that went wrong.
+                # Without it `--normalise` is a flag whose existence is known to
+                # the person who wrote it, and the population that needs it is
+                # exactly the population that has never read the help text.
+                if normaliser and not args.normalise and normaliser.applies(rel):
+                    if merge(normaliser(base, rel), theirs, normaliser(ours, rel), workdir) is not None:
+                        formatting_only.append(rel)
                 if not args.dry_run:
                     patch = patches / f"{rel}.patch"
                     patch.parent.mkdir(parents=True, exist_ok=True)
@@ -1158,6 +1306,10 @@ def main() -> int:
                         "updated": updated,
                         "merged": merged,
                         "conflicted": conflicted,
+                        # A subset of `conflicted`, so a machine consumer can
+                        # tell a decision to port from a formatter's opinion
+                        # without re-running the merge to find out.
+                        "formatting_only": formatting_only,
                         "collided": collided,
                         "entangled": entangled,
                         "declined": declined,
@@ -1200,6 +1352,20 @@ def main() -> int:
                 detail("A real base→ours patch needs the base text, which this run had no way to get.")
             else:
                 detail("tmp/upgrade/<path>.patch — port it by hand.")
+
+            if formatting_only:
+                # Said here rather than in `--help`, because the population that
+                # needs it is the population that has already hit the conflict.
+                # A formatter is a second author with commit rights and no
+                # changelog: the divergence it wrote was never decided by
+                # anybody, so an adopter reading this hunk is looking for a
+                # choice they did not make.
+                detail()
+                detail(f"Formatting your own tools would settle accounts for {len(formatting_only)}")
+                detail("of these. Re-run with --normalise to put both rendered sides through the")
+                detail("formatters this tree declares before merging — yours is never touched:")
+                for rel in formatting_only:
+                    item(rel)
             if not args.dry_run:
                 # The window in which this is recoverable closes at the next
                 # run, and nothing used to say so at the moment it opened. A
@@ -1224,6 +1390,12 @@ def main() -> int:
                 else:
                     detail("Port them before then, or re-run to regenerate them. The base stays")
                     detail("where it is until they are gone, so nothing expires while you decide.")
+
+        if args.normalise and normaliser.unsupported:
+            say("⚠️ ", f"{len(normaliser.unsupported)} declared formatter(s) could not be run here")
+            for hook in normaliser.unsupported:
+                item(hook)
+            detail("Those files were merged unnormalised. Silence about a tool is not coverage by it.")
 
         if collided:
             say("❌", f"{len(collided)} file(s) you already had where the template now ships one")

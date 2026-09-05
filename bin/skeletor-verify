@@ -3128,6 +3128,143 @@ def author_leak_gate(tier: str, workdir: Path) -> Result:
     )
 
 
+def normalise_gate(workdir: Path) -> List[Result]:
+    """A conflict written by the adopter's own formatter is resolved by it.
+
+    mind.head's only conflict taking `v0.9.0` was **one blank line** between two
+    imports, placed by `ruff check --fix` during adoption — never decided, never
+    noticed, adjacent to the line the template then rewrote. That is the third
+    size of the collision class this repository has now seen, after a five-line
+    comment and a single `#:` separator, and it is the one that breaks the
+    guidance shipped for the other two: *audit per line* is correct and not
+    sufficient, because **the population an adopter is asked to inspect is not
+    the population they wrote.** A formatter is a second author with commit
+    rights and no changelog.
+
+    This gate reproduces that faithfully, which took one correction. The
+    divergence has to be **produced by the tree's own formatter config**, not
+    planted by hand — a hand-planted line the tree's formatter would remove is
+    the opposite case, and normalising would correctly fail to match it. So the
+    gate changes a real isort setting in the scaffolded tree (dropping a module
+    from `known_first_party`), runs the tree's isort, and lets the divergence
+    appear the way mind.head's did.
+
+    Three assertions, and the middle one is the reason this is worth shipping
+    rather than being a smaller conflict count. Without the flag the run
+    conflicts **and advertises the flag** — an opt-in nobody hears about is a
+    feature that never runs, and the population that needs it is the population
+    that has already hit the conflict. With the flag the file does not merge, it
+    **applies**: `normalise(base)` equals the user's file byte for byte, so the
+    classification is "never touched" and there is nothing to merge at all.
+
+    What it does not touch is the load-bearing part: hashes. `cross_check` and
+    the `--no-base` fallback both compare `sha256` of the raw render, so a
+    normalised merge is invisible to both — which is why the manifest objection
+    to this design dissolved rather than being argued away.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    tier = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
+    isort = shutil.which("isort")
+    if not isort:
+        return [Result("normalise: isort is not installed, so the tree's formatter cannot be run", True,
+                       time.time() - started, "skipped loudly rather than silently")]
+
+    clean = clean_skeletor(workdir)
+    scratch = workdir / "normalise-skeletor"
+    if not scratch.exists():
+        run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(scratch)], cwd=workdir)
+
+    tree = workdir / "normalise-tree" / "probe"
+    if tree.exists():
+        shutil.rmtree(tree.parent)
+    run(
+        [sys.executable, str(scratch / "bin" / "skeletor-new"), str(tree),
+         "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--language", "python", "--force"],
+        cwd=SKELETOR,
+    )
+
+    # The adopter's config change, and the file it reformats. Derived from the
+    # tree: whichever first-party module the config names that a test imports
+    # bare, so this survives the fixture being renamed.
+    config = tree / "pyproject.toml"
+    settings = config.read_text(encoding="utf-8")
+    match = re.search(r"known_first_party = \[([^\]]*)\]", settings)
+    if not match:
+        return [Result("normalise: the tree declares no known_first_party to diverge on", False,
+                       time.time() - started, "")]
+    names = [name.strip().strip('"') for name in match.group(1).split(",") if name.strip()]
+
+    # Every candidate is TRIED, not the first one taken. Dropping a name from
+    # `known_first_party` only moves a file if isort's sections actually change
+    # there, and the convenient first pair — `cli` and `test_cli_smoke.py` — is
+    # one where they do not. The example you reach for first cannot
+    # discriminate, so the selector is a search whose failure names what it
+    # tried rather than an assertion about the one it happened to pick.
+    attempts, subject = [], None
+    for name in names:
+        for path in sorted((tree / "tests").glob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            if not re.search(rf"^from {re.escape(name)} import", text, re.MULTILINE):
+                continue
+            config.write_text(
+                settings.replace(match.group(0), "known_first_party = [%s]" % ", ".join(
+                    f'"{other}"' for other in names if other != name)),
+                encoding="utf-8",
+            )
+            run([isort, "--settings-path", str(config), str(path)], cwd=tree)
+            if path.read_text(encoding="utf-8") != text:
+                subject = (name, path)
+                break
+            attempts.append(f"{name} in {path.name}: isort did not move it")
+            config.write_text(settings, encoding="utf-8")
+        if subject:
+            break
+    if subject is None:
+        # The plant asserts it landed. A formatter that changed nothing leaves
+        # every assertion below testing the unmodified template against itself.
+        return [Result("normalise: no known_first_party name has a test isort would re-section", False,
+                       time.time() - started, "\n".join(attempts) or f"names: {names}")]
+    dropped, path = subject
+    rel = path.relative_to(tree).as_posix()
+    run(["git", "-C", str(tree), "commit", "--quiet", "-am", "adopter: formatter config and its result"], cwd=tree)
+
+    # The template must then change that same file, or there is no conflict to
+    # have. A scratch commit does it, the way `ported_only_conflict_gate` does.
+    source = scratch / "template" / "core" / rel
+    if not source.exists():
+        return [Result(f"normalise: {rel} does not ship from template/core", False, time.time() - started, "")]
+    text = source.read_text(encoding="utf-8")
+    hit = re.search(r"^from scripts\.[\w.]+ import .*$", text, re.MULTILINE)
+    if not hit:
+        return [Result(f"normalise: no scripts import to rewrite in {rel}", False, time.time() - started, "")]
+    source.write_text(text.replace(hit.group(0), hit.group(0) + "  # rewritten by the template"), encoding="utf-8")
+    git_in(scratch, "commit", "--quiet", "-am", "scratch: rewrite the import below the adopter's blank line")
+
+    upgrade = [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree), "--dry-run"]
+    _, plain = run(upgrade, cwd=tree)
+    _, normalised = run(upgrade + ["--normalise"], cwd=tree)
+
+    problems = []
+    if "LEFT ALONE" not in plain or rel not in plain.split("LEFT ALONE")[1]:
+        problems.append(f"the plant did not conflict without --normalise:\n{plain}")
+    elif "--normalise" not in plain:
+        problems.append("the conflict does not advertise --normalise, so nobody who needs it hears about it")
+    if "LEFT ALONE" in normalised:
+        problems.append(f"--normalise did not resolve a conflict its own formatter wrote:\n{normalised}")
+    elif rel not in normalised:
+        problems.append(f"--normalise resolved the conflict by not classifying {rel} at all:\n{normalised}")
+
+    return [
+        Result(
+            f"normalise: a formatter's own divergence in {rel} conflicts, and --normalise applies it",
+            not problems,
+            time.time() - started,
+            "\n".join(problems) or f"diverged by dropping {dropped} from known_first_party",
+        )
+    ]
+
+
 def ported_only_conflict_gate(workdir: Path) -> List[Result]:
     """`--ported` advances the base when a conflict is the ONLY pending work.
 
@@ -3859,6 +3996,9 @@ def main() -> int:
         results.append(leak)
 
         for gate in ported_only_conflict_gate(workdir):
+            results.append(gate)
+
+        for gate in normalise_gate(workdir):
             results.append(gate)
 
         for gate in entangled_gate(workdir):
