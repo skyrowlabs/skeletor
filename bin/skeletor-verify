@@ -3180,13 +3180,27 @@ def adopted_repo_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     listed = set(run(["git", "-C", str(target), "ls-files"], cwd=target)[1].split())
     untracked = sorted(produced - listed)
 
+    # Asked of git rather than recomputed from `produced`, which would be two
+    # readings of one expression and green whatever it said. This is the
+    # coordinate outside the scaffolder's own idea of what it wrote — and it is
+    # the assertion that would have caught `.skeletor.json`, which cannot be in
+    # its own `files` list and so was staged by neither half of the set.
+    loose = sorted(run(["git", "-C", str(target), "ls-files", "--others", "--exclude-standard"], cwd=target)[1].split())
+
     results = [
         Result(
             f"adopted repo: all {len(produced)} produced file(s) are tracked",
             not untracked,
             time.time() - started,
             "\n".join(untracked[:20]) or "",
-        )
+        ),
+        Result(
+            "adopted repo: the scaffold leaves nothing untracked at all",
+            not loose,
+            0.0,
+            "skeletor wrote these and staged none of them — the fixture's own files are all "
+            f"committed, so every one of these is ours:\n" + "\n".join(loose[:20]) if loose else "",
+        ),
     ]
 
     # The suite the enumeration feeds, run for real. `-p no:cacheprovider` so a

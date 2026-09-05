@@ -1844,6 +1844,32 @@ and the same suites must go **red**. Without it the gate would pass on a tree
 that was green for some other reason and would keep passing if the staging were
 deleted.
 
+The first version of that fix staged the manifest's `files` list, and **the
+manifest is not in its own list.** It cannot be: `cross_check` is a bijection
+between that list and the base render, and a hash of the manifest would have to
+contain itself, so it sits beside the render by construction. An adopter who ran
+`--force` and then did the obvious next thing committed 100 files and left
+`.skeletor.json` — the one file `skeletor-upgrade` reads — outside git. A state
+no existing adopter is in, and one where a tree is upgradable from birth except
+that its base record is untracked.
+
+That is the same class as recording post-copy mutations, facing the other way.
+**"skeletor wrote this" and "the manifest lists this" are different sets**, and
+using the second as a proxy for the first fails exactly where they differ. This
+document already carried that pair once; it took a second instance in the
+opposite direction to notice the proxy had been reached for again.
+
+The gate could not see it either, and that is the more useful half. Its
+assertion recomputed the tracked set from `produced` — two readings of one
+expression, green whatever it said. It now also asks **git** what is left
+untracked, which is the coordinate outside the scaffolder's own idea of what it
+wrote, and planting the regression turns that assertion red while the original
+stays green.
+
+skyrow-workspace found it with one command against a real tree, and said the
+thing worth keeping: reading the diff would not have shown it, **because the
+code was correct about the set it named.**
+
 ### A formatter is a second author with commit rights and no changelog
 
 mind.head's only conflict taking `v0.9.0` was **one blank line** between two

@@ -972,12 +972,27 @@ def main() -> int:
     # does not: that flag is about collisions at the moment of writing, this is
     # about the render being untracked afterwards. Two moments in one command,
     # and the first one landing made the second look handled.
+    #
+    # `produced` PLUS the manifest, and the manifest is the whole reason this
+    # needs saying. It cannot appear in its own `files` list — `cross_check` is
+    # a bijection between that list and the base render, and a hash of the
+    # manifest would have to contain itself — so it sits beside the render by
+    # construction. Staging the recorded set alone therefore left the one file
+    # `skeletor-upgrade` reads outside git, on the path where the scaffolder
+    # does not commit: an adopter who did the obvious next thing committed 100
+    # files and no manifest. The same class as recording post-copy mutations,
+    # facing the other way — *what skeletor wrote* and *what the manifest lists*
+    # are different sets, and using the second as a proxy for the first breaks
+    # exactly where they differ. Found by skyrow-workspace in one command
+    # against a real tree; reading the code would not have shown it, because the
+    # code was correct about the set it named.
     if populated and (target / ".git").exists() and produced:
+        wrote = sorted(set(produced) | {MANIFEST_NAME})
         ignored = subprocess.run(
-            ["git", "check-ignore", "--", *sorted(produced)],
+            ["git", "check-ignore", "--", *wrote],
             cwd=str(target), capture_output=True, text=True,
         ).stdout.split()
-        stageable = sorted(set(produced) - set(ignored))
+        stageable = sorted(set(wrote) - set(ignored))
         staged = subprocess.run(
             ["git", "add", "--", *stageable], cwd=str(target), capture_output=True, text=True
         ) if stageable else None
