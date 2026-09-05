@@ -1846,9 +1846,27 @@ is reproducible, and those differ by everything outside `template/` and
 
 The cost was measured in one round: an untracked `notes.md` at this repository's
 root — a draft tag annotation, twenty-eight lines, touching nothing — refused
-all four adopters. Every one of them worked around it by cloning at a tag, which
-is precisely the fallback the guard exists to make unnecessary. A refusal that
-everybody routes around has stopped being a guard.
+all four adopters, and three of them worked around it by cloning at a tag —
+precisely the fallback the guard exists to make unnecessary. A refusal that
+people route around has stopped being a guard.
+
+The count is three rather than four, and how it got there is its own small
+lesson. "All four worked around it by cloning at a tag" was relayed to me,
+repeated by me into a pushed commit message, and then came back from the same
+session as corroboration. Sourced afterwards, one at a time: mind.head,
+stash.flow, and node-zero — who were refused with `notes.md` named and followed
+the tool's own printed remedy. proto.pilot is still unsourced. **A relayed
+number does not merely travel — it can be written down by the party best placed
+to be believed, and return to its originator looking like confirmation.** What
+was safe to assert before the sourcing is a property of the guard rather than of
+anybody's remedy: it refused every one of them.
+
+The near miss is worth keeping too. The sentence that would have sourced
+node-zero *did* exist and said the opposite — they had described the clone as a
+preference — but it came from a later round, after this guard was fixed, when
+they were rendering pristine trees rather than upgrading. **A quotation carries
+the round it was said in, and a session that has done two things has two
+answers.**
 
 `reaches_a_render()` is a prefix test over the render inputs, not a list of
 files to ignore, and it reads both sides of git's `old -> new` rename form. The
