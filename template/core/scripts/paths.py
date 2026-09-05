@@ -72,15 +72,33 @@ RELEASES_DIR = DOCS_DIR / "reports" / "releases"
 #: It lives here, and not in the checks, because **the roles are the part a
 #: generator cannot know.** A scaffold ships `docs/TODO/` and can enumerate it;
 #: it cannot know that your repository froze its concept work in `explore/`.
-#: Extending this tuple is a one-line change to a file you own; the alternative
-#: was every adopter editing a shipped test, which is a divergence the upgrade's
-#: three-way merge then carries forever. stash.flow named the rule after their
-#: `explore/` — 19 of their 44 tracked documents — reddened a gate that had no
-#: role exclusion at all.
+#: The alternative was every adopter editing a shipped test, which is a
+#: divergence the upgrade's three-way merge then carries forever. stash.flow
+#: named the rule after their `explore/` — 19 of their 44 tracked documents —
+#: reddened a gate that had no role exclusion at all.
 #:
 #: `reports` is taken at its parent so the regular, release and occasional
 #: editions are covered without naming three constants.
 NARRATIVE = (TODO_DIR, IMPL_DIR, DOCS_DIR / "reports")
+
+#: **Add your own stages below, as an append. Do not edit the tuple above.**
+#:
+#: This used to read "extending this tuple is a one-line change to a file you
+#: own", which was true about permission and wrong about merging. stash.flow
+#: measured both spellings of the identical intent against the identical
+#: upstream change, and so did this repository, with `git merge-file` against a
+#: pristine render:
+#:
+#:     NARRATIVE = (TODO_DIR, IMPL_DIR, DOCS_DIR / "reports", EXPLORE_DIR)   CONFLICT
+#:     NARRATIVE += (EXPLORE_DIR,)                                           clean
+#:
+#: **The discriminator is line disjointness, not permission.** Being invited to
+#: edit a line changes nothing about what git does when upstream edits it too,
+#: and every future change to the tuple above collides with an adopter who put
+#: their stage inside it. An append is a different line and always will be.
+#:
+#:     EXPLORE_DIR = PROJECT_ROOT / "explore"
+#:     NARRATIVE += (EXPLORE_DIR,)
 
 # ── Code and configuration ───────────────────────────────────────────────────
 CLI_DIR = PROJECT_ROOT / "cli"

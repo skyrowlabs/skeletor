@@ -54,6 +54,13 @@ IGNORE_FILE = GITHUB_DIR / "scripts" / ".validate-ignore"
 
 SCAN_ROOTS = ["docs", ".claude", ".github"]
 
+#: **Add your own roots below, as an append. Do not edit the list above.**
+#: A root written into the literal conflicts with every upstream change to it;
+#: an append is a different line and merges clean. See the same note beside
+#: `NARRATIVE` in `scripts/paths.py`, where the two spellings were measured.
+#:
+#:     SCAN_ROOTS += ["strategy"]
+
 _LINK = re.compile(r"(?<!!)\[(?P<text>[^\]]*)\]\((?P<href>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
 _HEADING = re.compile(r"^(#{1,6})\s+(?P<text>.+?)\s*$", re.MULTILINE)
 _CODE_FENCE = re.compile(r"```.*?```", re.DOTALL)
