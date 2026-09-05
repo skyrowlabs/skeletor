@@ -609,8 +609,9 @@ def main() -> int:
         help=(
             "release-please (default): a bot owns the version, writes CHANGELOG.md and bumps "
             "VERSION. tag: the annotated git tag is the only version, and none of that ships. "
-            "Pick by asking whether anything INSTALLS this project — a tarball has no git "
-            "history and needs the file; a checkout has the tag and the file is a second copy."
+            "Pick by asking whether anything DEPLOYS this project — a tarball, an image or a "
+            "desktop build has no .git, so `git describe` answers nothing and VERSION is the "
+            "only thing that knows; a checkout has the tag and the file is a second copy."
         ),
     )
     parser.add_argument("--language", choices=["python", "node", "both", "none"], default="python")

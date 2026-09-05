@@ -557,11 +557,18 @@ a verification grid it cannot afford, and it would put a conditional into every
 doc describing the workflow.
 
 The question it answers is a fact about the project rather than a taste — **does
-anything install this?** A published artifact needs a tracked `VERSION`, because
-a tarball carries no git history. A repository run from a checkout has the tag,
-and `VERSION` is then a second home for a number `git describe` already knows,
-kept in step by a bot. skeletor itself is the `tag` case, which is why there is
-no `VERSION` file here.
+anything deploy this?** A published artifact needs a tracked `VERSION`, because
+what a user runs has no `.git` and `git describe` there answers nothing. A
+repository run from a checkout has the tag, and `VERSION` is then a second home
+for a number `git describe` already knows, kept in step by a bot. skeletor itself
+is the `tag` case, which is why there is no `VERSION` file here.
+
+The verb matters and stash.flow supplied the correction: this said *install*,
+which reads as packaging and invites the answer "we don't publish to PyPI, so
+no". Their collector is a desktop build and their node ships as Compose —
+nothing is installed in that sense and every one of those artifacts is a tree
+with no git history. The flag reads as being about tagging discipline; the case
+it actually turns on is distribution.
 
 Two mechanisms make the subtraction safe, and both key on **the tree rather than
 the flag** — the flag is gone by the time anything reads them:
