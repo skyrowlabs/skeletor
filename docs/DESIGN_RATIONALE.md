@@ -249,6 +249,45 @@ It flags a state symbol typed into a `print`, a stream picked by hand, and a
 checker and parses the result, because a payload can be well-shaped in the
 source and still unusable in practice, which is exactly what had happened.
 
+### One allowlist, two consumers: a collision, not a gap
+
+`scripts/output_allowlist.yaml` exempts a script from the output discipline, and
+`_stale()` deletes an entry whose script now passes the check. That is the right
+rule and it has exactly one consumer's question baked into it.
+
+There are two. `check_output_discipline.py` asks about the **source shape** —
+does this script declare `--json`? `tests/test_output_contract.py` asks about
+**runtime behaviour** — does it actually answer, on this host, with something a
+parser can read. jam.sense adopted the component and hit the second: a checker
+that imports from a container-only mount, correct in their stack, red on a bare
+runner. The natural fix was structurally unavailable, and the reason is the
+interesting part — their checker *does* declare `--json`, so the source check
+passes, so any allowlist entry they added would be reported stale and deleted,
+and deleting it re-breaks the behavioural test. **One filename, two questions,
+and validation keyed to only one of them.**
+
+A third file would have been the obvious answer and the wrong one — it is the
+same shape one layer along, and the second consumer's staleness question is not
+about a path at all. The exemption is a constant in the script instead:
+
+```python
+CANNOT_RUN_ON_HOST = "imports from the container mount; needs the repo at /app"
+```
+
+Three properties, and each was a separate decision. It **travels with the
+script**, so there is no path string to maintain and no way to exempt a file you
+are not looking at. The value **is** the reason, so an exemption without one is
+not expressible rather than merely discouraged. And it is **validated in the
+direction that matters**: a script claiming it cannot answer `--json` here,
+which then does, is reported as a stale claim — the same "checked against the
+thing it exempts on every run" property the manifest has.
+
+The generalisation is the one this session kept arriving at from different
+directions: an exemption belongs at the site that needs it, holding its own
+reason, checked against reality on every run. `Suite.scheduled`,
+`SCAFFOLD-OPTIONAL`, and this are three spellings of it, and each was proposed
+by the consumer who tripped over the version without it.
+
 ---
 
 ## Propagating a template change: merge cleanly or say so

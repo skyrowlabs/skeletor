@@ -939,6 +939,101 @@ def agentless_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     return results
 
 
+#: A checker that cannot run on a bare host, in the three states that matter.
+#: Written here rather than shipped, because a tree that SHIPPED one would be a
+#: tree whose own `check pre-push` is red on arrival.
+_CONTAINER_CHECKER = '''#!/usr/bin/env python3
+"""A checker that only runs with the repository mounted in a container."""
+{declaration}
+import sys
+
+sys.path.insert(0, "/nonexistent-container-mount")
+import definitely_not_installed  # noqa: F401
+'''
+
+
+def host_exemption_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """`CANNOT_RUN_ON_HOST` excuses a checker, and only while it is true.
+
+    `tests/test_output_contract.py` runs every `scripts/check_*.py` as a host
+    subprocess, which is right for a fresh scaffold and false for a tree that
+    grows a checker needing a container mount, a service, or a credential.
+    jam.sense hit it on their first adoption and had nowhere to put the
+    exemption: `output_allowlist.yaml` answers the *source-shape* question, and
+    its staleness check deletes an entry the moment the source check passes — so
+    a container-only checker that correctly declares `--json` has its exemption
+    reported stale, and removing it re-breaks the behavioural test. One file,
+    two consumers, two questions.
+
+    Every branch of the fix ships untested in a scaffold, because a scaffold has
+    no such checker — the exempt path exists for trees this repository cannot
+    see. That is `declined_gate`'s lesson exactly: report text written for a
+    branch nothing exercises. So it is planted here, in all three states.
+    """
+    results: List[Result] = []
+    started = time.time()
+    target = workdir / "host-exemption"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(target), "--name", "Hosted", "--slug", "hosted",
+         "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
+        cwd=workdir,
+    )
+    if code != 0:
+        return [Result("host exemption: scaffold", False, time.time() - started, output)]
+    (target / ".venv").symlink_to(venv_python.parents[1])
+
+    planted = target / "scripts" / "check_planted_container_only.py"
+    suite = ["-m", "pytest", "tests/test_output_contract.py", "-q", "--no-header"]
+
+    def outcome(declaration: str) -> Tuple[bool, str]:
+        planted.write_text(_CONTAINER_CHECKER.format(declaration=declaration), encoding="utf-8")
+        assert planted.exists(), "the plant did not land"
+        code, output = run([str(venv_python), *suite], cwd=target, env_extra={"PYTHONPATH": str(target)})
+        return code == 0, output
+
+    cases = [
+        ("", False, "an undeclared container-only checker fails"),
+        ('CANNOT_RUN_ON_HOST = "needs the container mount"', True, "a declared one is excused"),
+        ('CANNOT_RUN_ON_HOST = ""', False, "an empty reason buys nothing"),
+    ]
+    for declaration, expected_green, label in cases:
+        started = time.time()
+        green, output = outcome(declaration)
+        results.append(
+            Result(
+                f"host exemption: {label}",
+                green is expected_green,
+                time.time() - started,
+                f"suite was {'green' if green else 'red'}, expected {'green' if expected_green else 'red'}\n{output}",
+            )
+        )
+
+    # The staleness direction: the container dependency goes, the claim stays.
+    started = time.time()
+    planted.write_text(
+        "#!/usr/bin/env python3\n"
+        '"""It runs on the host now, and still says it cannot."""\n'
+        'CANNOT_RUN_ON_HOST = "needs the container mount"\n'
+        "import argparse, json, sys\n"
+        'parser = argparse.ArgumentParser()\n'
+        'parser.add_argument("--json", action="store_true")\n'
+        "if parser.parse_args().json:\n"
+        "    json.dump({\"ok\": True}, sys.stdout)\n",
+        encoding="utf-8",
+    )
+    code, output = run([str(venv_python), *suite], cwd=target, env_extra={"PYTHONPATH": str(target)})
+    results.append(
+        Result(
+            "host exemption: a claim that stopped being true is reported stale",
+            code != 0 and "outlived its reason" in output,
+            time.time() - started,
+            output,
+        )
+    )
+    planted.unlink()
+    return results
+
+
 def versioning_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     """`--versioning tag` produces a tree that passes its own gates.
 
@@ -2427,6 +2522,9 @@ def main() -> int:
         # wrong tree.
         fullest = max(tiers, key=lambda t: len(scaffolder.TIERS[t]))
         for gate in versioning_gate(fullest, workdir, venv_python):
+            results.append(gate)
+
+        for gate in host_exemption_gate(fullest, workdir, venv_python):
             results.append(gate)
 
         for gate in agentless_gate(fullest, workdir, venv_python):
