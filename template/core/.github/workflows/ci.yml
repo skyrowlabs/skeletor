@@ -90,6 +90,31 @@ jobs:
           python scripts/check_source_doc_refs.py
           python scripts/check_output_discipline.py
 
+      # The commit-message rule is enforced locally by the `commit-msg` hook,
+      # which binds only contributors who ran `pre-commit install` — not a
+      # web-UI commit, not a merge made in the GitHub interface, not a machine.
+      # And Release Please reads those same subjects to build the changelog and
+      # pick the version bump, so a subject it cannot parse is not rejected,
+      # it is IGNORED: no entry, and no release if it was the only fix.
+      #
+      # Scoped to this change's own commits, never to all history: a repository
+      # adopting this template has history written under some other rule, and a
+      # gate red on arrival is one people learn to ignore.
+      #
+      # `git log` needs the merge base, so this is in the gate job — the one
+      # with `fetch-depth: 0`. The all-zeros SHA is a branch's first push, which
+      # has no `before` to diff against; HEAD alone is the honest range there.
+      - name: Commit subjects Release Please can read
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "no base commit for this event — checking HEAD alone"
+            python scripts/check_commit_subjects.py
+          else
+            python scripts/check_commit_subjects.py --range "$BASE..${{ github.sha }}"
+          fi
+
   # ── Lint ────────────────────────────────────────────────────────────────
   lint:
     name: Lint & Types

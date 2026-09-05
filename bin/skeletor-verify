@@ -35,7 +35,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 SKELETOR = Path(__file__).resolve().parents[1]
 SCAFFOLDER = SKELETOR / "bin" / "skeletor-new"
@@ -1469,6 +1469,170 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     return results
 
 
+#: A reference to a file in this tree: at least one slash, and an extension
+#: beginning with a letter. Both halves earn their place — without the slash a
+#: version string (`1.2.3`) and a sentence-ending word match; without the letter
+#: rule so does `v0.4.4`. The lookbehind keeps it off the tail of a URL, whose
+#: path segments are preceded by `/`.
+_TREE_REF = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.[A-Za-z]\w*)")
+
+
+def configurations(scaffolder) -> List[Tuple[str, str, str]]:
+    """Every (tier, language, agent) this scaffolder can produce.
+
+    Read from its own maps. `--agent none` is a configuration a user is
+    documented to pick, so a reference that only resolves when the vendor
+    directory ships is the same defect one axis over.
+    """
+    return [
+        (tier, language, agent)
+        for tier in sorted(scaffolder.TIERS)
+        for language in sorted(scaffolder.LANGUAGE_OVERLAYS)
+        for agent in sorted(scaffolder.AGENTS)
+    ]
+
+
+def superset_of(scaffolder, a: Tuple[str, str, str], b: Tuple[str, str, str]) -> bool:
+    """Does configuration `b` ship everything `a` does, and more?
+
+    Composition is cumulative in all three axes, so this is containment of the
+    overlay lists — never a hand-written ordering, which would go stale the day
+    a tier is inserted in the middle.
+    """
+    if a == b:
+        return False
+    a_tier, a_lang, a_agent = a
+    b_tier, b_lang, b_agent = b
+    tiers = set(scaffolder.TIERS[a_tier]) <= set(scaffolder.TIERS[b_tier])
+    langs = set(scaffolder.LANGUAGE_OVERLAYS[a_lang].split(",")) <= set(
+        scaffolder.LANGUAGE_OVERLAYS[b_lang].split(",")
+    )
+    agents = scaffolder.AGENTS[a_agent] is None or scaffolder.AGENTS[a_agent] == scaffolder.AGENTS[b_agent]
+    return tiers and langs and agents
+
+
+def tier_composition_gate(workdir: Path) -> List[Result]:
+    """A shipped file must not name a shipped file that is not shipped *here*.
+
+    stash.flow reported the class: `template/core/AGENTS.md` and
+    `template/core/scripts/paths.py` both cited `tests/test_state_paths.py`,
+    which shipped only at `agentic`. A `core` reader following either citation
+    finds nothing, and the sentence around it — "this test enforces it" — is
+    then a claim about a file that is not there.
+
+    No tree's own suite can see this. `check_source_doc_refs.py` runs inside one
+    configuration, where a reference either resolves or does not; the defect is
+    that it resolves in a *different* one. That makes it the generator's
+    question, which is why the fix went here and not into the template.
+
+    ## The predicate, and why it needs no allowlist
+
+    A reference is a finding only when it is **absent here and present in a
+    configuration that ships strictly more**. Everything else is out of scope by
+    construction rather than by exemption:
+
+    * `.env`, `tmp/upgrade/<path>`, a file the user is told to create — absent
+      everywhere, so never flagged.
+    * A URL, a version string, a dotted module name — not matched at all.
+    * Another repository's path — absent from every configuration here.
+
+    Measured, not asserted: the first run found 11 references across `core` and
+    `governed`, all six distinct sites real, and every one had a fix better than
+    an exemption. Four were live citations pointing a `core` reader at a module
+    only `agentic` ships; two were history about the repository this was
+    extracted from. The allowlist is empty and there is no mechanism to add one.
+
+    ## The one thing it cannot see
+
+    A path belonging to **another repo** that happens to collide with one of
+    ours. `scripts/yaml_text.py` cited jam.sense's `cli/worktree.py`, which is
+    not a file here at any tier — except that `agentic` ships a `cli/worktree.py`
+    of its own, so the collision made it look like a local dangling reference.
+    It was reworded rather than exempted, because spelling another repo's file
+    as a repo-relative path is misleading in its own right. A predicate over
+    paths cannot tell the two apart, and this is written down instead of guarded.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    configs = configurations(scaffolder)
+
+    trees: Dict[Tuple[str, str, str], Path] = {}
+    for tier, language, agent in configs:
+        name = f"compose-{tier}-{language}-{agent}"
+        target = workdir / name
+        code, output = run(
+            [
+                sys.executable,
+                str(SCAFFOLDER),
+                str(target),
+                "--name",
+                "Compose",
+                "--cli",
+                "cc",
+                "--tagline",
+                "composition",
+                "--tier",
+                tier,
+                "--language",
+                language,
+                "--agent",
+                agent,
+            ],
+            cwd=workdir,
+        )
+        if code != 0:
+            return [Result(f"tier composition: scaffold {name}", False, time.time() - started, output)]
+        trees[(tier, language, agent)] = target
+
+    def shipped(root: Path) -> set:
+        return {
+            str(f.relative_to(root))
+            for f in root.rglob("*")
+            if f.is_file() and ".git" not in f.relative_to(root).parts
+        }
+
+    files = {config: shipped(root) for config, root in trees.items()}
+
+    findings: Dict[str, List[str]] = {}
+    scanned_refs = 0
+    for config, root in trees.items():
+        mine = files[config]
+        elsewhere = set().union(
+            *(files[other] for other in configs if superset_of(scaffolder, config, other))
+        ) or set()
+        for rel in sorted(mine):
+            path = root / rel
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for match in _TREE_REF.finditer(text):
+                ref = match.group(1)
+                scanned_refs += 1
+                if ref in mine or ref not in elsewhere:
+                    continue
+                where = "/".join(config)
+                findings.setdefault(f"{ref}  (missing at {where})", []).append(rel)
+
+    # A negative over an empty scan is a tautology: a `_TREE_REF` that matched
+    # nothing would report every configuration clean. The trees hold hundreds of
+    # references between them, so a number this small means the extractor broke.
+    enumerated = scanned_refs >= 100
+    report = "\n".join(
+        f"  {ref}\n" + "\n".join(f"      cited by {c}" for c in sorted(set(citers)))
+        for ref, citers in sorted(findings.items())
+    )
+    return [
+        Result(
+            f"tier composition: every reference resolves where it is read ({len(configs)} configs, {scanned_refs} refs)",
+            not findings and enumerated,
+            time.time() - started,
+            (f"extracted only {scanned_refs} references — the extractor is broken\n" if not enumerated else "")
+            + ("a shipped file names a file that is not shipped in that configuration:\n" + report if findings else ""),
+        )
+    ]
+
+
 def clean_skeletor(workdir: Path) -> Path:
     """A committed clone of this checkout, cloned once and reused.
 
@@ -2142,6 +2306,10 @@ def main() -> int:
         for gate in collect_diff_gate(fullest, workdir, venv_python):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
+
+        # Not per-tier: it is a question ABOUT the tiers, so it scaffolds its own
+        # grid and runs once.
+        results += tier_composition_gate(workdir)
 
         for gate in long_path_gate(fullest, workdir, venv_python):
             gate.label = f"{fullest}: {gate.label}"

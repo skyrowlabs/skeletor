@@ -43,7 +43,7 @@ from typing import Any, Iterable, NoReturn, Sequence, Tuple
 #:
 #: `skip` is not a failure and not a success: a gate that correctly chose not to
 #: act executed properly, and it has to stay distinguishable from one that never
-#: ran. That distinction is load-bearing in `scripts/reporting/run_ledger.py`.
+#: ran. That distinction is load-bearing in the run ledger, where a tier ships one.
 STATE_SYMBOLS = {
     "ok": "✅",
     "fail": "❌",
@@ -62,9 +62,8 @@ MARK_SYMBOLS = {
 
 SYMBOLS = {**STATE_SYMBOLS, **MARK_SYMBOLS}
 
-#: Recorded outcome -> symbol name. The outcome *names* belong to
-#: `scripts/reporting/run_ledger.py`; the symbols belong here, so a status viewer
-#: never spells its own. It used to, and the viewer's `declined` glyph and the
+#: Recorded outcome -> symbol name. The outcome *names* belong to the run
+#: ledger; the symbols belong here, so a status viewer never spells its own. It used to, and the viewer's `declined` glyph and the
 #: runner's had already drifted apart by a trailing space.
 OUTCOME_SYMBOLS = {
     "ok": "ok",

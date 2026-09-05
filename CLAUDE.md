@@ -100,6 +100,32 @@ eslint and prettier run once, on the fullest tier's `both` tree, and the fullest
 tier is scaffolded a second time into a deliberately long path and a third time
 into a directory that already has files in it.
 
+**Tier composition is checked across all 18 configurations at once**, which is
+the one question no tree's own suite can ask. stash.flow reported the class: two
+`core` files cited `tests/test_state_paths.py`, which shipped only at `agentic`,
+so a `core` reader following either citation found nothing. Inside one tree a
+reference either resolves or does not; the defect is that it resolves in a
+*different* one, and that is the generator's question.
+
+The predicate is what makes it allowlist-free: a reference is a finding only
+when it is **absent here and present in a configuration that ships strictly
+more**. A file the user is told to create, a URL, another repo's path — all
+absent everywhere, so all out of scope by construction rather than by
+exemption. Containment is read from `TIERS`, `LANGUAGE_OVERLAYS` and `AGENTS`,
+so the language and agent axes came free, and the agent axis is where it earned
+itself: `--agent none` shipped a `.github/DOCS_INDEX.md` routing readers to
+three paths under `.claude/`, which that flag exists to omit. The tree's own
+`check_doc_tables.py` cannot see it — that one walks `docs/`, and `.claude/` is
+not in `docs/`.
+
+Eleven findings on the first run, six distinct sites, and every one had a fix
+better than an exemption: four were live citations sending a `core` reader to a
+module only `agentic` ships, two were history about the repository this was
+extracted from. There is no allowlist and no mechanism to add one. What it
+cannot see is written down instead of guarded — another repo's path that
+*collides* with one of ours reads as a local dangling reference, which is how
+jam.sense's `cli/worktree.py` surfaced.
+
 That empty-suite gate named `integration` until it had to name two things. A
 suite whose tests a scaffold cannot ship is red on arrival unless the CLI
 tolerates an empty selection, and the gate is what proves the tolerance — so

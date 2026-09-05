@@ -74,7 +74,7 @@ def _agent_backed() -> set:
     """Command paths that invoke a headless agent, read from the job registry.
 
     Not the allowlist, deliberately: `report <job>` subcommands are *generated*
-    from `scripts/reporting/jobs.py`, so an allowlist entry per job would be a
+    from the job registry, so an allowlist entry per job would be a
     second registry — and the day somebody forgot one, this suite would sit
     there paying for a real agent run until it timed out. Registering a job
     exempts it by existing.

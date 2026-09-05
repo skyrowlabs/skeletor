@@ -51,6 +51,12 @@ pointer to it, never a second copy.
 - **Rules** (`docs/rules/`) — the conventions, one file per domain. Plain
   markdown, read because `AGENTS.md` names them. Any agent can be pointed here.
 
+<!-- SCAFFOLD-VENDOR: removed at scaffold time when no vendor directory ships.
+     This is a ROUTING table, so a row here is a promise that the path is in
+     this tree. Under `--agent none` these three are not, and a routing table
+     that sends a reader nowhere is worse than a shorter one — it implies the
+     subject is still covered. Delimited rather than reworded because the whole
+     block is about files that are either all present or all absent. -->
 Everything under `.claude/` is Claude Code tooling and nothing else depends on
 it — scaffold with `--agent none` to omit it, and the tree keeps every rule:
 
@@ -58,6 +64,7 @@ it — scaffold with `--agent none` to omit it, and the tree keeps every rule:
 - **Skills** (`.claude/skills/`) — multi-agent orchestration, invoked as `/<name>`.
 - **Settings & hooks** (`.claude/settings.json`, `.claude/hooks/`) — a permission
   allowlist and a session-start toolchain install.
+<!-- /SCAFFOLD-VENDOR -->
 
 ---
 

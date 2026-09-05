@@ -54,8 +54,8 @@ from scripts.output import detail, emit, fail, item, line, ok, skip, step, warn
 **`skip` is not a warning.** A job that executed and correctly chose not to act
 is working. Reporting it as a warning means every legitimate decline reads as a
 problem, and a channel that cries wolf stops being read. This is the same
-distinction `scripts/reporting/run_ledger.py` draws between `declined` and a
-cron that never fired.
+distinction the run ledger draws — in the tiers that ship one — between
+`declined` and a cron that never fired.
 
 ## Why a Module and Not a Convention
 
@@ -64,7 +64,7 @@ call sites retyped `print(f"✅ ...")` anyway, because `scripts/` could not reac
 them — and a vocabulary only half the tree can import is one the other half
 reinvents. `⏸️` meant "executed and declined" in three files and was defined in
 none of them; the two spellings had already drifted by a trailing space. The
-gate table had a second implementation in `cli/commit.py`.
+gate table had a second implementation inside the commit command.
 
 None of that is visible to a linter or to review, because each file is
 internally consistent. So it is checked:

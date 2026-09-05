@@ -233,6 +233,42 @@ def register_shipped_docs(target: Path, values: Dict[str, str]) -> None:
     index.write_text(text, encoding="utf-8")
 
 
+#: Delimiters around prose that only makes sense when a vendor overlay shipped.
+#: A pair, so the block can be removed without a second copy of the file: a
+#: `.github/DOCS_INDEX.md` in the agent overlay would replace core's wholesale,
+#: and two copies of a routing table is the drift the table exists to prevent.
+VENDOR_BLOCK = ("<!-- SCAFFOLD-VENDOR:", "<!-- /SCAFFOLD-VENDOR -->")
+
+
+def drop_vendor_prose(target: Path) -> None:
+    """Remove vendor-only routing blocks when no vendor directory is present.
+
+    Keyed on **the tree**, not on `--agent`, which is the same reason the other
+    post-copy steps read what is on disk: the question is "did those files
+    arrive", and asking the flag instead means a renamed overlay silently keeps
+    prose about a directory nobody shipped.
+
+    Found by `bin/skeletor-verify`'s tier-composition gate on the axis it was
+    nearly not given. `--agent none` is documented, tested for having no
+    `.claude/` anywhere, and shipped an index routing readers to three paths
+    inside it. The tree's own `check_doc_tables.py` cannot see this: it walks
+    `docs/`, and `.claude/` is not in `docs/`.
+    """
+    if any(root.is_dir() for root in (target / ".claude",)):
+        return
+    index = target / ".github" / "DOCS_INDEX.md"
+    if not index.exists():
+        return
+    text = index.read_text(encoding="utf-8")
+    opener, closer = VENDOR_BLOCK
+    while opener in text:
+        start = text.index(opener)
+        end = text.index(closer, start) + len(closer)
+        # The trailing newline goes with the block, or removal leaves a widow.
+        text = text[:start] + text[end:].lstrip("\n")
+    index.write_text(text, encoding="utf-8")
+
+
 def skeletor_ref() -> str:
     """The commit of THIS checkout, so an upgrade can render the same base.
 
@@ -319,6 +355,7 @@ def post_copy_steps(tree: Path, values: Dict[str, str]) -> None:
     live here.
     """
     register_shipped_docs(tree, values)
+    drop_vendor_prose(tree)
     subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(tree), capture_output=True)
 
 

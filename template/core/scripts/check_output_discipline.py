@@ -5,7 +5,7 @@ The rule this enforces is in `docs/rules/output.md`, and it exists because it
 was already broken here. `cli/helpers.py` shipped `ok()` / `fail()` / `warn()`
 and roughly twenty call sites retyped `print(f"✅ ...")` anyway; `⏸️` meant
 "executed and declined" in three files and was defined in none of them; the gate
-table had a second implementation in `cli/commit.py`; and four scripts grew a
+table had a second implementation inside the commit command; and four scripts grew a
 `--json` flag while writing their human output to the same stdout, so three of
 them emitted something no parser could read.
 

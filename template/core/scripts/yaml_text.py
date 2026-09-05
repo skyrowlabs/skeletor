@@ -16,8 +16,8 @@ they guard was absent:
   five of its tests green. That gate exists specifically to catch a deleted
   trigger.
 
-jam.sense supplied the general form, from a naive grep that hit their
-`cli/worktree.py` twice — on an error message and a docstring — while missing
+jam.sense supplied the general form, from a naive grep that hit their worktree
+command twice — on an error message and a docstring — while missing
 the call it was looking for: **a detector validated by "it found the file I
 expected" is not validated; it has to find the site.**
 
