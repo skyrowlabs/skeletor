@@ -1443,6 +1443,51 @@ placed — the roots are bounded on purpose, and a discovered-everywhere rule
 would walk `template/`, `node_modules` and every vendored tree in repos that
 have one.
 
+### The generic name, claimed by the specific thing
+
+`cli/` is a literal directory in the template — no placeholder, no flag. It is
+in `python -m cli` in the wrapper, in `from cli.helpers import ...` in every
+command module, in `CLI_DIR`, in the tests and in the docs: 54 occurrences
+across 29 files. `--cli` renames the *wrapper script* and nothing else.
+
+Reported as skeletor owning a project's CLI, which is worth separating into the
+part that is true and the part that is not. Nothing under `template/*/cli/`
+mentions skeletor or calls back to it — `check`, `docs`, `test`, `commit`,
+`worktree`, `report` are the project's own gates over the project's own tree.
+What skeletor keeps is the right to *update* those files on upgrade, which is a
+different claim and the one that actually constrains a consumer.
+
+The clash is narrower than the report and completely real inside its range:
+**when the product is itself a command, the dev CLI and the product CLI want the
+same name and the same package.** Three shapes, and the tell is a question
+nobody was being asked —
+
+- the product is not a command (a service, a site): the two names are one word,
+  and the slug-derived default is right;
+- the product is a command shipped from its own package: give the wrapper a
+  shorter name. proto.pilot scaffolded `./pp` beside `proto` from `protopilot/`;
+  mind.head scaffolded `./mh` beside `mind-head` from `mind_head/`. Two
+  consumers reached the same arrangement independently and neither wrote it
+  down, which is the definition of an undocumented convention;
+- the product *is* `cli/`: sky.boss, which has no `.skeletor.json` at all. It
+  declined adoption and used `bin/skeletor-components`, which is the tool for
+  exactly that case.
+
+So the fix is the routing, said once in `AGENTS.md` where the five questions are
+asked, and not a rename. Renaming the package to `dev/` would be mechanical here
+and unaffordable downstream: **`bin/skeletor-upgrade` cannot rename a
+directory.** It renders the new tree, so `dev/*.py` arrive as new files and
+`cli/*.py` are *reported* as no longer shipped — never deleted, deliberately —
+leaving every adopted tree with two packages and a wrapper pointing at one of
+them. A migration wearing an upgrade's clothes.
+
+A `--cli-package` placeholder would be affordable — the same mechanism as
+`CLI_WRAPPER`, plus one verify configuration with a non-default value, since a
+flag never observed to disagree with another flag is undistinguished rather than
+confirmed. It is not built, because the one consumer it would serve already has
+an answer it chose on measurement, and a second door to a solved problem is how
+two mechanisms start disagreeing.
+
 ---
 
 ## CI, cost, and the draft-PR discipline

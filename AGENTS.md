@@ -21,12 +21,34 @@ annoying to change later.
 | ------------------ | --------- | -------------------------------------------------------- |
 | **Tier**           | `core`    | The only real decision — see the table below             |
 | Project name       | —         | Human form, e.g. "Order Service"                         |
-| CLI name           | from slug | Becomes `./<name>`; short, lowercase                     |
+| CLI name           | from slug | Becomes `./<name>` — **this repo's** commands, not the product's |
 | Tagline            | —         | One line: what the project is                            |
 | Language           | `python`  | `python`, `node`, `both`, or `none`                      |
 
 Defaults you only need to raise if the user has an opinion: base branch
 `develop`, release branch `main`, Python `3.12`, line length `120`.
+
+**The CLI name is the repository's command, not the product's.** `./<name>`
+runs `check`, `docs`, `test` — this project's own gates, from a package named
+`cli/`. Nothing in it mentions or calls back to skeletor; what skeletor keeps is
+the right to *update* those files on upgrade. But `cli` is a literal directory
+in the template, substituted nowhere and configurable by no flag, so the
+question to ask before answering this one is **whether the product is itself a
+command**:
+
+- **It is not** — a service, a library, a site. The two names are the same word
+  and `./<slug>` is right. jam.sense types `./jam`, breeze.brain `./bbrain`.
+- **It is, and ships from its own package.** Give the wrapper a different,
+  shorter name so the product keeps its own: proto.pilot scaffolded `./pp` and
+  ships `proto` from `protopilot/`; mind.head scaffolded `./mh` and ships
+  `mind-head` from `mind_head/`. Both arrived at this independently, which is
+  why it is written down here now.
+- **It *is* `cli/`.** Do not scaffold — there is no flag that would keep the two
+  apart, so the project's commands would land in the same package as the
+  template's. Use `$SKELETOR/bin/skeletor-components` instead: it copies the
+  files you choose, records where each came from and at what ref, and reports
+  when the original moves. sky.boss measured twelve overwrites against seventeen
+  declines and took this door.
 
 **Tiers** (cumulative — read `$SKELETOR/docs/TIERS.md` for detail):
 

@@ -617,7 +617,11 @@ def main() -> int:
     parser.add_argument("target", help="directory to create")
     parser.add_argument("--name", help='human name, e.g. "Order Service"')
     parser.add_argument("--slug", help="repo slug (defaults to the directory name)")
-    parser.add_argument("--cli", help="name of the CLI wrapper, e.g. `ord` (defaults from the slug)")
+    parser.add_argument(
+        "--cli",
+        help="name of the wrapper for this repo's own commands — check/docs/test, e.g. `ord`; "
+        "defaults from the slug. Not the product's command if the product is itself a CLI: see AGENTS.md",
+    )
     parser.add_argument("--env-prefix", help="env-var prefix, e.g. ORD (defaults from the CLI name)")
     parser.add_argument("--tagline", default="<one line: what this project is>")
     parser.add_argument("--tier", choices=sorted(TIERS), default="core")
