@@ -1319,13 +1319,38 @@ it prints under the most reassuring line this tool has.
 
 stash.flow reported it and named the class: **the warning is conditioned on
 there being a plan to contrast against, and absence-of-plan is not
-absence-of-hazard.** The general form is worth holding, because the condition
-looks like ordinary narrowing every time: a guard predicated on a quantity
-being non-empty should be checked against the empty case explicitly, since that
-is usually the end where the hazard is *total* rather than absent. It is the
-sibling of the rule this repository already states for negative assertions —
-there, an empty enumeration makes a check vacuous; here, an empty plan makes a
-warning maximally warranted and turns it off.
+absence-of-hazard.**
+
+The first generalisation written here was that this is the sibling of the rule
+this repository already holds for negative assertions — there an empty
+enumeration makes a check vacuous, here an empty plan makes a warning maximally
+warranted and turns it off — and *therefore* a guard predicated on a quantity
+being non-empty is worth checking against the empty case. stash.flow's
+correction is the load-bearing half, and it is that the two point in **opposite**
+directions from the same observation, which leaves "watch the empty case"
+underdetermined: it says to look and not what you will find. What decides which
+one you are in:
+
+> **Ask whether the empty thing is what you *looked at* or what you *found*.**
+>
+> Empty **scope** — the enumeration, the file list, the scan — means nothing was
+> examined, so every verdict over it is vacuous. That is `scanned()`, and it is
+> the `--junitxml` ratchet: *"I could not measure" is never "the budget is
+> respected."*
+>
+> Empty **finding** — the plan, the diff, the result — is a real answer, and
+> frequently the most informative one available, because it can be the fact that
+> makes some other hazard total. The plan being empty is not an absence of
+> information; it is the reason every file in `tmp/upgrade/` is *guaranteed*
+> stale rather than possibly stale.
+
+Both are "a quantity was zero". One is a measurement that did not happen and one
+is a measurement that came back, and the failure here was reading the second as
+the first. That also explains why it outlived every gate: all three of the
+upgrade gates reach branches with something to report, so all three test the
+*scope* end. Nothing had ever asserted on a branch whose finding was
+legitimately empty — and that is the common branch, precisely because most runs
+have nothing to do.
 
 The same line had a second defect, and it cost one string: **"already current"
 named no version.** The run compares the tree against a render of skeletor's
