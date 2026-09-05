@@ -16,9 +16,12 @@ did not exist, in a repository whose `AGENTS.md` explained on the same page that
 never had. Nothing could see the disagreement, because the two files were separate
 copies of one instruction.
 
-They are not separate any more. The block above is rendered from `setup_commands()`
-in the scaffolder — the same source as the README's — so there is exactly one place
-these steps are written down, and `bin/skeletor-verify` runs it.
+That was fixed where it could be: the block above and the README's were generated
+from one source when this repository was scaffolded. **Do not read that as a
+standing guarantee** — a guarantee implemented by rendering is spent at the moment
+of rendering. Both blocks are static text here, the generator is not present, and
+the two files wrap the shared steps differently. Change the setup steps and you
+change them in both places, by hand, and nothing will tell you if you miss one.
 
 Two things it installs are easy to miss, because they live outside version control:
 
@@ -26,8 +29,9 @@ Two things it installs are easy to miss, because they live outside version contr
   format check and the lint gates.
 - **The `regen-docs` merge driver** — its definition lives in `.git/config`, which
   is not tracked, so a fresh clone has `.gitattributes` pointing at a driver that
-  does not exist. The scaffolder installs it; verify with
-  `{{CLI}} check merge-drivers`.
+  does not exist. **Every clone after the first installs it by hand:**
+  `python scripts/git/install_merge_drivers.py`. Verify with
+  `{{CLI}} check merge-drivers`, which checks and never installs.
 
 ## Configuration
 

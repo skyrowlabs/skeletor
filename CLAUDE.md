@@ -908,6 +908,34 @@ interlock, and which you cannot understand from one file:
 6. **Ratchets ship at 0 for a greenfield tree** and document how to baseline
    them for an adoption. Never ship a ratchet that is red on arrival.
 
+7. **Template prose is read in the reader's tree, and must be true there.** The
+   generator is absent by then, and so is this repository. Two ways a sentence
+   fails that test, both of which shipped:
+
+   **A guarantee implemented by rendering cannot survive rendering.**
+   `docs/DEVELOPMENT.md` said its setup block "is rendered from
+   `setup_commands()` in the scaffolder — the same source as the README's — so
+   there is exactly one place these steps are written down". Every word was true
+   here and none of it in a scaffold, where the two blocks are static text that
+   nothing compares. The tell is narrower than tense: **a sentence in the present
+   tense about an ongoing guarantee that was actually a one-time act** — `is
+   rendered from`, `stays in sync with`, `the scaffolder installs it`. Standing
+   conventions in `docs/rules/` are present-tense and fine; a *mechanism* named
+   as currently operating is the dangerous subset, and the reader cannot check it
+   because the generator is a repository they may not have. The merge-driver
+   bullet was the same sentence at its worst: it described the untracked-`.git/config`
+   hazard from the one machine where that hazard cannot occur, so it read
+   "the scaffolder installs it" to every clone after the first, which is precisely
+   the population it was written for.
+
+   **A count measured in one tier, written into a file every tier carries.**
+   `scripts/yaml_text.py` said "two of the four workflows this template ships";
+   `core` ships three and `governed` adds the fourth. Same failure with the axis
+   changed from time to space, same remedy — state the shape, not the number.
+
+   Both were found by stash.flow, from an adopted tree, which is where they are
+   visible and here is where they are not.
+
 ---
 
 ## Conventions in this repo

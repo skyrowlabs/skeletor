@@ -44,8 +44,10 @@ def uncommented(text: str) -> str:
     Not a YAML-preserving transformation, and the difference is deliberate. In a
     block scalar — `run: |` — YAML treats `#` as literal content, so a shell
     comment inside a script is *data* to a parser and *prose* to a person. This
-    strips it, which changes what `yaml.safe_load` returns for two of the four
-    workflows this template ships.
+    strips it, which changes what `yaml.safe_load` returns for several of the
+    workflows here. No count: this file ships at `core` and higher tiers add
+    workflows, so a number written here is true in one tier and false in the
+    others, stated by a file all of them carry.
 
     That is the behaviour both consumers need. A job carrying
 
