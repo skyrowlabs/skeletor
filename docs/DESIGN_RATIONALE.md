@@ -808,6 +808,56 @@ having compared nothing. Here the truncation is in the reader's own terminal.
 Both are a negative claim sourced from a view that could not have shown the
 positive.
 
+### The defect that lives in what two files jointly imply
+
+Both of the corrections above were the same shape, which stash.flow named after
+the second one landed: the defect was not in either file. `tests/scanning.py`
+argues that a scan must refuse to enumerate nothing.
+`tests/test_output_contract.py` argued that what makes an empty enumeration safe
+is the shape of the set rather than a guard beside it. **Each was true about the
+case in front of its author.** They shipped four directories apart, in one
+repository, for two releases, and read together the second licenses deleting the
+first.
+
+This is the workspace's rule about test suites, one level up and with no suite
+involved:
+
+> A suite cannot find a disagreement about an artifact it publishes, because
+> writer and reader share an author.
+
+Two prose claims are that with the suite removed. Nothing compares them —
+`check_doc_links.py` asks whether a reference resolves, the tier-composition gate
+asks whether it resolves *here*, and neither can ask whether two paragraphs
+recommend opposite things. Consistency between them is assumed rather than
+checked, and the author is the last person positioned to notice, because he met
+each case separately and was right each time.
+
+stash.flow's report ends "I do not have a remedy and I am not sure one exists
+short of what just happened." The remedy is what just happened, and it is worth
+naming as a procedure rather than an accident: **an outside case that neither
+claim was written for.** Their read-only surface pin fit neither paragraph — no
+partition to make the empty case safe, and the set not growing *is* the
+invariant — so applying the rule produced the opposite answer and the two claims
+collided. That is the same instrument the workspace prescribes for seam defects,
+pointed at prose instead of bytes: run the actual consumer against the actual
+producer, and the disagreement surfaces in what the consumer does with it.
+
+Which means the practical form is a habit rather than a gate. A rule stated in
+one file is checkable against the file that states the opposite rule, and
+**nobody performs that check unless a second tree hands them the mismatched
+case** — so the value of an adoption is not only the bugs it finds. Two of the
+three defects it found here were things no test could have been written for,
+because the thing that was wrong was an implication between two correct files.
+
+The narrower lesson, which is actionable today: this repository's own rule that
+*every rule carries its reason, in the file that states it* pulls against its
+ownership rule that a doc *lives where it changes and is linked, never
+duplicated*. Restating a convention in a second file is how a reason gets
+carried, and it is also how two homes for one claim get created. When a
+docstring is about to argue a general principle that another file owns, link
+that file by name — the two claims then sit close enough that the next reader
+compares them, which is the only mechanism available.
+
 One thing stash.flow did **not** do is the reason this is a template fix rather
 than an adopter's workaround: they left `max_skipped: 0` alone. Raising it to 1
 would have recorded a claim about their tree that was false — they had no
