@@ -104,9 +104,19 @@ jobs:
       # `git log` needs the merge base, so this is in the gate job — the one
       # with `fetch-depth: 0`. The all-zeros SHA is a branch's first push, which
       # has no `before` to diff against; HEAD alone is the honest range there.
+      #
+      # `forced` is the third case and it was missing. On a force-push `before`
+      # is a real sha string naming a commit that is now reachable from **no
+      # ref**, so the empty and all-zeros tests both pass it through and git
+      # then cannot resolve the range. The failure was correct and its
+      # diagnosis was not: the message sent the reader to `fetch-depth: 0`,
+      # which deepens a fetch of refs and cannot reach an orphan — there is
+      # nothing to deepen to. A remedy that does not exist is the expensive
+      # kind of wrong answer. Reported by stash.flow.
       - name: Commit subjects Release Please can read, if it reads them here
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          FORCED: ${{ github.event.forced }}
         run: |
           # SCAFFOLD-OPTIONAL .github/release-please-config.json
           # Scaffolded with `--versioning tag` there is no release automation,
@@ -117,9 +127,20 @@ jobs:
             echo "no Release Please config in this repository — nothing parses commit subjects"
             exit 0
           fi
-          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-            echo "no base commit for this event — checking HEAD alone"
-            python scripts/check_commit_subjects.py
+          REASON=""
+          if [ "$FORCED" = "true" ]; then
+            REASON="force-push: \`before\` names a commit no ref reaches"
+          elif [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            REASON="no base commit for this event"
+          fi
+          if [ -n "$REASON" ]; then
+            echo "$REASON — checking HEAD alone"
+            # `--range -1` and not a bare call. The script's default is
+            # `@{u}..HEAD` — the set a local push would send — and a checkout
+            # here has no upstream, so a bare call would land on HEAD alone by
+            # coincidence rather than by instruction. The branch that MEANS
+            # HEAD alone says HEAD alone.
+            python scripts/check_commit_subjects.py --range -1
           else
             python scripts/check_commit_subjects.py --range "$BASE..${{ github.sha }}"
           fi
