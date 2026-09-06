@@ -210,7 +210,8 @@ Then read [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md) from Step 2 on.
 ## What you get
 
 ```bash
-bin/skeletor-new ../my-project --name "My Project" --cli mp --tier core
+bin/skeletor-new ../my-project --name "My Project" --cli mp \
+  --tagline "What it is." --tier core
 
 cd ../my-project
 python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt

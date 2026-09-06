@@ -8,9 +8,9 @@ looks most thorough.
 > exactly like the noise. Every tier below is a promise to keep something green.
 
 ```bash
-bin/skeletor-new ../my-project --tier core       # default
-bin/skeletor-new ../my-project --tier governed
-bin/skeletor-new ../my-project --tier agentic
+bin/skeletor-new ../my-project --tagline "What it is." --tier core   # default
+bin/skeletor-new ../my-project --tagline "What it is." --tier governed
+bin/skeletor-new ../my-project --tagline "What it is." --tier agentic
 ```
 
 Tiers compose in order (`agentic` includes `governed` includes `core`), and a
@@ -132,7 +132,7 @@ Tiers are plain file overlays, so upgrading is a re-run into the existing tree:
 
 ```bash
 bin/skeletor-new . --tier governed --force \
-  --name "..." --cli "..." --slug "..."     # same values as the original run
+  --name "..." --cli "..." --slug "..." --tagline "..."   # as the original run
 ```
 
 Pass the **same** substitution values, or the overlay will render placeholders

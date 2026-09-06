@@ -711,7 +711,27 @@ def build_parser() -> argparse.ArgumentParser:
         "defaults from the slug. Not the product's command if the product is itself a CLI: see AGENTS.md",
     )
     parser.add_argument("--env-prefix", help="env-var prefix, e.g. ORD (defaults from the CLI name)")
-    parser.add_argument("--tagline", default="<one line: what this project is>")
+    #: Required, and deliberately without a default. This is the only rendered
+    #: field that cannot be derived from anything else: `--name` falls back to
+    #: the slug, `--cli` and `--env-prefix` to the target directory name. So a
+    #: default here can only ever be placeholder text, and this one was
+    #: `<one line: what this project is>`. Omitting the flag rendered that
+    #: literal into five files plus `.skeletor.json`, green, because by the time
+    #: `render()` sees it it is a substituted string like any other — the check
+    #: for an *unsubstituted* `{{PLACEHOLDER}}` cannot see a placeholder that
+    #: substituted correctly. dream-doll scaffolded at v0.13.1 without passing
+    #: it and reached `cli/__init__.py`'s docstring, i.e. rendered `--help`
+    #: output. The manifest is the durable half: it is the upgrade base, so
+    #: every later `skeletor-upgrade` re-renders the placeholder, and
+    #: `--repair-manifest` re-derives it faithfully.
+    #:
+    #: Requiring it is the whole fix, and it is subtraction rather than
+    #: validation: it turns a silent wrong render into an argparse error at the
+    #: only moment the missing information exists, and deletes the string that
+    #: was its own copy-paste source. A `^<.*>$` guard would treat the symptom
+    #: and leave a scaffolder judging a user's prose; presence is checkable,
+    #: content is not.
+    parser.add_argument("--tagline", required=True, help="one line: what this project is")
     parser.add_argument("--tier", choices=sorted(TIERS), default="core")
     parser.add_argument(
         "--versioning",

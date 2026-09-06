@@ -1207,7 +1207,7 @@ def agentless_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     target = workdir / "agentless"
     started = time.time()
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Agentless", "--slug", "agentless",
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Agentless", "--slug", "agentless", "--tagline", "t",
          "--cli", CLI_NAME, "--tier", tier, "--language", "python", "--agent", "none", "--no-git"],
         cwd=workdir,
     )
@@ -1284,7 +1284,7 @@ def host_exemption_gate(tier: str, workdir: Path, venv_python: Path) -> List[Res
     started = time.time()
     target = workdir / "host-exemption"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Hosted", "--slug", "hosted",
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Hosted", "--slug", "hosted", "--tagline", "t",
          "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
         cwd=workdir,
     )
@@ -1393,7 +1393,7 @@ def versioning_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]
     started = time.time()
     target = workdir / "versioning-tag"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Tagged", "--slug", "tagged",
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Tagged", "--slug", "tagged", "--tagline", "t",
          "--cli", CLI_NAME, "--tier", tier, "--language", "python", "--versioning", "tag"],
         cwd=workdir,
     )
@@ -1404,7 +1404,7 @@ def versioning_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]
     started = time.time()
     default = workdir / "versioning-default"
     run(
-        [sys.executable, str(SCAFFOLDER), str(default), "--allow-dirty", "--name", "Default", "--slug", "defaulted",
+        [sys.executable, str(SCAFFOLDER), str(default), "--allow-dirty", "--name", "Default", "--slug", "defaulted", "--tagline", "t",
          "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
         cwd=workdir,
     )
@@ -1538,7 +1538,7 @@ def badge_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     target = workdir / "badged"
     started = time.time()
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Badged", "--slug", "badged",
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Badged", "--slug", "badged", "--tagline", "t",
          "--cli", CLI_NAME, "--tier", tier, "--language", "both", "--org", "acme",
          "--release-branch", "trunk", "--no-git"],
         cwd=workdir,
@@ -1787,7 +1787,7 @@ def dry_run_gate(tier: str, workdir: Path) -> List[Result]:
 
     def invoke(*extra: str) -> Tuple[int, str]:
         return run(
-            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Dry", "--slug", "dryrun",
+            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Dry", "--slug", "dryrun", "--tagline", "t",
              "--cli", CLI_NAME, "--tier", tier, "--language", "python", *extra],
             cwd=workdir,
         )
@@ -1813,7 +1813,7 @@ def dry_run_gate(tier: str, workdir: Path) -> List[Result]:
     started = time.time()
     absent = workdir / "dryrun-absent"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(absent), "--allow-dirty", "--name", "Dry", "--slug", "dryabsent",
+        [sys.executable, str(SCAFFOLDER), str(absent), "--allow-dirty", "--name", "Dry", "--slug", "dryabsent", "--tagline", "t",
          "--cli", CLI_NAME, "--tier", tier, "--language", "python", "--dry-run"],
         cwd=workdir,
     )
@@ -1869,7 +1869,7 @@ def branch_gate(tier: str, workdir: Path) -> List[Result]:
     def build(name: str, base: str, release: str) -> Optional[Path]:
         target = workdir / name
         code, output = run(
-            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Branchy", "--slug", name,
+            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Branchy", "--slug", name, "--tagline", "t",
              "--cli", CLI_NAME, "--tier", tier, "--language", "python",
              "--base-branch", base, "--release-branch", release],
             cwd=workdir,
@@ -2879,7 +2879,9 @@ def manifest_args_gate() -> Result:
     parser.print_usage(usage)
     printed = set(re.findall(r"--[\w-]+", usage.getvalue())) - {"--help"}
 
-    args = parser.parse_args(["probe"])
+    # `--tagline` is required, so the probe must supply it: this gate asks what
+    # the parser declares, not what a caller may omit.
+    args = parser.parse_args(["probe", "--tagline", "t"])
     recorded = set(scaffolder.manifest_args(args, scaffolder.substitutions(args))[::2])
 
     problems = []
@@ -4681,6 +4683,62 @@ def entry_point_gate() -> Result:
     )
 
 
+def tagline_required_gate(workdir: Path) -> Result:
+    """Omitting `--tagline` is refused, rather than rendering placeholder text.
+
+    `--tagline` is the one rendered field with no derivation — `--name` falls
+    back to the slug, `--cli` and `--env-prefix` to the target directory name —
+    and it carried `default="<one line: what this project is>"`. A scaffold that
+    omitted the flag wrote that literal into five files plus `.skeletor.json`,
+    reaching `cli/__init__.py`'s docstring and therefore rendered `--help`
+    output. `render()` structurally cannot catch it: the guard is for an
+    *unsubstituted* `{{PLACEHOLDER}}`, and this one substituted correctly. The
+    manifest is the durable half, being the upgrade base.
+
+    **Nothing here caught it because every scaffold in this file passes the
+    flag** — `--tagline "t"` at fourteen sites. The default was never once
+    produced by the grid whose premise is that the scaffold is the test. That is
+    `--no-git`'s shape mirrored: there the verifier omitted what the docs
+    passed, here the verifier passes what a user omits, and both times the
+    tested path and the real path were disjoint. A default no gate ever produces
+    is not a tested default, and a flag every caller happens to pass is
+    undistinguished rather than confirmed.
+
+    The refusal must **name the flag**. A scaffold can fail for many reasons, so
+    a gate satisfied by any non-zero exit would stay green if the failure moved
+    to something unrelated — which is this file's own rule that a green negative
+    looks identical whether the thing did not happen or nobody looked. It also
+    asserts no tree was left behind, because a parser that rejected the run
+    after writing files would be a different and worse bug.
+    """
+    started = time.time()
+    target = workdir / "no-tagline"
+    code, output = run(
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            "core",
+        ],
+        cwd=SKELETOR,
+    )
+    named = "--tagline" in output
+    unwritten = not target.exists()
+    return Result(
+        "bin/skeletor-new: --tagline is required, not defaulted",
+        code != 0 and named and unwritten,
+        time.time() - started,
+        f"exit: {code} (want non-zero)\nrefusal names --tagline: {named}\n"
+        f"left no tree behind: {unwritten}\n{output[:400]}",
+    )
+
+
 def main() -> int:
     scaffolder = load_scaffolder()
     all_tiers = sorted(scaffolder.TIERS)
@@ -4712,6 +4770,7 @@ def main() -> int:
         # rather than after a five-minute grid.
         results.append(entry_point_gate())
         results.append(manifest_args_gate())
+        results.append(tagline_required_gate(workdir))
         venv_python = make_venv(workdir, args.quiet)
         results.append(shadow_gate(workdir, venv_python))
         results.append(dirty_scope_gate(workdir))
