@@ -128,6 +128,25 @@ def template_at(ref: str, source: str) -> Optional[bytes]:
     return result.stdout if result.returncode == 0 else None
 
 
+def relocated(source: str) -> Optional[str]:
+    """Where a template file of this name lives now, if exactly one does.
+
+    Only ever a pointer. Two matches or none is silence, because a guess in a
+    report that exists to be trusted is worse than an absent sentence — and this
+    tool merges nothing, so the adopter is the one who rules.
+    """
+    name = Path(source).name
+    result = subprocess.run(
+        ["git", "-C", str(SKELETOR), "ls-files", "template/"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    matches = [line for line in result.stdout.splitlines() if line.endswith("/" + name)]
+    return matches[0] if len(matches) == 1 else None
+
+
 def current_ref() -> str:
     """What `record` stamps. Tagged where possible, because a bare sha is
     strippable by a rebase and unreadable to the person reading the report."""
@@ -261,7 +280,19 @@ def classify(tree: Path, entry: dict) -> Tuple[str, str]:
     upstream_then = entry.get("source_sha")
     upstream_now_bytes = template_at("HEAD", source)
     if upstream_now_bytes is None:
-        return "gone", "unknown", f"skeletor no longer ships {source}"
+        # What is known is that the PATH is gone. `skeletor no longer ships
+        # <source>` said the file was retired, and v0.15.0 made that false for a
+        # live consumer: `test_pyright_scope.py` moved `template/python/` ->
+        # `template/core/`, so jam.sense was told a gate had been dropped when it
+        # had been promoted to a tier they take more readily. **A move is
+        # indistinguishable from a deletion at a fixed path**, so the note says
+        # the true half and names a candidate when exactly one file of that name
+        # survives — a pointer to look at, never a re-record, which only the
+        # adopter can decide.
+        moved_to = relocated(source)
+        if moved_to:
+            return "gone", "unknown", f"{source} is gone from the template — same filename now at {moved_to}"
+        return "gone", "unknown", f"{source} is gone from the template"
     moved = sha256_bytes(upstream_now_bytes) != upstream_then
 
     local_now = sha256_file(tree / entry["path"])
@@ -350,10 +381,21 @@ def report(tree: Path, as_json: bool, fail_on_drift: bool = False) -> int:
         # The component headline first, because the component is the unit: a
         # checker that moved while its module did not is the drift worth seeing,
         # and it is invisible in a flat list of files.
+        gone = sum(1 for r in rows if r["state"] == "gone")
         summary = f"{len(rows)} file(s)"
         if moved:
             summary += f", {moved} moved upstream"
-        say(MARKS["upstream"] if moved else MARKS["current"], f"{name} — {summary}")
+        if gone:
+            summary += f", {gone} unresolvable"
+        # `gone` outranks `moved`, and both outrank clean. The headline was a
+        # binary on `moved`, so a component whose every file was unresolvable
+        # summarised as `✅` — the clean mark over a row that says the opposite,
+        # two lines apart. **Declining to rule is correct; rendering the
+        # declined case as the clean case is a claim**, which is the same
+        # sentence this tool already earned once at `b0f527b`, for `baseline`
+        # rather than for the headline. One field over, and the fix that landed
+        # there did not generalise because nothing made it.
+        say(MARKS["gone"] if gone else MARKS["upstream"] if moved else MARKS["current"], f"{name} — {summary}")
         for row in rows:
             item(f"{MARKS[row['state']]} {row['path']} — {row['note']}")
 
