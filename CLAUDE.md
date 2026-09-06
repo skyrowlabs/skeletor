@@ -207,6 +207,43 @@ on this box, which has a system-wide `click`, and dead on a clean one — the
 `--pythonpath` hazard from the pyright gate, on the language axis instead of
 the platform one.
 
+The **coverage baseline** gate is the same split at a different artifact, and
+the artifact looked inert. `coverage_budget.json` ships at `0.00%` because a
+ratchet is never red on arrival — and a fresh tree is *always* above its own
+floor, so the first coverage run of every scaffold printed `Lock it in:
+--update`. The number on offer is the template's coverage of the template.
+Measured: `--update` recorded 69.69%, five modules with one test each took the
+tree to 63.72%, and the nightly ratchet went red with nothing regressed. **The
+invariant was enforced at scaffold time and contradicted at run time by the same
+repository.**
+
+`--update` now refuses while `.skeletor.json` says every measured statement is
+one skeletor wrote, and the suppression is narrow — the two paths that *write*
+the number down, never the comparison. The tree tests the classification against
+a synthetic manifest, which is the half it can ask; whether a **real** manifest
+covers a **real** coverage run is the generator's, and the plant that
+establishes it is a `skeletor-new` dropping one file from the manifest: the gate
+goes red and the tree's own six tests stay green.
+
+That was queued as `--suites`/`--stage` and measuring it killed the flag. Empty
+suites already report as empty and `check health` already says `nothing to probe
+yet`; node-zero's measurement covers the rest, since all 136 tests in a fresh
+tree are the template's and `--suites none` has nothing of the adopter's to
+drop. For the ratchet, **a flag would remove the artifact at the only moment it
+is harmless and leave it in place at the moment it does damage** — the floor
+cannot fail, and `--update` is an act, which no scaffold-time flag can reach.
+When a queued item names a flag, check whether the hazard is a state or an
+event.
+
+It also found four gates that are permanently red under `--tier core`: they run
+against `max(selected tiers)`, and `versioning_gate` required the default to
+ship all four paths `--versioning tag` subtracts, one of which is `agentic`'s.
+The documented debug loop had a standing red on a check that is correct where CI
+runs it. Scoping it to the tier then dropped the staleness check it used to
+carry — a term set corrected in one direction and overshot, which is the class
+the day's other four defects were in. Both are asserted now, from different
+sources.
+
 The repository gate is the one that had to be paid for twice. `--no-git` reads
 as the careful flag for scaffolding into a repo that already exists, and it is a
 no-op in precisely that case: the scaffolder skips a tree that has a `.git`

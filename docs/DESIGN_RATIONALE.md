@@ -2523,6 +2523,138 @@ requires the announcement to be absent — then strips the scope back out and
 requires it to be present, because the first assertion alone is a negative over
 a set nobody sized, which is the reading that shipped.
 
+### The scaffolder shipped a floor and the tool told you to fill it in
+
+A coverage ratchet ships at `baseline_pct: 0.00%` because Invariant 6 says a
+ratchet is never red on arrival. At that value it cannot fail — which is the
+strongest thing that can be said for it, and it made the artifact look inert.
+
+It is not inert, because the tool prints an instruction. A fresh tree is
+**always** above its own floor, so the very first coverage run of every scaffold
+ended:
+
+```
+✅ unit: 69.69% — above baseline 0.00%.
+   Lock it in: python scripts/check_coverage_budget.py --suite unit --update
+```
+
+69.69% is the template's coverage of the template. There is no product code in
+that tree yet; every measured statement is machinery the reader was handed, at
+whatever rate its own tests happen to reach. Recording it makes the first
+lightly-tested module of their own read as a regression they caused. Measured on
+an `agentic` scaffold: `--update` locked in 69.69%, five modules with one test
+each took the tree to 63.72%, and the nightly ratchet went red with nothing
+regressed and their own coverage up from zero.
+
+**The invariant was enforced at scaffold time and contradicted at run time by
+the same repository.** That is the shape worth keeping — not "the ratchet is
+premature", which is what the queued item said and is false.
+
+#### Why the queued fix was the wrong fix
+
+This sat as `--suites`/`--stage`: a scaffold-time flag that would omit the
+ratchet, the empty suites and the health probes for a tree with no source yet.
+Measuring the three killed it.
+
+The empty suites are already tolerated by `ships_tests=False` and report as
+empty rather than failing; `check health` already says `nothing to probe yet`.
+Both are honest at day zero, and node-zero's measurement is the reason the third
+would not have helped either: **all 136 tests in a fresh tree are the
+template's, so `--suites none` cannot mean "drop the tests"** — there is nothing
+of the adopter's to drop.
+
+And for the ratchet the flag is aimed at the wrong moment entirely:
+
+> **A flag would remove the artifact at the only moment it is harmless and leave
+> it in place at the moment it does damage.** The floor cannot fail. The damage
+> is an *act* — `--update` — and an act happens whenever the reader gets round
+> to it, which a scaffold-time flag cannot reach.
+
+The general form, and the reason this is filed rather than merely fixed: when a
+queued item names a *flag*, check whether the hazard is a state or an event.
+A flag can only condition a state.
+
+#### A percentage is a claim about a population
+
+The fix is that `--update` refuses while the measured population contains none
+of the subject, and the invitation is not printed there. `.skeletor.json` names
+every path the scaffolder wrote, so a measured file absent from it is the
+project's own — and on the day a tree is scaffolded that set is exactly empty.
+This is the positive form of a rule already in this repository: a negative
+assertion over a possibly-empty set is a tautology, and a percentage measured
+over a population that contains none of its subject is not a measurement of it.
+
+Three things it is careful about:
+
+- **The suppression covers the two paths that WRITE the number down, and
+  nothing else.** A drop below an existing baseline is still reported: `cli/`
+  and `scripts/` are the tree's code from its first commit, and a regression in
+  them is real whatever the rest of the population looks like. Suppressing the
+  comparison as well would have been the same mistake facing the other way.
+- **No manifest is not the same answer as none of it is yours.** A tree can be
+  adopted by hand or delete the file, and refusing there would make an optional
+  file load-bearing for an unrelated command. It is a third value, `None`, and
+  the envelope reports it as `null` rather than as a zero.
+- **The refusal is only the degenerate case, and the edge is named rather than
+  guarded.** One test file of your own lifts a tree out of it while the baseline
+  is still 99% the shell. No percentage separates those honestly, so both paths
+  that record or recommend the number now state the composition — `9 of 2786
+  measured statements are your own` — and the reader decides. A threshold would
+  have been a number nobody can defend.
+
+#### The half no tree can ask about itself
+
+The tree ships `tests/test_coverage_population.py`, which feeds the checker a
+synthetic report and a synthetic manifest. It proves the classification is right
+about the data it is handed, and it would pass unchanged on a generator whose
+manifest omitted half the files it wrote — because that omission is in the data,
+not in the code.
+
+So `bin/skeletor-verify` runs the live question: a real coverage pass over a
+real fresh tree, and `--update` must refuse. Established by planting a
+`skeletor-new` that drops one file from the manifest — the gate goes red, and
+**the tree's own six tests stay green**, which is the two-homes split measured
+rather than asserted. Both directions run in the same tree: one module and one
+test of its own, and the baseline it just refused is recorded.
+
+A module alone does not do it, which is worth knowing before writing that
+fixture: bare `--cov` measures what is imported, so an untested file is
+invisible to coverage and the population does not move. What lifts a tree out of
+the degenerate case is the first *test* of its own — the act the refusal is
+waiting for anyway.
+
+### Two tiers where the debug loop was permanently red
+
+Found by the change above, on `bin/skeletor-verify --tier core`. Four gates run
+against `fullest = max(selected tiers)`, which is `agentic` for the grid and
+`core` when somebody narrows — and `versioning_gate` asserted that the default
+mode ships all four paths `--versioning tag` subtracts. One of them,
+`.claude/skills/release/SKILL.md`, is `agentic`'s. So the documented debug loop
+had a standing red on a check that is correct at the tier CI runs.
+
+`--tier` is for narrowing a debug loop, and a debug loop with a permanent red in
+it teaches a reader that red is normal — this repository's own objection to a
+gate that is red on arrival, arriving in the tool that enforces it.
+
+The fix is to scope the assertion to what *this tier's* default actually ships,
+measured rather than assumed. What makes it worth writing down is the second
+pass: narrowing it silently dropped the check it used to carry. "The default
+must ship every entry" had been catching a `VERSIONING` entry that no overlay
+ships at all, and after the fix such an entry read as "out of scope at this
+tier" and passed. **A term set corrected in one direction and overshot** — the
+class four defects landed in the day before, arriving inside the correction for
+a fifth. Both questions are asserted now, from different sources: the tier's
+default for scope, and `template/` directly for staleness.
+
+The staleness half then shipped broken and its own plant said so.
+`any(template.glob(depth + rel) for depth in ...)` is true for every path,
+because a glob generator is truthy before it yields anything — so the outer
+`any` was testing the depth list and never the tree. Green for every entry,
+including one no overlay ships. It is the same mistake as `elem or default` on
+an `ElementTree` node, made twice in one afternoon in two files, which is the
+argument for planting rather than reading: both were obviously correct on the
+page.
+
 ---
 
 ## CI, cost, and the draft-PR discipline

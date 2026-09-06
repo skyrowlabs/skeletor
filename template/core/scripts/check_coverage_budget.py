@@ -15,6 +15,27 @@ Usage:
 `--json` reports on **every** path, including the ones that pass. A ratchet a
 dashboard can only read when it is red tells you nothing about the direction it
 has been moving, which is the only thing a ratchet is for.
+
+**A percentage is a claim about a population, so the baseline is refused while
+the population contains none of the subject.** A tree on the day it is
+scaffolded measures the shell and nothing else, at whatever rate the shell's own
+tests happen to reach — and `--update` there records that as this project's
+coverage. It is not: the first module of your own that lands covered at less
+than the shell's rate then reads as a regression you caused, on a tree where
+coverage of your code went from nothing to something. Measured on a fresh
+`agentic` scaffold, `--update` locked in 69.69% and five lightly-tested product
+modules took it to 63.72% — red, with nothing regressed.
+
+The floor the scaffolder ships, `0.00%`, cannot fail and is the honest value
+until the suite covers source of your own. `own_statements` is the question, and
+the suppression is narrow: it stops the two paths that would WRITE that number
+down, never the comparison. A drop below an existing baseline is still a drop.
+
+The refusal is only the **degenerate** case, and the edge it leaves open is
+named rather than guarded: one test file of your own lifts a tree out of it
+while the baseline is still 99% the shell. No percentage separates those
+honestly, so both paths that record or recommend the number state the
+composition beside it and the reader decides.
 """
 
 from __future__ import annotations
@@ -24,16 +45,50 @@ import json
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Optional
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.output import detail, emit, fail, ok  # noqa: E402
-from scripts.paths import TESTS_DIR, TMP_DIR  # noqa: E402
+from scripts.paths import SCAFFOLD_MANIFEST, TESTS_DIR, TMP_DIR  # noqa: E402
 
 BUDGET = TESTS_DIR / "coverage_budget.json"
 DEFAULT_XML = TMP_DIR / "coverage.xml"
+
+
+def own_statements(root: ET.Element) -> Optional[int]:
+    """How many of the measured statements are this project's own.
+
+    A percentage is a claim about a population, and this is the one question
+    that decides whether the population contains the subject at all. On the day
+    a tree is scaffolded the answer is **zero**: every measured file is the
+    shell, covered by the shell's own tests, and a baseline recorded then is the
+    template's coverage of the template wearing this project's name.
+
+    `.skeletor.json` names every path the scaffolder wrote, so a measured file
+    that is not in it is the project's. Only the key set is read — see
+    `scripts.paths.SCAFFOLD_MANIFEST` for why nothing else in there is ours to
+    interpret.
+
+    Returns `None` when there is no manifest to ask, which is a real state and
+    not a failure: a tree can be adopted by hand or have deleted the file. The
+    difference between *none of this is yours* and *I cannot tell* is exactly
+    the difference between a refusal and a caveat, so it is a third value rather
+    than a zero.
+    """
+    if not SCAFFOLD_MANIFEST.exists():
+        return None
+    try:
+        scaffolded = set(json.loads(SCAFFOLD_MANIFEST.read_text(encoding="utf-8")).get("files", {}))
+    except (OSError, ValueError):
+        return None
+    return sum(
+        len(cls.findall("lines/line"))
+        for cls in root.iterfind("packages/package/classes/class")
+        if cls.get("filename") not in scaffolded
+    )
 
 
 def main() -> int:
@@ -67,15 +122,52 @@ def main() -> int:
         fail(f"suite '{args.suite}' has no entry in tests/coverage_budget.json — add one")
         return done({"state": "unbudgeted"}, 1)
 
-    observed = float(ET.parse(args.xml).getroot().get("line-rate", 0)) * 100
+    root = ET.parse(args.xml).getroot()
+    observed = float(root.get("line-rate", 0)) * 100
     baseline = float(entry["baseline_pct"])
     tolerance = float(budget.get("tolerance_pts", 0.5))
-    measured = {"observed_pct": round(observed, 2), "baseline_pct": baseline, "tolerance_pts": tolerance}
+    own = own_statements(root)
+    measured = {
+        "observed_pct": round(observed, 2),
+        "baseline_pct": baseline,
+        "tolerance_pts": tolerance,
+        # On every path, including the ones that pass. The ratio alone cannot
+        # say whether it is about this project, and a dashboard reading only
+        # the ratio has no way to ask. `null` is "no manifest to ask".
+        "own_statements": own,
+        "total_statements": int(root.get("lines-valid", 0)),
+    }
+
+    # Nothing measured is this project's own. The ratchet itself is unharmed —
+    # it ships at 0.00% and cannot fail there — so this suppresses the two
+    # places that would WRITE that number down, and nothing else. A drop below
+    # an existing baseline is still a drop: `cli/` and `scripts/` are this
+    # tree's code from its first commit, and a regression in them is real
+    # whatever the rest of the population looks like.
+    nothing_of_yours = (
+        "every measured statement belongs to the scaffold this tree was started from, "
+        "so this percentage is not yet a fact about this project"
+    )
+
+    if args.update and own == 0:
+        fail(f"{args.suite}: refusing to record a baseline — {nothing_of_yours}")
+        detail("Baseline once the suite covers source of your own; until then 0.00% is the honest floor.")
+        return done({"state": "unrepresentative", **measured}, 1)
+
+    # What the ratio hides, stated wherever the number is about to be written
+    # down or recommended. It is a measured fact and not a threshold: the
+    # refusal above is only the degenerate case, and a baseline that is 99% the
+    # shell is still mostly the shell. Nobody can pick the percentage at which
+    # that stops mattering, so the reader is given the composition instead of a
+    # number somebody guessed.
+    composition = f"{own} of {measured['total_statements']} measured statements are your own"
 
     if args.update:
         entry["baseline_pct"] = round(observed, 2)
         BUDGET.write_text(json.dumps(budget, indent=2) + "\n", encoding="utf-8")
         ok(f"{args.suite} baseline set to {observed:.2f}%")
+        if own is not None:
+            detail(composition)
         return done({"state": "updated", **measured}, 0)
 
     if observed < baseline - tolerance:
@@ -85,7 +177,16 @@ def main() -> int:
 
     if observed > baseline + tolerance:
         ok(f"{args.suite}: {observed:.2f}% — above baseline {baseline:.2f}%.")
+        if own == 0:
+            # The invitation is the whole defect. A fresh tree is ALWAYS above
+            # its shipped 0.00% floor, so this line printed "lock it in" on the
+            # very first coverage run of every scaffold — telling the reader to
+            # undo the one thing the scaffolder got right.
+            detail(f"Not yet: {nothing_of_yours}.")
+            return done({"state": "unrepresentative", **measured}, 0)
         detail(f"Lock it in: python scripts/check_coverage_budget.py --suite {args.suite} --update")
+        if own is not None:
+            detail(composition)
         return done({"state": "above", **measured}, 0)
 
     ok(f"{args.suite}: {observed:.2f}% (baseline {baseline:.2f}%)")

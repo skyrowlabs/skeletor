@@ -471,6 +471,12 @@ def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     results += lint_gates(tree, venv_python)
     results += pyright_gate(tree, venv_python, pyright_ok)
     results += actionlint_gate(tree, venv_python.parent)
+    # Last, because it is the only gate here that WRITES into the tree — a
+    # module and a test of its own, to move the one variable the refusal turns
+    # on. It puts them back, and running it after everything else means a
+    # cleanup that ever fails is a failure of this gate rather than a puzzle in
+    # the next one.
+    results += check_the_baseline_is_refused_on_a_fresh_tree(tree, venv_python)
     return results
 
 
@@ -619,6 +625,109 @@ def check_empty_suite_is_not_red(tree: Path, venv_python: Path) -> List[Result]:
         started = time.time()
         code, output = run([f"./{CLI_NAME}", "test", marker], cwd=tree)
         results.append(Result(f"test {marker} on an empty suite", code == 0, time.time() - started, output))
+    return results
+
+
+def check_the_baseline_is_refused_on_a_fresh_tree(tree: Path, venv_python: Path) -> List[Result]:
+    """A fresh scaffold measures none of its own code, and must refuse to
+    baseline that.
+
+    The tree ships a unit test for this and it cannot ask this question. That
+    one feeds `check_coverage_budget.py` a synthetic report and a synthetic
+    manifest, so it proves the classification is right about the data it is
+    handed — and it would pass unchanged on a generator whose manifest omitted
+    half the files it wrote, because the omission is in the data, not the code.
+    Whether a **real** manifest covers a **real** coverage run of a tree nobody
+    has touched is the generator's question, and only a live run answers it.
+
+    What it protects is small and permanent. `coverage_budget.json` ships at
+    `0.00%` because Invariant 6 says a ratchet is never red on arrival — and
+    then the first coverage run of every scaffold printed `Lock it in:
+    --update`, because a fresh tree is always above its own floor. The number on
+    offer is the template's coverage of the template. Measured: `--update`
+    recorded 69.69%, five lightly-tested product modules took the tree to
+    63.72%, and the ratchet went red with nothing regressed. The invariant was
+    enforced at scaffold time and contradicted at run time by the same
+    repository.
+
+    Both directions run, because a rule that only ever refuses is being agreed
+    with rather than applied: the same tree with one module and one test of its
+    own must record the baseline it just refused.
+    """
+    started = time.time()
+    report = tree / "tmp" / "coverage.xml"
+
+    def measure() -> Tuple[int, dict, str]:
+        code, output = run(
+            [
+                str(venv_python),
+                "-m",
+                "pytest",
+                "tests/",
+                "-m",
+                "unit",
+                "-q",
+                "--cov",
+                "--cov-report=",
+                f"--cov-report=xml:{report}",
+            ],
+            cwd=tree,
+            env_extra={"PYTHONPATH": str(tree)},
+        )
+        if code != 0:
+            return code, {}, output
+        code, envelope = run(
+            [str(venv_python), "scripts/check_coverage_budget.py", "--suite", "unit", "--json", "--update"],
+            cwd=tree,
+        )
+        try:
+            payload = json.JSONDecoder().raw_decode(envelope[envelope.index("{") :])[0]
+        except (ValueError, json.JSONDecodeError):
+            payload = {}
+        return code, payload, output + envelope
+
+    def baseline() -> float:
+        return float(json.loads((tree / "tests" / "coverage_budget.json").read_text())["suites"]["unit"]["baseline_pct"])
+
+    code, payload, output = measure()
+    fresh_refused = code == 1 and payload.get("own_statements") == 0 and baseline() == 0.0
+    results = [
+        Result(
+            "coverage baseline: refused while the tree measures none of its own code",
+            fresh_refused,
+            time.time() - started,
+            f"exit {code}, envelope {payload}, baseline {baseline()}\n{output}",
+        )
+    ]
+
+    # The other direction, in the same tree, so the only thing that changed is
+    # the population. A module alone is not enough and that is the point: an
+    # unimported file is invisible to coverage, so what lifts a tree out of the
+    # degenerate case is the first test of its own — which is exactly the act
+    # the refusal is waiting for.
+    started = time.time()
+    (tree / "app").mkdir(exist_ok=True)
+    (tree / "app" / "engine.py").write_text('"""Ours."""\n\n\ndef add(a: int, b: int) -> int:\n    return a + b\n')
+    (tree / "tests" / "test_engine.py").write_text(
+        '"""Ours."""\n\nimport pytest\n\nfrom app.engine import add\n\n'
+        "pytestmark = pytest.mark.unit\n\n\ndef test_add() -> None:\n    assert add(1, 1) == 2\n"
+    )
+    code, payload, output = measure()
+    recorded = code == 0 and (payload.get("own_statements") or 0) > 0 and baseline() > 0.0
+    results.append(
+        Result(
+            "coverage baseline: recorded once the tree measures code of its own",
+            recorded,
+            time.time() - started,
+            f"exit {code}, envelope {payload}, baseline {baseline()}\n{output}",
+        )
+    )
+
+    # Planted files and a moved baseline would make every later gate in this
+    # tree answer about a tree the scaffolder did not produce.
+    (tree / "tests" / "test_engine.py").unlink()
+    shutil.rmtree(tree / "app")
+    subprocess.run(["git", "checkout", "--", "tests/coverage_budget.json"], cwd=tree, capture_output=True)
     return results
 
 
@@ -1160,6 +1269,20 @@ def versioning_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]
     * The omitted files are gone, **and present in the default mode**. Without
       the second half an empty omit set passes the first trivially, which is
       this repository's own rule about a negative over an empty set.
+
+      Scoped to the tier under test, which took two passes to get right.
+      `VERSIONING["tag"]` names paths from several overlays — the release skill
+      is `agentic`'s — so requiring the default to ship all four made
+      `--tier core` and `--tier governed` permanently red on a check that is
+      correct at `agentic`. The grid never saw it, because `fullest` is
+      `agentic` when every tier is selected; only the documented debug loop
+      reaches it, which is the worst place for a standing red.
+
+      Narrowing it lost the other half in the same motion: an entry no overlay
+      ships at all had been caught by "the default must ship it", and became
+      "out of scope at this tier" — silently. Both are asserted now, from
+      different sources, because they are different questions. The template
+      answers the second directly.
     * The prose swapped rather than merely shrank. `--versioning tag` still HAS
       a release procedure — `git tag -a`, which is how skeletor itself is
       versioned — so a `## Releases` heading with nothing under it would be a
@@ -1194,14 +1317,41 @@ def versioning_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]
          "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
         cwd=workdir,
     )
-    present = [rel for rel in omitted if (target / rel).exists()]
-    missing_by_default = [rel for rel in omitted if not (default / rel).exists()]
+    # `VERSIONING["tag"]` names paths from several tiers — the release skill is
+    # `agentic`'s — so the set to assert is the omitted files THIS tier's
+    # default actually ships, measured rather than assumed. Asserting the whole
+    # map made `--tier core` and `--tier governed` permanently red on a check
+    # that is right about `agentic`, which is the documented debug loop teaching
+    # a reader that red is normal. The grid never saw it: `fullest` is `agentic`
+    # when every tier is selected, and `core` when only `core` is.
+    #
+    # It keeps both halves — the applicable set is required to be non-empty, so
+    # narrowing cannot make this pass by having nothing left to check — and the
+    # tier-absent files are named rather than dropped in silence.
+    applicable = [rel for rel in omitted if (default / rel).exists()]
+    elsewhere = [rel for rel in omitted if rel not in applicable]
+    # An entry this tier's default does not ship is out of scope *here*; an
+    # entry NO overlay ships is stale, and that is a different question with a
+    # different answer. Dropping the second when the first was fixed is the
+    # mistake that produced the first: a term set corrected in one direction
+    # and overshot. The template is asked directly rather than by scaffolding
+    # the fullest tier — a path is shipped if some overlay contains it, which is
+    # the question itself instead of a proxy for it.
+    template = SKELETOR / "template"
+    stale = [
+        rel
+        for rel in elsewhere
+        if not any(next(template.glob(depth + rel), None) for depth in ("*/", "*/*/"))
+    ]
+    present = [rel for rel in applicable if (target / rel).exists()]
     results.append(
         Result(
-            f"--versioning tag: omits {len(omitted)} file(s) the default ships",
-            bool(omitted) and not present and not missing_by_default,
+            f"--versioning tag: omits {len(applicable)} of {len(omitted)} file(s) the {tier} default ships",
+            bool(applicable) and not present and not stale,
             time.time() - started,
-            f"still present under tag: {present}\nnever shipped by default: {missing_by_default}",
+            f"still present under tag: {present}\n"
+            f"not shipped by the {tier} default, so out of scope here: {elsewhere}\n"
+            f"named by VERSIONING and shipped by no overlay at all: {stale}",
         )
     )
 

@@ -123,6 +123,20 @@ GITHUB_DIR = PROJECT_ROOT / ".github"
 #: wrong quietly: each is right about its own caller and nothing compares them.
 REQUIREMENTS = SCRIPTS_DIR / "requirements.txt"
 
+#: The scaffolder's record of what it wrote here, or absent if this tree was
+#: never scaffolded — or if somebody deleted it, which is a supported choice.
+#:
+#: It is the only file that can tell **this project's own code from the shell it
+#: was started with**, and that distinction is not cosmetic: a measurement over
+#: a population that contains none of the subject is not a measurement of the
+#: subject. `scripts/check_coverage_budget.py` asks it exactly that.
+#:
+#: Never read it for anything an upgrade owns. Its contents are the
+#: **generator's** business — hashes, arguments, a ref — and a consumer in here
+#: that depended on their shape would be a second reader of a format this tree
+#: does not control. The one question asked of it is which paths it names.
+SCAFFOLD_MANIFEST = PROJECT_ROOT / ".skeletor.json"
+
 #: Scratch, and gitignored. Tree locks, coverage XML, merge markers — everything
 #: whose lifetime is a run rather than a commit, and which nothing will want
 #: next week. The record of what ran is **not** here; see `state_dir` below.
