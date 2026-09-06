@@ -865,6 +865,42 @@ def manifest_args(args, values: Dict[str, str]) -> List[str]:
     return recorded
 
 
+def lost_entries(before: str, after: str, limit: int = 12) -> List[str]:
+    """Keys in `before` that `after` does not have, for a file that is JSON in both.
+
+    The warning above names files. This names what was *in* one, because the
+    expensive case is a manifest: replacing `package.json` removes an adopter's
+    `build`, `test` and `typecheck` while keeping the two scripts CI happens to
+    invoke, so nothing anywhere goes red. The file's name in a list of 102 is
+    not what tells somebody that.
+
+    One level into nested maps and no further. `scripts` and `dependencies` are
+    the entries that get lost and they are exactly one level down; recursing
+    deeper would report every changed compiler option in a `tsconfig.json` as a
+    loss, which is noise about a file the adopter can diff.
+
+    **Non-JSON is not a failure and returns nothing.** This is an extra sentence
+    on a warning, not a gate: a YAML workflow or a markdown file that cannot be
+    parsed here still gets its name printed by the caller, which is the
+    behaviour that existed before. Silence is the honest answer for a shape
+    this cannot read, and inventing a diff for one would be worse than the
+    filename alone.
+    """
+    try:
+        old, new = json.loads(before), json.loads(after)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return []
+    lost = []
+    for key, value in sorted(old.items()):
+        if key not in new:
+            lost.append(key)
+        elif isinstance(value, dict) and isinstance(new[key], dict):
+            lost += [f"{key}.{inner}" for inner in sorted(set(value) - set(new[key]))]
+    return lost[:limit] + ([f"…and {len(lost) - limit} more"] if len(lost) > limit else [])
+
+
 def existing_files(target: Path) -> Set[str]:
     """What is in the tree before skeletor touches anything.
 
@@ -938,6 +974,15 @@ def report_a_dry_run(
             return 1
         post_copy_steps(preview, values)
         produced = set(hash_tree(preview))
+        # Read inside the block, because `preview` is a temporary directory and
+        # the report below runs after it is removed. Only the collisions — the
+        # rest of the render is not being compared against anything.
+        would_write = {}
+        for rel in pre_existing & produced:
+            try:
+                would_write[rel] = (preview / rel).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                pass
 
     collides = sorted(pre_existing & produced)
     print()
@@ -949,9 +994,20 @@ def report_a_dry_run(
     print()
 
     if collides:
+        # The same entry-level report as the real run, and this is the place it
+        # is worth most: here nothing has been lost yet. A dry run that named
+        # only the filenames would be the weaker half of a pair whose whole
+        # purpose is to be read BEFORE the destructive one.
         print(f"⚠️  {len(collides)} of them already exist here and WOULD BE OVERWRITTEN:")
         for rel in collides:
             print(f"   · {rel}")
+            try:
+                lost = lost_entries((target / rel).read_text(encoding="utf-8"), would_write.get(rel, ""))
+            except (OSError, UnicodeDecodeError):
+                lost = []
+            if lost:
+                print(f"       {len(lost)} entr(y/ies) of yours would not survive:")
+                print(f"       {', '.join(lost)}")
         print()
         print("   Save what you mean to keep first. Whatever survives a real run is")
         print("   recorded as skeletor's, so every later `skeletor-upgrade` three-way")
@@ -1013,6 +1069,16 @@ def main() -> int:
     # a later overlay overwriting an earlier one is the composition working, and
     # only a file predating the whole scaffold is somebody's own.
     pre_existing = existing_files(target) if populated else set()
+    # The CONTENT of what is about to be replaced, for the report below. Read
+    # here because after `copy_overlays` it is gone — and the alternative,
+    # asking git, answers nothing in a target that is not a repository or whose
+    # file was never committed.
+    before_text = {}
+    for rel in pre_existing:
+        try:
+            before_text[rel] = (target / rel).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            pass
     written = copy_overlays(target, overlays, values, cli_name, VERSIONING[args.versioning])
     if written is None:
         return 1
@@ -1077,10 +1143,33 @@ def main() -> int:
         # redirect whose loss pointed the suite at the operator's real state
         # directory. Neither announces itself. Naming the files is the whole fix
         # — it turns reviewing the scaffold into reviewing this list.
+        #
+        # And naming the file is not enough when the loss is INSIDE it, which
+        # is the same finding one level down. `--force` over a node product
+        # replaces `package.json` wholesale: the template's supplies
+        # `lint:check` and `format:check`, and `build`, `typecheck`, `test`,
+        # `dev` and `preview` are gone. **CI then goes green on a tree whose
+        # build script no longer exists**, because every `npm run` in `ci.yml`
+        # names a script the template's own manifest provides — there is no
+        # configuration in which the workflow calls something the overwrite
+        # removed. A generator that replaces a manifest and then tests only the
+        # entries it wrote cannot detect what it destroyed. dream-doll lost
+        # eight scripts that way and it was caught by a human reading a
+        # 102-file diff.
+        #
+        # Reported by SHAPE, not by filename: a file that parses as JSON on
+        # both sides gets its lost keys named, one level into any nested map,
+        # which is where `scripts` and `dependencies` live. So `tsconfig.json`
+        # and an `.eslintrc.json` are covered by the same code and no list
+        # names any of them.
         print()
         print(f"⚠️  {len(overwritten)} file(s) you already had were OVERWRITTEN:")
         for rel in overwritten:
+            lost = lost_entries(before_text.get(rel, ""), (target / rel).read_text(encoding="utf-8", errors="replace"))
             print(f"   · {rel}")
+            if lost:
+                print(f"       {len(lost)} entr(y/ies) of yours are not in skeletor's version:")
+                print(f"       {', '.join(lost)}")
         print()
         print("   `git diff` them before anything else, and restore what you meant to keep.")
         print("   Whatever survives here is now recorded as skeletor's, so every future")

@@ -1823,6 +1823,33 @@ def populated_tree_gate(tier: str, workdir: Path) -> List[Result]:
     # decoys above were all files skeletor ignores, and this one it reads.
     (populated / "docs").mkdir(parents=True, exist_ok=True)
     (populated / "docs" / "adopted.md").write_text("# Adopted\n\nours, from before.\n", encoding="utf-8")
+    # The fifth shape: a MANIFEST, where naming the file is not enough because
+    # the loss is inside it. `--force` over a node product replaces
+    # `package.json` wholesale, and CI stays green — every `npm run` in
+    # `ci.yml` names a script the template's own manifest supplies, so there is
+    # no configuration in which the workflow calls something the overwrite
+    # removed. dream-doll lost eight scripts to this and the only thing that
+    # caught it was a human reading a 102-file diff.
+    #
+    # The decoy is `tests/skip_budget.json` and NOT a `package.json`, which is
+    # the motivating case — and the substitution is the stronger test rather
+    # than a compromise. This gate scaffolds `--language python`, which ships
+    # no `package.json` at all, so a `package.json` decoy is a file with
+    # nothing to collide with: planted, never overwritten, nothing reported,
+    # and the assertion red for a reason that has nothing to do with the
+    # report. (Measured: it failed exactly that way first.) `skip_budget.json`
+    # ships at every tier and every language and has the same nested shape, so
+    # passing on it proves the predicate is keyed to the SHAPE of the file and
+    # not to its name — which is the property the fix claims.
+    #
+    # `suites.unit` is in the decoy deliberately: the template supplies it too,
+    # so it must NOT be reported lost. A gate planting only unique keys cannot
+    # tell "reports what is missing" from "reports everything that was there".
+    (populated / "tests").mkdir(parents=True, exist_ok=True)
+    (populated / "tests" / "skip_budget.json").write_text(
+        json.dumps({"suites": {"unit": {"max_skipped": 3}, "e2e": {"max_skipped": 7}}}, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
     result, target = scaffold(tier, "python", workdir, name="populated")
     results.append(Result(f"populated: {result.label}", result.ok, result.seconds, result.output))
@@ -1848,6 +1875,26 @@ def populated_tree_gate(tier: str, workdir: Path) -> List[Result]:
             "README.md" in overwrite_report and "src/app.py" not in overwrite_report,
             0.0,
             result.output,
+        )
+    )
+
+    # And what was inside one. Three assertions, because two of them are what
+    # stop this passing for the wrong reason: the keys unique to the decoy must
+    # be named, the key the template also supplies must NOT be (or the report
+    # is listing the file's contents rather than its losses), and `README.md`
+    # must contribute nothing (or the reader is being handed a diff of every
+    # overwritten file rather than the manifests).
+    results.append(
+        Result(
+            "populated: --force names the entries lost inside a manifest",
+            "suites.e2e" in overwrite_report
+            and "suites.unit" not in overwrite_report
+            and "# Theirs" not in overwrite_report,
+            0.0,
+            f"named the lost key: {'suites.e2e' in overwrite_report}\n"
+            f"wrongly named a key the template also supplies: {'suites.unit' in overwrite_report}\n"
+            f"leaked a non-JSON file's content: {'# Theirs' in overwrite_report}\n"
+            f"{overwrite_report[:1500]}",
         )
     )
 
