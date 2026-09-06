@@ -87,6 +87,10 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from render_guard import render_dirt, uncommitted  # noqa: E402
+
 SKELETOR = Path(__file__).resolve().parents[1]
 MANIFEST_NAME = ".skeletor.json"
 
@@ -193,57 +197,6 @@ def die(message: str) -> "NoReturn":  # type: ignore[valid-type]
 #: program's behaviour, which no predicate here can discover — so
 #: `bin/skeletor-verify` asserts dirt inside and outside is classified
 #: oppositely, on a real run.
-RENDER_INPUTS = ("template/", "bin/skeletor-new")
-
-
-def reaches_a_render(path: str) -> bool:
-    """Can uncommitted work at this path change what the base renders to?
-
-    The guard used to count **every** uncommitted file, which was right about
-    untracked files and wrong about which ones. The justification was always
-    scoped — `copy_overlay` walks `template/`, so an untracked file *there* is
-    rendered into the base as readily as a committed one — and the code applied
-    it to the whole repository. So one untracked `notes.md` at this repo's root,
-    which no render can read, refused every adopter in a five-repository round:
-    two cloned at a tag to get past it and two more were warned off.
-
-    node-zero's predicate, and it is the one already accepted for the scaffold
-    end of the same pipe: **does the dirt intersect what this render reads.**
-    It still refuses the case the guard exists for — an uncommitted `ci.yml`
-    under `template/`, which is how proto.pilot's manifest was poisoned.
-
-    A rename reports as `old -> new`, and either side landing in a render input
-    is enough: moving a file into `template/` adds it to the render, and moving
-    one out removes it.
-    """
-    return any(part.startswith(RENDER_INPUTS) for part in path.split(" -> "))
-
-
-def uncommitted(target: Path, *, untracked: bool = False) -> Optional[List[str]]:
-    """Paths with uncommitted changes — or None if git cannot say.
-
-    The `untracked` flag is not a preference, it is the difference between two
-    questions. For the **target**, untracked files do not matter: one does not
-    appear in `git diff` and nothing here will remove it, so it cannot make the
-    result unreadable — only tracked work interleaves. For the **base**, they
-    matter most of all: `copy_overlay` walks the template directory, so an
-    untracked file under `template/` is rendered into the base as readily as a
-    committed one, and is exactly as absent from history.
-
-    Its base callers then filter to `reaches_a_render`. The scoping belongs to
-    the question rather than to the enumeration — the target's callers want the
-    whole set.
-    """
-    result = subprocess.run(
-        ["git", "-C", str(target), "status", "--porcelain", f"--untracked-files={'all' if untracked else 'no'}"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return None
-    return sorted(line[3:] for line in result.stdout.splitlines() if line.strip())
-
-
 def head_commit(target: Path) -> Optional[str]:
     """The target's HEAD, or None if git cannot say.
 
@@ -276,21 +229,6 @@ def _list_dirty(dirty: List[str]) -> None:
         item(path)
     if len(dirty) > 10:
         item(f"... and {len(dirty) - 10} more")
-
-
-def render_dirt(checkout: Path) -> List[str]:
-    """Uncommitted content this checkout would render, untracked included.
-
-    The one predicate for *does unversioned content reach this render*, because
-    it had two homes and they disagreed. `copy_overlay` walks the template
-    directory, so an untracked file under `template/` is rendered as readily as
-    a committed one and is exactly as absent from history; a tracked edit
-    outside the render inputs cannot change a byte of it. Both halves matter and
-    `git describe --dirty` gets both wrong — it is untracked-blind and
-    repo-wide, which are precisely the two properties this predicate exists to
-    fix, and it re-entered through a version string.
-    """
-    return [path for path in uncommitted(checkout, untracked=True) or [] if reaches_a_render(path)]
 
 
 def warn_a_dirty_base(base: Path, role: str) -> None:
@@ -484,8 +422,21 @@ def render_with(checkout: Path, args: List[str], into: Path) -> None:
     scaffolder = checkout / "bin" / "skeletor-new"
     if not scaffolder.exists():
         die(f"{scaffolder} does not exist — that checkout is not a skeletor")
+    # `--allow-dirty` because this call has already been ruled on. The
+    # scaffolder refuses a dirty render to protect the manifest it writes; here
+    # nothing is written to a manifest — the render goes to a scratch directory
+    # and this tool has made its own decision above, refusing for a real run and
+    # warning for a dry one. Without it a dry run from a working checkout dies
+    # at render time, which is the one path the fleet actually uses. An older
+    # scaffolder that has no such flag never sees it: it is appended only when
+    # that checkout's parser knows it.
+    flags = ["--no-git", "--force"]
+    if "--allow-dirty" in subprocess.run(
+        [sys.executable, str(scaffolder), "--help"], capture_output=True, text=True
+    ).stdout:
+        flags.append("--allow-dirty")
     result = subprocess.run(
-        [sys.executable, str(scaffolder), str(into), *args, "--no-git", "--force"],
+        [sys.executable, str(scaffolder), str(into), *args, *flags],
         capture_output=True,
         text=True,
     )

@@ -1797,6 +1797,83 @@ resolver now. And `AGENTS.md`'s Rule 14 stated the path in prose, which
 Python. The rule forbidding a second definition of the path contained one; it
 names `state_dir()` and tells the reader to ask it.
 
+### The justification travelled to the other door and the mechanism did not
+
+`bin/skeletor-upgrade` has refused a dirty base since `5230a7c`, because a
+manifest naming a render that exists in no commit poisons every later run.
+`bin/skeletor-new` — **the door that creates that manifest** — had no such guard
+at all.
+
+`reaches_a_render`'s own docstring gave the reason away, and nobody read it that
+way for four tags: it called its scoping *"the one already accepted for the
+scaffold end of the same pipe."* The argument came from the scaffold end. The
+code never went there. That is this repository's recurring failure — the
+argument standing in for the mechanism — one file over from where it was last
+retracted.
+
+stash.flow reproduced every property, and the ordering of severity is theirs:
+
+- **The upgrade refuses before writing; the scaffold writes first**, and the
+  adopter commits the result in their own first commit.
+- **The upgrade's damage is a wasted run; the scaffold's is a file in somebody
+  else's git history.**
+- **The untracked case records a clean ref.** `git describe --dirty` is
+  untracked-blind, so a file under `template/` renders into the tree, is
+  recorded in the manifest, and leaves the ref looking ordinary. `cross_check`
+  then refuses every later upgrade, permanently, in a different tree for a
+  different person, and `--repair-manifest` fixes the symptom without the cause
+  ever surfacing.
+
+The blast radius is bounded and safely so, which they also measured:
+`copy_overlay` selects overlays while `reaches_a_render` says `template/` wide,
+so the predicate warns on strictly more than can poison. Conservative in the
+right direction, and no reason to narrow it.
+
+**The repair is not "add a warning", and that is the part worth keeping.** A
+warning keyed on `git describe --dirty` would reproduce the defect this
+repository had just fixed one door over — same wrong predicate, one release
+later, in the file that *writes* the record instead of the one that reads it.
+`render_dirt()` is the term at both ends, and it now lives in
+`bin/render_guard.py` so there is one predicate rather than an agreement between
+two. That module is itself a render input, because editing it changes which dirt
+counts.
+
+Two halves ship together because each is what makes the other survivable.
+`skeletor_ref()` stamps `-dirty` whenever `render_dirt()` finds anything,
+whatever git thinks — its docstring had claimed *"a dirty tree is recorded as
+dirty and warned about"*, and stash.flow measured **both clauses false**, with
+the compounding that matters: the missing warning alone costs a puzzled minute,
+and it cost a manifest only because the recording missed exactly the case that
+does the damage.
+
+> **When a false clause is load-bearing for a second false clause, fixing the
+> cosmetic one first leaves the failure intact and looks like progress.**
+
+`--allow-dirty` rather than a warning, because a warning is the right answer
+where nothing is recorded and everything here is recorded. `bin/skeletor-verify`
+passes it at every site that scaffolds from this working checkout, which is
+honest rather than a workaround: those trees are throwaway, and that is the one
+caller for which an unreproducible base costs nothing. The upgrade's internal
+render passes it too — it has made its own ruling by then — and appends the flag
+only when the checkout being rendered from knows it, so an older scaffolder is
+never handed an argument it cannot parse.
+
+The gate's third assertion is the one that makes the other two worth having:
+refusing is easy to satisfy, and the property that actually cost a manifest is
+that `--allow-dirty` leaves a **trace** rather than a silence. Each assertion was
+established by planting its own defect, and removing the honest-ref half turns
+that one red while the refusal stays green.
+
+One consequence caught by the grid rather than by reasoning: fixing the ref
+**moved which configuration discriminates** in `dirty_signals_gate`. Its
+envelope assertion had been keyed on an untracked template file producing a
+clean ref beside a real hazard; the moment the ref became honest, that assertion
+was asserting the bug. It is keyed on the two fields answering different
+questions now — a tracked edit outside the render still sets git's repo-wide
+suffix while `render_dirt` is empty. **A gate keyed on a symptom expires when
+the symptom does, and it expires by going red on the fix**, which is the good
+direction and still a warning about how it was written.
+
 ### Standing state counted as work, and the verdict that cannot fail later
 
 Two findings against the same block, from two trees, and both are about a

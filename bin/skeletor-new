@@ -26,6 +26,10 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from render_guard import render_dirt  # noqa: E402
+
 SKELETOR = Path(__file__).resolve().parents[1]
 TEMPLATE = SKELETOR / "template"
 
@@ -437,19 +441,86 @@ def drop_absent_prose(target: Path) -> None:
         path.write_text("".join(out), encoding="utf-8")
 
 
+def refuse_a_dirty_render(allow: bool) -> None:
+    """A manifest must not record a render that exists in no commit.
+
+    This is the guard `bin/skeletor-upgrade` has always had, on the door that
+    writes the record rather than the one that reads it. Until `v0.10.3` only
+    the reading end asked, and the scaffold end is the worse of the two:
+
+    * The upgrade refuses **before** writing. The scaffold writes first, and the
+      adopter then commits the result in their own first commit.
+    * The upgrade's damage is a wasted run. The scaffold's is a file in somebody
+      else's git history.
+    * An **untracked** render input leaves `git describe --dirty` clean, because
+      it is untracked-blind — so the poisoned tree records an ordinary-looking
+      ref and carries no sign a dirty checkout was ever involved. `cross_check`
+      then refuses every later upgrade, permanently, in a different tree for a
+      different person, and `--repair-manifest` fixes the symptom without the
+      cause ever surfacing.
+
+    Reported by stash.flow, who reproduced all three properties; the trace
+    reached `skeletor_ref()` from this end because skyrow-workspace followed it
+    backwards from the write.
+
+    `--allow-dirty` rather than a warning, and the asymmetry is deliberate: a
+    warning is the right answer where nothing is recorded, and everything here
+    is recorded. `bin/skeletor-verify` passes it, which is honest — it scaffolds
+    from a working tree on purpose, into throwaway directories, and is the one
+    caller for which an unreproducible base costs nothing.
+    """
+    dirty = render_dirt(SKELETOR)
+    if not dirty or allow:
+        if dirty:
+            print(f"⚠️  --allow-dirty: {len(dirty)} uncommitted change(s) reach this render.")
+            print(f"   {MANIFEST_NAME} will name a base no other checkout can reproduce.")
+        return
+    print(f"❌ {len(dirty)} uncommitted change(s) in this checkout reach what it renders:")
+    for path in dirty:
+        print(f"   · {path}")
+    print()
+    print(f"   {MANIFEST_NAME} would record hashes of a render that exists in no commit, so")
+    print("   every later `skeletor-upgrade` resolves the recorded ref, renders something")
+    print("   else, and refuses — permanently, in a tree you will have committed by then.")
+    print("   An untracked file here is the quiet case: `git describe` still says clean, so")
+    print("   nothing in the scaffolded tree records that this happened.")
+    print()
+    print("   Commit them first, or pass --allow-dirty for a throwaway tree.")
+    raise SystemExit(1)
+
+
 def skeletor_ref() -> str:
     """The commit of THIS checkout, so an upgrade can render the same base.
 
     `--always` because a checkout with no tags still has a sha, and a sha is
-    what `skeletor-upgrade` actually renders from. A dirty tree is recorded as
-    dirty and warned about: the uncommitted half cannot be reproduced from
-    history, so an upgrade would read those edits as template changes.
+    what `skeletor-upgrade` actually renders from.
+
+    **`--dirty` alone is not enough, and the gap it left is the one that cost a
+    manifest.** git's suffix is untracked-blind, so an untracked file under
+    `template/` renders into the tree, is recorded in the manifest, and leaves
+    the ref looking ordinary — a base no checkout can reproduce, with nothing in
+    the record to say so. The docstring here used to claim *"a dirty tree is
+    recorded as dirty and warned about"*, and stash.flow measured both clauses
+    false: there was no warning at all, and the recording missed exactly the
+    case that does the damage. The true half is what would have made the missing
+    half survivable, which is why this is fixed at the same time as the warning
+    rather than after it.
+
+    So the suffix is added when `render_dirt()` finds anything, whatever git
+    thinks. `--allow-dirty` is then a decision that leaves a trace instead of a
+    silence: the tree records `-dirty`, and `skeletor-upgrade` says so on its
+    first run.
     """
     result = subprocess.run(
         ["git", "describe", "--tags", "--always", "--dirty"],
         cwd=str(SKELETOR), capture_output=True, text=True,
     )
-    return result.stdout.strip() if result.returncode == 0 else ""
+    if result.returncode != 0:
+        return ""
+    ref = result.stdout.strip()
+    if render_dirt(SKELETOR) and not ref.endswith("-dirty"):
+        ref += "-dirty"
+    return ref
 
 
 #: Never part of the manifest: scratch, history, and bytecode. `__pycache__` is
@@ -685,6 +756,11 @@ def build_parser() -> argparse.ArgumentParser:
     # directory, where it leaves a tree with no repository at all. This is for a
     # render that must never become one (`skeletor-upgrade`'s base, a probe).
     parser.add_argument("--no-git", action="store_true", help="render a tree that is not a repository at all")
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="scaffold from a checkout whose uncommitted work reaches the render (throwaway trees)",
+    )
     parser.add_argument("--force", action="store_true", help="write into an existing non-empty directory")
     return parser
 
@@ -694,7 +770,7 @@ def build_parser() -> argparse.ArgumentParser:
 #: `git init`; re-rendering a base wants neither. Every other flag is recorded
 #: by existing, which is the point — this set is the only thing anybody has to
 #: keep, and `bin/skeletor-verify` fails if an entry stops being a real flag.
-NOT_RENDERED = {"force", "no_git", "dry_run"}
+NOT_RENDERED = {"force", "no_git", "dry_run", "allow_dirty"}
 
 #: Flags whose recorded value is the **derived** one rather than the raw
 #: argument. All four default from the target directory name, and an upgrade
@@ -838,6 +914,13 @@ def report_a_dry_run(
 
 def main() -> int:
     args = build_parser().parse_args()
+
+    # Before anything is written, and before `skeletor_ref()` is read: the
+    # render is worthless the moment the ref is stamped, so this has to precede
+    # the write rather than report after it. A dry run is exempt for the same
+    # reason it is exempt from the populated-target refusal — it records
+    # nothing, so the hazard cannot land — and the warning still prints.
+    refuse_a_dirty_render(args.allow_dirty or args.dry_run)
 
     target = Path(args.target).expanduser().resolve()
     populated = target.exists() and any(target.iterdir())

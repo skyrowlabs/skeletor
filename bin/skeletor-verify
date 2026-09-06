@@ -187,6 +187,12 @@ def scaffold(tier: str, language: str, workdir: Path, name: Optional[str] = None
             sys.executable,
             str(SCAFFOLDER),
             str(target),
+            # This checkout is dirty whenever somebody is working in it, and
+            # that is the condition this grid exists to run under. The
+            # scaffolder refuses a dirty render to protect the manifest an
+            # adopter commits; these trees are throwaway, so the flag is the
+            # honest answer rather than a workaround.
+            "--allow-dirty",
             "--name",
             "Probe",
             "--cli",
@@ -1001,7 +1007,7 @@ def agentless_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     target = workdir / "agentless"
     started = time.time()
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--name", "Agentless", "--slug", "agentless",
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Agentless", "--slug", "agentless",
          "--cli", CLI_NAME, "--tier", tier, "--language", "python", "--agent", "none", "--no-git"],
         cwd=workdir,
     )
@@ -1078,7 +1084,7 @@ def host_exemption_gate(tier: str, workdir: Path, venv_python: Path) -> List[Res
     started = time.time()
     target = workdir / "host-exemption"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--name", "Hosted", "--slug", "hosted",
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Hosted", "--slug", "hosted",
          "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
         cwd=workdir,
     )
@@ -1173,7 +1179,7 @@ def versioning_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]
     started = time.time()
     target = workdir / "versioning-tag"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--name", "Tagged", "--slug", "tagged",
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Tagged", "--slug", "tagged",
          "--cli", CLI_NAME, "--tier", tier, "--language", "python", "--versioning", "tag"],
         cwd=workdir,
     )
@@ -1184,7 +1190,7 @@ def versioning_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]
     started = time.time()
     default = workdir / "versioning-default"
     run(
-        [sys.executable, str(SCAFFOLDER), str(default), "--name", "Default", "--slug", "defaulted",
+        [sys.executable, str(SCAFFOLDER), str(default), "--allow-dirty", "--name", "Default", "--slug", "defaulted",
          "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
         cwd=workdir,
     )
@@ -1291,7 +1297,7 @@ def badge_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     target = workdir / "badged"
     started = time.time()
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--name", "Badged", "--slug", "badged",
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Badged", "--slug", "badged",
          "--cli", CLI_NAME, "--tier", tier, "--language", "both", "--org", "acme",
          "--release-branch", "trunk", "--no-git"],
         cwd=workdir,
@@ -1540,7 +1546,7 @@ def dry_run_gate(tier: str, workdir: Path) -> List[Result]:
 
     def invoke(*extra: str) -> Tuple[int, str]:
         return run(
-            [sys.executable, str(SCAFFOLDER), str(target), "--name", "Dry", "--slug", "dryrun",
+            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Dry", "--slug", "dryrun",
              "--cli", CLI_NAME, "--tier", tier, "--language", "python", *extra],
             cwd=workdir,
         )
@@ -1566,7 +1572,7 @@ def dry_run_gate(tier: str, workdir: Path) -> List[Result]:
     started = time.time()
     absent = workdir / "dryrun-absent"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(absent), "--name", "Dry", "--slug", "dryabsent",
+        [sys.executable, str(SCAFFOLDER), str(absent), "--allow-dirty", "--name", "Dry", "--slug", "dryabsent",
          "--cli", CLI_NAME, "--tier", tier, "--language", "python", "--dry-run"],
         cwd=workdir,
     )
@@ -1622,7 +1628,7 @@ def branch_gate(tier: str, workdir: Path) -> List[Result]:
     def build(name: str, base: str, release: str) -> Optional[Path]:
         target = workdir / name
         code, output = run(
-            [sys.executable, str(SCAFFOLDER), str(target), "--name", "Branchy", "--slug", name,
+            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Branchy", "--slug", name,
              "--cli", CLI_NAME, "--tier", tier, "--language", "python",
              "--base-branch", base, "--release-branch", release],
             cwd=workdir,
@@ -2273,6 +2279,7 @@ def tier_composition_gate(workdir: Path) -> List[Result]:
                 sys.executable,
                 str(SCAFFOLDER),
                 str(target),
+                "--allow-dirty",
                 "--name",
                 "Compose",
                 "--cli",
@@ -2441,7 +2448,7 @@ def shadow_gate(workdir: Path, venv_python: Path) -> Result:
     for name, cli in (("shadow-a", "shadowa"), ("shadow-b", "shadowb")):
         target = workdir / name
         code, output = run(
-            [sys.executable, str(SCAFFOLDER), str(target), "--name", name.title(),
+            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", name.title(),
              "--cli", cli, "--tagline", "t", "--tier", "core"],
             cwd=SKELETOR,
         )
@@ -2497,7 +2504,7 @@ def coverage_gate(workdir: Path, venv_python: Path) -> Result:
     started = time.time()
     target = workdir / "coverage-probe"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--name", "Probe",
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Probe",
          "--cli", CLI_NAME, "--tagline", "t", "--tier", "core"],
         cwd=SKELETOR,
     )
@@ -3176,7 +3183,7 @@ def adopted_repo_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     (target / "mine.txt").write_text("work in progress\n", encoding="utf-8")
 
     code, output = run(
-        [sys.executable, str(SKELETOR / "bin" / "skeletor-new"), str(target),
+        [sys.executable, str(SKELETOR / "bin" / "skeletor-new"), str(target), "--allow-dirty",
          "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--language", "python", "--force"],
         cwd=SKELETOR,
     )
@@ -3235,6 +3242,100 @@ def adopted_repo_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
         )
     )
     return results
+
+
+def scaffold_dirt_gate(workdir: Path) -> List[Result]:
+    """The door that writes the record refuses a render nobody can reproduce.
+
+    `bin/skeletor-upgrade` has refused a dirty base since `5230a7c`.
+    `bin/skeletor-new` — the door that *creates* `.skeletor.json` — had no guard
+    at all, and the scaffold end is the worse of the two:
+
+    * the upgrade refuses before writing; the scaffold writes first, and the
+      adopter commits the result in their own first commit;
+    * the upgrade's damage is a wasted run; the scaffold's is a file in somebody
+      else's git history;
+    * an **untracked** render input left `git describe --dirty` clean, so the
+      poisoned tree recorded an ordinary-looking ref and carried no sign a dirty
+      checkout was ever involved. `cross_check` then refused every later
+      upgrade, permanently, for a different person in a different tree.
+
+    stash.flow reproduced all three properties; skyrow-workspace's trace opened
+    it by following `skeletor_ref()` backwards from the write. `reaches_a_render`
+    had said its own scoping was *"the one already accepted for the scaffold end
+    of the same pipe"* — **the justification had travelled and the mechanism had
+    not**, which is this repository's own recurring failure one file over.
+
+    Three assertions, and the third is the one that makes the first two worth
+    having: the untracked plant must be *recorded as dirty*. Refusing is easy to
+    satisfy; the property that cost a manifest is that `--allow-dirty` leaves a
+    trace instead of a silence, and git alone cannot supply it.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    tier = min(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
+    clean = clean_skeletor(workdir)
+    scratch = workdir / "scaffold-dirt-skeletor"
+    if not scratch.exists():
+        run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(scratch)], cwd=workdir)
+
+    def scaffold(name: str, *extra: str) -> Tuple[int, str, Path]:
+        tree = workdir / name / "probe"
+        if tree.exists():
+            shutil.rmtree(tree.parent)
+        code, output = run(
+            [sys.executable, str(scratch / "bin" / "skeletor-new"), str(tree),
+             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
+             "--tier", tier, "--language", "python", *extra],
+            cwd=SKELETOR,
+        )
+        return code, output, tree
+
+    # Untracked, under an overlay this tier actually selects — stash.flow
+    # measured that an unselected overlay is neither rendered nor recorded, so a
+    # plant there would be refused for a hazard that cannot occur and would
+    # prove nothing about the one that can.
+    plant = scratch / "template" / tier / "ZZ_PLANT.md"
+    plant.write_text("planted: untracked, rendered, recorded\n", encoding="utf-8")
+    try:
+        refused, output, _ = scaffold("scaffold-dirt-refused")
+        allowed, allowed_output, tree = scaffold("scaffold-dirt-allowed", "--allow-dirty")
+        ref = ""
+        manifest = tree / scaffolder.MANIFEST_NAME
+        if manifest.exists():
+            ref = str(json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"])
+    finally:
+        plant.unlink()
+
+    clean_code, clean_output, _ = scaffold("scaffold-dirt-clean")
+
+    return [
+        Result(
+            "scaffold dirt: an untracked render input refuses the scaffold",
+            refused != 0 and "reach what it renders" in output,
+            time.time() - started,
+            output[-800:],
+        ),
+        Result(
+            "scaffold dirt: --allow-dirty scaffolds and says what it recorded",
+            allowed == 0 and "--allow-dirty" in allowed_output,
+            0.0,
+            allowed_output[-600:],
+        ),
+        Result(
+            f"scaffold dirt: the recorded ref says -dirty where git would not ({ref or 'no manifest'})",
+            ref.endswith("-dirty"),
+            0.0,
+            "git describe is untracked-blind, so without this the poisoned tree records an "
+            f"ordinary ref and nothing in it says a dirty checkout was involved. Recorded: {ref!r}",
+        ),
+        Result(
+            "scaffold dirt: a clean checkout is not refused",
+            clean_code == 0 and "reach what it renders" not in clean_output,
+            0.0,
+            clean_output[-400:],
+        ),
+    ]
 
 
 def dirty_signals_gate(workdir: Path) -> List[Result]:
@@ -3316,6 +3417,7 @@ def dirty_signals_gate(workdir: Path) -> List[Result]:
     original = outside.read_text(encoding="utf-8")
     outside.write_text(original + "\n", encoding="utf-8")
     quiet = report(tree)
+    quiet_json = report(tree, "--json")
     outside.write_text(original, encoding="utf-8")
     results.append(
         Result(
@@ -3380,14 +3482,39 @@ def dirty_signals_gate(workdir: Path) -> List[Result]:
     )
     results.append(
         Result(
-            "dirty signals: --json publishes the predicate, not a suffix on a version string",
-            machine.get("render_dirt") == ["template/ZZ_PLANT.md"]
-            and not machine.get("head_ref", "").endswith("-dirty"),
+            "dirty signals: --json publishes the predicate for render-reaching dirt",
+            machine.get("render_dirt") == ["template/ZZ_PLANT.md"],
             0.0,
-            # A consumer filtering `head_ref` for `-dirty` inherits the deleted
-            # guard, and this is the configuration where the two answers differ:
-            # dirt that reaches the render, on a clean ref.
             json.dumps({k: machine.get(k) for k in ("head_ref", "render_dirt")}, indent=2) + "\n" + envelope[:400],
+        )
+    )
+
+    # The configuration where the suffix and the predicate disagree — and it
+    # MOVED when `skeletor_ref()` started stamping `-dirty` for render-reaching
+    # dirt git cannot see. Before that, an untracked template file gave a clean
+    # ref beside a real hazard and the untracked case was the discriminator;
+    # now the ref is honest in that direction and the remaining gap is the other
+    # one: git's suffix is repo-wide, so a tracked edit no render reads still
+    # sets it. A consumer filtering `head_ref` for `-dirty` gets a false positive
+    # there and has nothing else in the envelope to ask.
+    #
+    # Worth stating because the first version of this assertion asserted the
+    # clean-ref half and went red the moment the ref was fixed. A gate keyed on
+    # the symptom expires when the symptom does; this one is keyed on the two
+    # fields answering different questions, which is the property being kept.
+    quiet_machine = {}
+    start = 0 if quiet_json.startswith("{") else quiet_json.find("\n{") + 1
+    if start > 0 or quiet_json.startswith("{"):
+        try:
+            quiet_machine = json.JSONDecoder().raw_decode(quiet_json[start:])[0]
+        except json.JSONDecodeError:
+            quiet_machine = {}
+    results.append(
+        Result(
+            "dirty signals: --json separates the version string from the predicate",
+            quiet_machine.get("render_dirt") == [] and quiet_machine.get("head_ref", "").endswith("-dirty"),
+            0.0,
+            json.dumps({k: quiet_machine.get(k) for k in ("head_ref", "render_dirt")}, indent=2),
         )
     )
 
@@ -4318,6 +4445,9 @@ def main() -> int:
         results.append(leak)
 
         for gate in ported_only_conflict_gate(workdir):
+            results.append(gate)
+
+        for gate in scaffold_dirt_gate(workdir):
             results.append(gate)
 
         for gate in dirty_signals_gate(workdir):
