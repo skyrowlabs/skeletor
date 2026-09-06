@@ -957,8 +957,22 @@ def main() -> int:
         # which is how a true warning becomes one nobody reads.
         if not args.dry_run:
             if tracking is None:
-                say("⚠️ ", f"this checkout tracks no branch — nothing at {head_ref} is reachable elsewhere")
-                detail("The manifest this stamps names a commit only this machine has.")
+                # `None` means *I cannot count*, and this said *nothing is
+                # reachable* — a larger claim than the measurement supports, and
+                # false in the case it fires hardest on. A detached clone at a
+                # pushed tag tracks no branch BY CONSTRUCTION, and that clone is
+                # exactly what `refuse_a_dirty_base` tells an adopter to make.
+                # stash.flow took v0.15.0 that way, from a public tag, and was
+                # told their manifest named a commit only their machine had.
+                #
+                # The honest sentence, not a network call: `git ls-remote` would
+                # answer it and costs a round trip on every run to correct a line
+                # the reader can check in one command. Third instance from this
+                # seam of a predicate that is right about what it measures wired
+                # to prose that claims more — and all three were the sentence.
+                say("⚠️ ", f"this checkout tracks no branch — whether {head_ref} is reachable")
+                detail("elsewhere cannot be determined from here. If it is a pushed tag, it is fine;")
+                detail(f"`git ls-remote origin {head_ref}` is the check this declines to make for you.")
             elif unpushed:
                 say("⚠️ ", f"{unpushed} commit(s) here are not on {tracking} — stamping {head_ref} anyway")
                 detail("`base_checkout()` resolves a recorded ref with `git worktree add`, so until")
