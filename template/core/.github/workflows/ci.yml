@@ -422,3 +422,22 @@ jobs:
         with:
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json
+          # A seam, not a feature: unset, this is exactly what the action does
+          # on its own. It exists because `can_approve_pull_request_reviews` —
+          # a repo/org switch NO `permissions:` block can lift — stops
+          # `GITHUB_TOKEN` opening the release PR, and the switch does not bind
+          # a GitHub App installation token, which is a different identity.
+          # Without this input an adopter who has an App must restructure the
+          # workflow, and that edit becomes a standing three-way-merge conflict
+          # on every upgrade. With it, the remedy is a secret.
+          #
+          # The app-token step itself deliberately does NOT ship: it needs two
+          # secrets a scaffold cannot populate or verify, so it would be red on
+          # arrival in every tree that never sets them.
+          #
+          # Measured rather than assumed, on a real runner, because `actionlint`
+          # holds this expression's syntax and knows nothing about which secrets
+          # exist in an account — the same blind spot as the switch above:
+          #     secrets.RELEASE_TOKEN == ''                        -> true
+          #     (secrets.RELEASE_TOKEN || github.token) == github.token -> true
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}

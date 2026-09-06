@@ -3294,6 +3294,77 @@ a word list of superlatives, is the registry Rule 2 exists to refuse. So the
 five sentences are simply true now, and this paragraph is the record that the
 drift is unguarded.
 
+
+### The one fact a green tree cannot state about itself
+
+Every mechanism in this document is a tree checking itself. Release Please is
+the place that stops working, and the reason is not in any file a scaffold
+ships.
+
+The action opens a pull request. `can_approve_pull_request_reviews` is a
+repo- or organisation-level switch deciding whether Actions may, and **no
+`permissions:` block in any workflow can lift it.** mind.head's job carried
+`contents: write, pull-requests: write`, and the run got all the way through —
+branch created, tree written, commit made, ref updated — then failed on the PR
+call alone with *"GitHub Actions is not permitted to create or approve pull
+requests."* Everything before that line succeeded, which is why it reads as a
+release that nearly worked rather than as a permission that was never granted.
+
+**That is the class this repository has no instrument for, and it is the inverse
+of everything else here.** A gate can ask whether a tree agrees with itself. It
+cannot ask about the account the tree runs under. So a scaffold can be entirely
+green, ship 186 passing checks, and hand over a release pipeline whose first real
+use fails — and the only instrument that sees it is somebody trying to release.
+stash.flow states the sibling case from the other axis: *a mechanism gated on a
+branch you do not work on cannot be evaluated by using the repository.* Both are
+the repository being the wrong unit of observation — one because the fact lives
+in the account, one because it lives in an event the tree never triggers. The
+test for the class: **would this be visible to a tree that was entirely green?**
+
+The remedy is a setup step, in `docs/SETUP_GUIDE.md` beside branch protection,
+because that is the only place a fact outside every file can live.
+
+**What the template can contribute is a seam, not a fix**, and the distinction is
+load-bearing. The release job now takes
+`token: ${{ secrets.RELEASE_TOKEN || github.token }}`. The switch binds
+`GITHUB_TOKEN`, the Actions identity; it does not bind a GitHub App installation
+token, which is a different identity — jam.sense has the switch off and has cut
+304 releases by authenticating as an App. Without that input, an adopter who
+acquires an App has to restructure the workflow, and that edit becomes a standing
+three-way-merge conflict at every upgrade. With it, the remedy is a secret.
+
+The app-token **step** deliberately does not ship, behind a flag or otherwise. It
+needs two secrets a scaffold cannot populate or verify, so it is red on arrival
+in every tree that never sets them; and `--versioning` is *a subtraction and
+nothing else* by design, because a mode that wrote files differently needs a
+verification grid this repository cannot afford. A flag that renders an extra
+step is not that shape.
+
+**The line was measured, not reasoned, and the reason is the sharpest part.**
+`actionlint` runs in `bin/skeletor-verify` and holds the expression's syntax — and
+it knows nothing about which secrets exist in the account a tree runs under,
+which is `can_approve_pull_request_reviews` one field over. Saying "actionlint
+covers it" would have been the completeness claim two sections up, written the
+same evening, about a different file. mind.head caught it after proposing the
+line, having found **zero** instances of the idiom anywhere in this workspace to
+reason from: jam.sense passes its App token unconditionally, because it has real
+secrets. So a throwaway branch, one dispatched run, three booleans off a real
+runner:
+
+```
+unset-is-empty:      true      # secrets.RELEASE_TOKEN == ''
+or-yields-fallback:  true      # (secrets.RELEASE_TOKEN || 'FALLBACK') == 'FALLBACK'
+or-yields-gh-token:  true      # (secrets.RELEASE_TOKEN || github.token) == github.token
+```
+
+The failure mode that justified the five minutes is mind.head's, and it is
+unpleasantly well aimed: the fallthrough executes **only** in a tree that has a
+release config — one actually cutting releases — and if it misbehaved it would
+hand the action an empty token, presenting as an auth error that every reader in
+this organisation would now misattribute to the switch. **A wrong answer wearing
+the costume of the thing you have just finished diagnosing is worse than a wrong
+answer.**
+
 ---
 
 ## Honest assessment: what is over-built

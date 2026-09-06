@@ -729,6 +729,36 @@ tier-composition gate checks both staleness directions, so a declaration for a
 path that ships everywhere, or one whose file stopped mentioning it, is red.
 That is the only exemption mechanism the gate has, and it is two entries.
 
+**The one thing a scaffold hands over broken, and it is not in any file.**
+Release Please opens a pull request, and `can_approve_pull_request_reviews` — a
+repo/org switch — decides whether Actions may. No `permissions:` block lifts it;
+mind.head's job declared `contents: write, pull-requests: write`, created the
+branch, tree, commit and ref, and failed on the PR call alone. **Every gate here
+asks whether a tree is consistent with itself, and this is a fact about the
+account the tree runs under**, so a perfectly green scaffold ships a release
+pipeline that fails on first use and the only instrument that sees it is somebody
+trying to release. It is written up in [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md)
+at Step 4, beside branch protection, because a setup step is the only place a
+fact outside every file can live.
+
+The template's part is a **seam, not a fix**: the release job takes
+`token: ${{ secrets.RELEASE_TOKEN || github.token }}`. The switch binds
+`GITHUB_TOKEN` and not a GitHub App installation token — jam.sense has the switch
+off and 304 releases — so an App is the second door, and without that input an
+adopter must restructure the workflow, which is a standing three-way-merge
+conflict at every upgrade. The app-token *step* does not ship: two secrets a
+scaffold cannot populate would be red on arrival everywhere they are unset.
+
+The fallthrough was **measured, not reasoned**. `actionlint` holds the
+expression's syntax and knows nothing about which secrets exist in an account,
+which is the same blind spot as the switch — so claiming the gate covered it
+would have been the completeness sentence this repository had just spent the
+evening deleting. One dispatched run on a throwaway branch:
+`secrets.RELEASE_TOKEN == ''` → `true`, and
+`(secrets.RELEASE_TOKEN || github.token) == github.token` → `true`. mind.head
+asked for the run after proposing the line, having found zero instances of the
+idiom anywhere in the workspace to reason from.
+
 **Pins are reported, never bumped automatically.** `bin/skeletor-check-pins`
 discovers every pinned version by pattern and asks the registries what is
 current; `.github/workflows/pins.yml` puts the result in one issue, weekly.

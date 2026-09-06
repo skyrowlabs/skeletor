@@ -213,6 +213,40 @@ gh api -X PUT repos/<org>/<slug>/branches/develop/protection \
 - **`enforce_admins: false` on the release branch**, so a human can merge the
   release PR by hand. That step is deliberately not automated.
 
+**Then let Actions open a pull request, which is a separate switch and the one
+that is easiest to miss.** Release Please works by opening a PR. If Actions is
+not allowed to, the job runs, creates the branch, writes the tree, commits, and
+updates the ref — and then fails on the final call with *"GitHub Actions is not
+permitted to create or approve pull requests."* Everything before that line
+succeeded, so the run looks like a release that nearly worked:
+
+```bash
+gh api -X PUT repos/<org>/<slug>/actions/permissions/workflow \
+  -F 'can_approve_pull_request_reviews=true' \
+  -f 'default_workflow_permissions=write'
+```
+
+**Do not try to fix this from the workflow.** `ci.yml` already declares
+`permissions: {contents: write, pull-requests: write}` and that is not what is
+being refused: the switch is a property of the repository or the organisation,
+outside every file a scaffold ships, and no `permissions:` block can lift it.
+mind.head found this the only way it can be found — by trying to release.
+
+**If the setting is not yours to flip**, the second door is authentication. The
+switch binds `GITHUB_TOKEN`, the Actions identity. It does not bind a GitHub App
+installation token, because that is a different identity — jam.sense has the
+switch off, authenticates as an App, and has cut 304 releases. Mint a token with
+`actions/create-github-app-token` and set it as `RELEASE_TOKEN`; the release job
+reads `${{ secrets.RELEASE_TOKEN || github.token }}`, so an unset secret changes
+nothing and a set one is used without editing the workflow. The step that mints
+it does not ship, because it needs two secrets a scaffold cannot populate and
+would be red on arrival in every repository that never sets them.
+
+**This is the one setup step no gate here can check.** Every check a scaffolded
+tree ships asks whether the tree is consistent with itself; this is a fact about
+the account the tree runs under. A repository can be entirely green and still
+have a release pipeline that fails the first time somebody uses it.
+
 ---
 
 ## Step 5 — Write the first plan
