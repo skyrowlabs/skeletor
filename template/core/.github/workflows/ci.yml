@@ -424,16 +424,29 @@ jobs:
           manifest-file: .github/.release-please-manifest.json
           # A seam, not a feature: unset, this is exactly what the action does
           # on its own. It exists because `can_approve_pull_request_reviews` —
-          # a repo/org switch NO `permissions:` block can lift — stops
-          # `GITHUB_TOKEN` opening the release PR, and the switch does not bind
-          # a GitHub App installation token, which is a different identity.
-          # Without this input an adopter who has an App must restructure the
-          # workflow, and that edit becomes a standing three-way-merge conflict
-          # on every upgrade. With it, the remedy is a secret.
+          # a repo/org switch NO `permissions:` block can lift, and which an
+          # ENTERPRISE policy can close for good — stops `GITHUB_TOKEN` opening
+          # the release PR. A PAT is a user identity rather than the Actions
+          # one, so it is not what is being refused, and this input is how a PAT
+          # reaches the action without editing the file.
           #
-          # The app-token step itself deliberately does NOT ship: it needs two
-          # secrets a scaffold cannot populate or verify, so it would be red on
-          # arrival in every tree that never sets them.
+          # **This serves a PAT and cannot serve a GitHub App.** A secret holds
+          # a static string; an App issues an app id and a private key that must
+          # be exchanged for a one-hour installation token by a step at run
+          # time. The first version of this comment claimed the App route was a
+          # secret away, and it is a workflow edit away — this one, made here,
+          # which is why it is written out rather than pointed at:
+          #
+          #   - uses: actions/create-github-app-token@v3
+          #     id: app-token
+          #     with:
+          #       app-id: ${{ secrets.RELEASE_APP_ID }}
+          #       private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          #
+          # then `token: ${{ steps.app-token.outputs.token }}` below instead of
+          # the line that is there. Making it turns this file into one you have
+          # edited, so `skeletor-upgrade` will hand you a conflict here rather
+          # than replacing it — correct, and better known before than after.
           #
           # Measured rather than assumed, on a real runner, because `actionlint`
           # holds this expression's syntax and knows nothing about which secrets

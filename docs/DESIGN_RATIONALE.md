@@ -3327,18 +3327,56 @@ because that is the only place a fact outside every file can live.
 **What the template can contribute is a seam, not a fix**, and the distinction is
 load-bearing. The release job now takes
 `token: ${{ secrets.RELEASE_TOKEN || github.token }}`. The switch binds
-`GITHUB_TOKEN`, the Actions identity; it does not bind a GitHub App installation
-token, which is a different identity — jam.sense has the switch off and has cut
-304 releases by authenticating as an App. Without that input, an adopter who
-acquires an App has to restructure the workflow, and that edit becomes a standing
-three-way-merge conflict at every upgrade. With it, the remedy is a secret.
+`GITHUB_TOKEN`, the Actions identity; a PAT is a *user* identity, so it is not
+what is being refused, and that input is how a PAT reaches the action with no
+workflow edit at all.
 
-The app-token **step** deliberately does not ship, behind a flag or otherwise. It
-needs two secrets a scaffold cannot populate or verify, so it is red on arrival
-in every tree that never sets them; and `--versioning` is *a subtraction and
+**It cannot carry a GitHub App, and the first version of this section said it
+could.** That is the more instructive half. A secret holds a static string; an
+App issues an app id and a private key which a *step* exchanges for a one-hour
+installation token at run time — `actions/create-github-app-token`, which is
+precisely what jam.sense runs and precisely what this section had just finished
+declining to ship. So the paragraph recommended, as the remedy for an adopter
+with an App, a mechanism that structurally cannot serve one. **The seam's stated
+purpose and its capability came apart in the same commit that introduced it**,
+and the sentence read fluently because both halves were separately true: the
+switch really does not bind an App, and an unset secret really does fall
+through.
+
+Two things made it survivable to write. The measurement I had just run was real
+and answered a *different* question — whether `||` falls through — so the
+paragraph carried the authority of a verified claim next to an unverified one,
+which is the conjunction failure this document already records under template
+prose. And the org has exactly one App, on one repository, so there was no
+adopter to try the advice and no gate anywhere that reads English. skyrow-
+workspace found it by reading the App registration, an hour after the tag.
+
+The corrected shape is three doors, in `docs/SETUP_GUIDE.md`: the switch — which
+**an enterprise policy can close outright**, stash.flow having taken a `409`
+reading *"The enterprise does not allow GitHub Actions to create or approve pull
+requests"* — then a PAT in `RELEASE_TOKEN`, then an App, whose exact workflow
+edit is written out both there and in `ci.yml` itself rather than pointed at.
+
+**The pointing is its own correction.** The first fix cited
+`docs/SETUP_GUIDE.md` from a comment inside `template/core/`, and no tier ships
+that file: Invariant 7 broken in the act of repairing a different sentence. The
+tier-composition gate cannot catch it either — its predicate is *absent here and
+present in a configuration that ships strictly more*, and skeletor's own docs are
+absent from every configuration, so they fall through the same hole that
+deliberately exempts URLs and other repositories' paths. A path that exists in
+this checkout and in no scaffold looks resolvable to the only person who can see
+it. Measured across `template/` afterwards: exactly one instance, now zero.
+
+The app-token **step** still does not ship, but the reason first given was
+weaker than it sounded. "Two secrets a scaffold cannot populate, so red on
+arrival" is avoidable — a job-level `env:` bridging the secret into a step-level
+`if:` skips it cleanly, the bridge being necessary because the `secrets` context
+is not readable from a step's `if:`. What survives is that nobody has measured
+that guarded form on a runner, and that `--versioning` is *a subtraction and
 nothing else* by design, because a mode that wrote files differently needs a
-verification grid this repository cannot afford. A flag that renders an extra
-step is not that shape.
+verification grid this repository cannot afford. **Those are reasons to wait,
+not reasons it is impossible**, and the difference is what the first version
+obscured.
 
 **The line was measured, not reasoned, and the reason is the sharpest part.**
 `actionlint` runs in `bin/skeletor-verify` and holds the expression's syntax — and
@@ -3364,6 +3402,7 @@ hand the action an empty token, presenting as an auth error that every reader in
 this organisation would now misattribute to the switch. **A wrong answer wearing
 the costume of the thing you have just finished diagnosing is worse than a wrong
 answer.**
+
 
 ---
 

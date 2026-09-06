@@ -742,12 +742,19 @@ at Step 4, beside branch protection, because a setup step is the only place a
 fact outside every file can live.
 
 The template's part is a **seam, not a fix**: the release job takes
-`token: ${{ secrets.RELEASE_TOKEN || github.token }}`. The switch binds
-`GITHUB_TOKEN` and not a GitHub App installation token — jam.sense has the switch
-off and 304 releases — so an App is the second door, and without that input an
-adopter must restructure the workflow, which is a standing three-way-merge
-conflict at every upgrade. The app-token *step* does not ship: two secrets a
-scaffold cannot populate would be red on arrival everywhere they are unset.
+`token: ${{ secrets.RELEASE_TOKEN || github.token }}`. **That serves a PAT and
+structurally cannot serve a GitHub App**, which the first version of this
+paragraph got wrong in the direction that costs most — a secret holds a static
+string, and an App issues an id and a private key that a *step* exchanges for a
+one-hour token at run time. So there are three doors, not two: the switch (which
+an enterprise policy can close outright — stash.flow got a `409` saying so in
+this org), a PAT in `RELEASE_TOKEN` with no workflow edit, and an App with one.
+The app-token *step* still does not ship, but the reason first given for that —
+two unpopulated secrets would be red on arrival — was weaker than it sounded,
+since a job-level `env:` bridge into a step `if:` avoids it. What survives is
+that nobody has measured the guarded form, and that `--versioning` is a
+subtraction and nothing else. Reported by skyrow-workspace, from the App
+registration, an hour after `v0.13.0` shipped.
 
 The fallthrough was **measured, not reasoned**. `actionlint` holds the
 expression's syntax and knows nothing about which secrets exist in an account,
@@ -790,6 +797,7 @@ The weekly pass this is the middle of — read the report, bump whole pins,
 verify, PR, allowlist a refusal, tag what shipped — is written once, in
 [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md), so a person, a scheduled agent and
 a workflow can run the same procedure instead of three copies of it.
+
 
 ---
 

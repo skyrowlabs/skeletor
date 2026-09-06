@@ -232,15 +232,61 @@ being refused: the switch is a property of the repository or the organisation,
 outside every file a scaffold ships, and no `permissions:` block can lift it.
 mind.head found this the only way it can be found — by trying to release.
 
-**If the setting is not yours to flip**, the second door is authentication. The
-switch binds `GITHUB_TOKEN`, the Actions identity. It does not bind a GitHub App
-installation token, because that is a different identity — jam.sense has the
-switch off, authenticates as an App, and has cut 304 releases. Mint a token with
-`actions/create-github-app-token` and set it as `RELEASE_TOKEN`; the release job
-reads `${{ secrets.RELEASE_TOKEN || github.token }}`, so an unset secret changes
-nothing and a set one is used without editing the workflow. The step that mints
-it does not ship, because it needs two secrets a scaffold cannot populate and
-would be red on arrival in every repository that never sets them.
+**That `PUT` can be refused, and the refusal is the useful part.** A `409` reading
+*"The enterprise does not allow GitHub Actions to create or approve pull
+requests"* means the policy is set above your organisation and no repository or
+org setting will override it. stash.flow got exactly that in `skyrowlabs`, so
+for this organisation door one is closed and the rest of this section is not
+optional reading.
+
+**The other two doors are both authentication**, and they are not
+interchangeable — the difference is what a secret can hold.
+
+**Door two, a personal access token.** The switch binds `GITHUB_TOKEN`, the
+Actions identity. A PAT is a *user* identity, so it is not what is being
+refused. A fine-grained token with `Contents: read and write` and
+`Pull requests: read and write` on the repository, stored as `RELEASE_TOKEN`, is
+used by the release job with **no workflow edit at all** — the step already
+reads `${{ secrets.RELEASE_TOKEN || github.token }}`, and an unset secret changes
+nothing. The costs are the ones PATs always have: the release commits and the
+release PR are attributed to whoever owns the token, and it expires, so somebody
+has to rotate it.
+
+**Door three, a GitHub App**, which is what jam.sense uses — switch off, 304
+releases. This one **needs a workflow edit and `RELEASE_TOKEN` cannot carry it**,
+because an App does not issue a storable string. It issues an app id and a
+private key, which have to be exchanged for a one-hour installation token *at
+run time, by a step*. So the two secrets go in as `RELEASE_APP_ID` and
+`RELEASE_APP_PRIVATE_KEY`, and the release job gains a step above the action:
+
+```yaml
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@v5
+        if: steps.config.outputs.present == 'true'
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .github/.release-please-manifest.json
+          token: ${{ steps.app-token.outputs.token }}   # replaces the RELEASE_TOKEN line
+```
+
+That edit makes `ci.yml` a file you have modified, so `bin/skeletor-upgrade`
+will hand you a conflict there rather than replacing it — which is the correct
+outcome and worth knowing before you make it, not after.
+
+**The mint step does not ship, and the reason this guide gave for that was
+weaker than it sounded.** "Two secrets a scaffold cannot populate would be red
+on arrival" is avoidable: a job-level `env:` bridging `secrets.RELEASE_APP_ID`
+into a step-level `if:` would skip the step cleanly when unset, because the
+`secrets` context is not readable from a step's `if:` directly. The reasons that
+survive are that nobody has measured that guarded form on a runner, and that
+`--versioning` is a subtraction and nothing else by design — a mode that renders
+an extra step is a different shape and costs a verification grid this project
+does not have. Both are reasons to wait, not reasons it is impossible.
 
 **This is the one setup step no gate here can check.** Every check a scaffolded
 tree ships asks whether the tree is consistent with itself; this is a fact about
