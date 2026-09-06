@@ -225,13 +225,42 @@ jobs:
         if: steps.node.outputs.present == 'true'
         run: npm install --no-audit --no-fund
 
+      # `--if-present`, because the guard above and the scripts below live in
+      # DIFFERENT TIERS. `core` asks whether a `package.json` exists; what it
+      # needs to know is whether *node's* `package.json` is the one that exists,
+      # and no file in a scaffolded tree distinguishes those. Any tree holding a
+      # manifest without `lint:check` / `format:check` reads `present=true` and
+      # then exits 1 on a missing script, having done nothing wrong.
+      #
+      # The path is UPGRADE, not scaffold, and the difference was measured
+      # rather than reasoned: `skeletor-new --force` OVERWRITES a colliding
+      # `package.json` (verified — the adopter's is replaced by the overlay's,
+      # scripts and all), while `skeletor-upgrade` leaves a collision alone by
+      # design. So it is the adopter who upgrades, keeps their own manifest and
+      # receives this workflow who meets it. The first account of this bug had
+      # the scaffold losing the collision; it does not, and the fix is right for
+      # a reason the story got wrong.
+      #
+      # dream-doll found it at v0.16.0 and it is dream-doll's sentence: **the
+      # guard cannot test for the thing it depends on.** `bin/skeletor-verify`
+      # structurally cannot produce it either — a fresh scaffold always receives
+      # the overlay's `package.json` and therefore always has both scripts, so
+      # the harness only ever observes the state it always creates. That is the
+      # third instance of that shape in a day.
+      #
+      # Measured on npm 12.0.2 rather than assumed, because a flag that
+      # swallowed a real failure would be worse than the bug: absent -> exit 0,
+      # present and passing -> exit 0, present and FAILING -> exit 3, which
+      # propagates. Same posture as `|| true` on the informational step — make
+      # the step's severity mean what it says — and unlike a pin it costs an
+      # adopter nothing.
       - name: eslint
         if: steps.node.outputs.present == 'true'
-        run: npm run lint:check
+        run: npm run --if-present lint:check
 
       - name: prettier
         if: steps.node.outputs.present == 'true'
-        run: npm run format:check
+        run: npm run --if-present format:check
 
   # ── Unit tests ──────────────────────────────────────────────────────────
   # Ungated by full_suite: the host-side suite is minutes, and it is the check
