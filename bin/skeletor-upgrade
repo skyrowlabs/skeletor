@@ -970,9 +970,34 @@ def main() -> int:
                 # the reader can check in one command. Third instance from this
                 # seam of a predicate that is right about what it measures wired
                 # to prose that claims more — and all three were the sentence.
+                #
+                # The command names the **commit**, and the first version named
+                # `head_ref`, which is wrong in three ways at once and node-zero
+                # and proto.pilot each found it independently. `git ls-remote
+                # origin v0.16.0` answers with the *annotated tag object*
+                # (`96c2ccf`), never the commit the manifest records
+                # (`b8c337b`) — so a reader who runs it compares two shas that
+                # are not meant to match and concludes the tag was never
+                # pushed. A dirty or offset describe (`v0.16.0-dirty`,
+                # `v0.16.0-2-gabc1234`) is not a ref at all and matches
+                # nothing, which reads as the same wrong answer. A sha matches
+                # the peeled `^{}` line, and it is what `base_checkout()`
+                # actually resolves.
+                #
+                # Still a tip check rather than a reachability one, and the
+                # sentence says `identified by` for that reason: a commit in the
+                # middle of a pushed branch is reachable and appears in no row.
+                # A false negative here is the safe direction — it under-claims,
+                # which is the failure mode this whole block exists to correct.
+                sha = subprocess.run(
+                    ["git", "-C", str(SKELETOR), "rev-parse", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
                 say("⚠️ ", f"this checkout tracks no branch — whether {head_ref} is reachable")
                 detail("elsewhere cannot be determined from here. If it is a pushed tag, it is fine;")
-                detail(f"`git ls-remote origin {head_ref}` is the check this declines to make for you.")
+                detail(f"`git ls-remote origin | grep {sha[:12] or head_ref}` is the check this")
+                detail("declines to make for you — a row means some pushed ref identifies it.")
             elif unpushed:
                 say("⚠️ ", f"{unpushed} commit(s) here are not on {tracking} — stamping {head_ref} anyway")
                 detail("`base_checkout()` resolves a recorded ref with `git worktree add`, so until")

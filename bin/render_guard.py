@@ -126,8 +126,17 @@ def head_standing(checkout: Path) -> Tuple[Optional[int], Optional[int], Optiona
     stamped `v0.14.0-2-g8d9bddb` is reproducible on exactly one machine.
 
     Both counts are `None` when git cannot say, and a checkout with no upstream
-    returns `(n, None, None)` — which is its own answer and not a zero: nothing
-    in it is reachable from anywhere else, so there is no count to give.
+    returns `(n, None, None)` — which is its own answer and not a zero: there is
+    no branch to count against, so there is no count to give.
+
+    That last clause used to read *nothing in it is reachable from anywhere
+    else*, which is a claim about the world made from a fact about this
+    checkout, and false in the case it fires hardest on — a detached clone at a
+    pushed tag tracks no branch **by construction**, and that clone is what
+    `refuse_a_dirty_base` tells an adopter to make. It was corrected at the one
+    call site that prints it and left standing here for a day, which is this
+    repository's own recurring shape: **a sentence with two homes, fixed in the
+    home that has a reader.**
     """
 
     def count(spec: str) -> Optional[int]:
