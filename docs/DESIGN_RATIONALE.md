@@ -1999,6 +1999,27 @@ them. The general form of that mistake is worth more than the number:
 > inheriting its verification.** Nobody re-derives the label sitting next to a
 > figure they checked.
 
+The sharper form arrived the same day, from the same session, in a report they
+sent *after* stating that rule — which is the part worth keeping, because it
+says the rule is not self-applying. Reporting the currency defect, they named
+`dropped` as the term carrying their four files. It was `declined`. Their
+experiment was sound and it varied exactly one thing: a tree with four deletions
+against a tree with none, and the verdict flipping between them. That proves
+**a standing decline suppresses the verdict**. It cannot say which of seven
+names in the tuple held those files, because no tree in the experiment had
+`dropped` non-empty and `declined` empty.
+
+> **An experiment's design bounds what it can attribute.** Varying one thing
+> establishes the effect and says nothing about the mechanism, so a mechanism
+> read out of the source beside it is a separate claim — and it arrives wearing
+> the experiment's confidence.
+
+The fix depended on the distinction they had collapsed. `declined` has an
+actionable half — the template can move past a decline, and there is then
+something new to say no to — and `dropped` has none, because nothing records
+that you were told, so it can never become news again. So the term is `fresh`
+rather than "remove both", and the asymmetry stays visible everywhere else.
+
 `Normaliser` never touches the user's file. Reformatting the one thing in a
 three-way merge that nobody else authored would be this tool editing a file it
 was not asked to edit, and it would destroy the very divergence it is trying to
