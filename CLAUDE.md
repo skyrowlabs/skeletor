@@ -81,6 +81,10 @@ bin/skeletor-bump pyright 1.1.413
 bin/skeletor-maintain            # docs/MAINTENANCE.md is the procedure
 bin/skeletor-maintain --agent
 
+# Provenance for a tree that took files by hand and is NOT a scaffold
+bin/skeletor-components record ../target --component output-contract --file template/core/scripts/output.py
+bin/skeletor-components report ../target            # what moved upstream since you took it
+
 # Carry a template change into an already-scaffolded tree
 bin/skeletor-upgrade ../target --dry-run
 bin/skeletor-upgrade ../target
@@ -798,6 +802,26 @@ verify, PR, allowlist a refusal, tag what shipped — is written once, in
 [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md), so a person, a scheduled agent and
 a workflow can run the same procedure instead of three copies of it.
 
+
+
+`bin/skeletor-components` is the provenance half of adoption, for a repository
+that took files by hand. It reports and never merges, so **its whole failure
+surface is a sentence somebody mis-takes** — and the sentence that shipped
+wrong was the green one. The baseline it describes (what "unchanged" is measured
+from) has three states: `source_sha == local_sha` is provably clean, a verbatim
+template file that differed is provably forked, and a *placeholder* file that
+differed is unknowable, because rendering and editing are the same signal. The
+first two had sentences and the third borrowed the clean one, so a real fork of
+jam.sense's rendered `✅ unchanged on both sides since you recorded it` beside a
+file that genuinely was. **Declining to rule is correct; rendering the declined
+case as the clean case is a claim.** `baseline` is now on every JSON row.
+
+Its gate is the reusable lesson. It *had* an assertion about that sentence,
+against `"since you recorded it"` — a substring of all three spellings, so it
+could not fail — and its fixture copies template files verbatim, so every
+baseline in it is `matched`. **One fixture cannot hold three states, and the
+convenient one holds the state that is already right.** The assertion now spans
+the clean tree and the deliberately-forked one and compares the machine field.
 
 ---
 

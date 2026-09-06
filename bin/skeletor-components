@@ -233,6 +233,27 @@ def classify(tree: Path, entry: dict) -> Tuple[str, str]:
     templated file — the same false reading facing the other way, and harder to
     doubt because it fires on real forks too. Telling the two apart needs a fact
     the record does not hold, and saying less is better than saying it wrongly.
+
+    **But not guessing is not the same as not saying**, and the first version of
+    this ran the two together. The baseline has THREE states and it shipped with
+    two spellings: `source_sha == local_sha` is a file that provably matched the
+    template at record time, and a placeholder file that differed is one nothing
+    here can rule on — and both printed *"unchanged on both sides since you
+    recorded it"*. **A green that means checked-and-clean and a green that means
+    could-not-check were the same pixel**, which is this project's own
+    null-result rule landing on its own instrument. It costs most exactly where
+    it is silent: a `⬆️` line at least sends a reader to a diff, and nobody
+    investigates a `✅`.
+
+    So the third state is named. `baseline` is on every JSON row as `matched`,
+    `forked` or `unknown`, because a consumer that had to parse the sentence to
+    recover it would be re-deriving a fact this function already holds.
+
+    jam.sense found it in an evaluation of six files, and named the case: their
+    `test_pyright_scope.py` is a real fork — `jam check docs` became
+    `jam check markdown`, and a `# noqa: E402` was dropped — and rendered green
+    beside `allowlist.py`, which is provably identical. Same mark, opposite
+    facts.
     """
     ref = entry["ref"]
     source = entry["source"]
@@ -240,12 +261,12 @@ def classify(tree: Path, entry: dict) -> Tuple[str, str]:
     upstream_then = entry.get("source_sha")
     upstream_now_bytes = template_at("HEAD", source)
     if upstream_now_bytes is None:
-        return "gone", f"skeletor no longer ships {source}"
+        return "gone", "unknown", f"skeletor no longer ships {source}"
     moved = sha256_bytes(upstream_now_bytes) != upstream_then
 
     local_now = sha256_file(tree / entry["path"])
     if local_now is None:
-        return "gone", f"not in this tree any more (was {entry['path']})"
+        return "gone", "unknown", f"not in this tree any more (was {entry['path']})"
     edited = local_now != entry.get("local_sha")
 
     # The one thing that CAN be said about the record baseline, said only where
@@ -255,16 +276,35 @@ def classify(tree: Path, entry: dict) -> Tuple[str, str]:
     # named as one. Everything else stays silent about it.
     taken = entry.get("source_sha") is not None and entry.get("local_sha") != entry.get("source_sha")
     source_then = template_at(ref, source)
-    forked = taken and source_then is not None and rendered_verbatim(source_then)
-    since = "since you recorded it (and it already differed from the template then)" if forked else "since you recorded it"
+    # The baseline clause is appended to every state rather than folded into
+    # the middle of one, because it qualifies the same word each time — what
+    # "unchanged" and "changed" are measured FROM. Trailing also keeps the
+    # three spellings adjacent to each other in the output, where a reader
+    # comparing two lines can see that they differ.
+    since = "since you recorded it"
+    if not taken:
+        baseline = "matched"
+        aside = "it matched the template exactly when you recorded it"
+    elif source_then is not None and rendered_verbatim(source_then):
+        baseline = "forked"
+        aside = "it ALREADY differed from the template when you recorded it"
+    else:
+        baseline = "unknown"
+        aside = (
+            "whether it already differed from the template then is not knowable from this "
+            "record (it renders placeholders, so rendering and an edit look identical)"
+        )
 
     if moved and edited:
-        return "both", f"upstream moved since {ref}, and this copy changed {since}"
-    if moved:
-        return "upstream", f"upstream moved since {ref}; your copy is unchanged {since}"
-    if edited:
-        return "local", f"this copy changed {since}; upstream unchanged since {ref}"
-    return "current", f"unchanged on both sides {since}, at {ref}"
+        head = f"upstream moved since {ref}, and this copy changed {since}"
+    elif moved:
+        head = f"upstream moved since {ref}; your copy is unchanged {since}"
+    elif edited:
+        head = f"this copy changed {since}; upstream unchanged since {ref}"
+    else:
+        head = f"unchanged on both sides {since}, at {ref}"
+    state = "both" if (moved and edited) else "upstream" if moved else "local" if edited else "current"
+    return state, baseline, f"{head} — {aside}"
 
 
 def report(tree: Path, as_json: bool, fail_on_drift: bool = False) -> int:
@@ -279,8 +319,21 @@ def report(tree: Path, as_json: bool, fail_on_drift: bool = False) -> int:
         rows = []
         for path in sorted(components[name].get("files", {})):
             entry = dict(components[name]["files"][path], path=path)
-            state, why = classify(tree, entry)
-            rows.append({"path": path, "source": entry["source"], "ref": entry["ref"], "state": state, "note": why})
+            state, baseline, why = classify(tree, entry)
+            rows.append(
+                {
+                    "path": path,
+                    "source": entry["source"],
+                    "ref": entry["ref"],
+                    "state": state,
+                    # What the record can say about the moment it was taken:
+                    # `matched`, `forked`, or `unknown`. In JSON because a
+                    # consumer parsing it back out of `note` would be
+                    # re-deriving what this row already knows.
+                    "baseline": baseline,
+                    "note": why,
+                }
+            )
             # Drift is movement on SKELETOR's side. A file this repo adapted and
             # upstream has not touched is a steady state, not a pending decision
             # — failing on it would make the gate red forever for every repo

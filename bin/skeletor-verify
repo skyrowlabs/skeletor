@@ -4222,12 +4222,15 @@ def components_gate(workdir: Path) -> List[Result]:
     if not recorded.exists():
         return results
 
-    def states() -> Dict[str, str]:
-        code, out = run([sys.executable, str(tool), "report", str(consumer), "--json"], cwd=workdir)
+    def rows_of(where: Path, field: str) -> Dict[str, str]:
+        code, out = run([sys.executable, str(tool), "report", str(where), "--json"], cwd=workdir)
         if code != 0 or "{" not in out:
             return {}
         payload = json.loads(out[out.index("{") : out.rindex("}") + 1])
-        return {row["path"]: row["state"] for rows in payload["components"].values() for row in rows}
+        return {row["path"]: row[field] for rows in payload["components"].values() for row in rows}
+
+    def states() -> Dict[str, str]:
+        return rows_of(consumer, "state")
 
     def human() -> str:
         return run([sys.executable, str(tool), "report", str(consumer)], cwd=workdir)[1]
@@ -4235,6 +4238,14 @@ def components_gate(workdir: Path) -> List[Result]:
     started = time.time()
     fresh = states()
     fresh_prose = human()
+    # Read BEFORE the falsifications below, which is the whole reason this line
+    # is here and not beside the assertion that uses it. Every state after this
+    # point is manufactured by zeroing a hash, and zeroing `local_sha` also
+    # makes it differ from `source_sha` — so a verbatim file reads `forked`,
+    # correctly, and a baseline read at the end would be measuring the gate's
+    # own tampering. It said `forked` for a file copied byte for byte, and the
+    # assertion caught it: a fixture mutated in place stops being a fixture.
+    fresh_baselines = rows_of(consumer, "baseline")
 
     data = json.loads(recorded.read_text(encoding="utf-8"))
     files = data["components"]["output-contract"]["files"]
@@ -4341,14 +4352,40 @@ def components_gate(workdir: Path) -> List[Result]:
         cwd=workdir,
     )
     _, mixed = run([sys.executable, str(tool), "report", str(forked)], cwd=workdir)
-    claim = "already differed from the template"
-    named = [line for line in mixed.splitlines() if claim in line]
+    # THREE sentences, not two, and the third is why this assertion grew. The
+    # baseline has three states — provably clean, provably forked, and not
+    # knowable — and the first version of the tool spelled the first and third
+    # identically, so `✅ unchanged on both sides since you recorded it` meant
+    # either "checked, clean" or "could not check". jam.sense found it on a real
+    # fork of theirs rendering green beside a file that was genuinely pristine.
+    # **Nobody investigates a ✅**, so the collapsed state costs most on exactly
+    # the line that is silent; a `⬆️` at least sends a reader to a diff.
+    #
+    # Asserted across two fixtures because one cannot hold all three: `consumer`
+    # copies verbatim, so every baseline there is `matched`, and only the
+    # deliberately-forked tree produces the other two. A gate reading one tree
+    # would have agreed with the bug.
+    forked_says = "ALREADY differed from the template"
+    unknowable_says = "is not knowable from this record"
+    clean_says = "matched the template exactly when you recorded it"
+    named = [line for line in mixed.splitlines() if forked_says in line]
+    unnamed = [line for line in mixed.splitlines() if unknowable_says in line]
+    baselines = rows_of(forked, "baseline")
     results.append(
         Result(
-            "components: a provable fork is named, and a rendered file is not",
-            len(named) == 1 and "allowlist.py" in named[0],
+            "components: a provable fork, an unprovable one and a clean take read differently",
+            len(named) == 1
+            and "allowlist.py" in named[0]
+            and len(unnamed) == 1
+            and "commits.md" in unnamed[0]
+            # The discriminating half: the clean sentence must NOT be what the
+            # unprovable file prints, which is the bug as it shipped.
+            and clean_says in fresh_prose
+            and clean_says not in mixed
+            and baselines == {"scripts/allowlist.py": "forked", "docs/rules/commits.md": "unknown"}
+            and set(fresh_baselines.values()) == {"matched"},
             time.time() - started,
-            mixed,
+            f"{mixed}\nbaselines: {baselines}\nfresh baselines: {fresh_baselines}",
         )
     )
 

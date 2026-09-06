@@ -3404,6 +3404,52 @@ the costume of the thing you have just finished diagnosing is worse than a wrong
 answer.**
 
 
+
+### A green that means "clean" and a green that means "could not check"
+
+`skeletor-components` classifies a taken file by two independent comparisons and
+then says what the record can support about the *baseline* — the moment the file
+was taken. That baseline has three states and it shipped with two sentences.
+
+`source_sha == local_sha` at record time is a file that **provably** matched the
+template. A file with placeholders that differed is one nothing can rule on,
+because rendering and editing produce the same signal. Both printed
+*"unchanged on both sides since you recorded it"*. So `scripts/allowlist.py`,
+genuinely pristine, and `tests/test_pyright_scope.py`, a real fork — `jam check
+docs` become `jam check markdown`, a `# noqa: E402` dropped — rendered the
+identical line, under the identical `✅`.
+
+**This is the null-result rule landing on the instrument built to hold it.** The
+tool's own docstring already said the record cannot tell a fork from a rendering;
+what it did not say is that *not guessing* and *not saying* are different acts.
+Declining to rule is correct. Rendering the declined case as the clean case is a
+claim, and a false one.
+
+jam.sense's sharpening is why it ranks high rather than as a wording nit:
+**nobody investigates a `✅`.** The cost of a collapsed state is highest exactly
+where the state is silent — an `⬆️` line at least sends a reader to a diff, and
+the green line is the one a person skimming for drift never stops at. That is
+the same argument this document makes about `check pre-push`'s docstring one
+section up, arriving at a different artifact within the day: a claim of coverage
+is worse than a gap, because it is doing active work to stop somebody looking.
+
+The fix names the third state — `baseline` is `matched`, `forked` or `unknown`
+on every JSON row, so a consumer is not left recovering it by parsing English —
+and appends the clause to all four states rather than folding it into one, which
+puts the three spellings adjacent in the output where a reader comparing two
+lines can see they differ.
+
+**The gate that missed it is the more useful lesson.** `components_gate` already
+asserted the fork sentence, with `qualified = "since you recorded it"` — a
+substring of *every* spelling, so the assertion passed under all three and could
+not have failed. And its fixture could not have discriminated either: the
+`consumer` tree copies template files verbatim, so every baseline there is
+`matched`, and only the deliberately-forked tree produces the other two. **One
+fixture cannot hold three states, and the one anybody reaches for first holds
+the state that is already correct.** The assertion now spans both trees and
+compares the machine field, and the plant that establishes it is the shipped bug
+itself: collapsing `unknown` back into `matched` turns it red.
+
 ---
 
 ## Honest assessment: what is over-built
