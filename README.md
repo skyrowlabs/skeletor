@@ -179,15 +179,17 @@ In the blank repo, say:
 The `/new-project` skill (installed at `~/.claude/skills/new-project/`) records
 where skeletor lives and sends the agent to [`AGENTS.md`](AGENTS.md) for the rest
 — it carries no procedure of its own, so it cannot go stale against one. If the
-skill is not installed, install it with:
+skill is not installed, install it by running this from your skeletor
+checkout:
 
 ```bash
-~/skeletor/bin/skeletor-install-skill
+bin/skeletor-install-skill
 ```
 
 ### 2. Point the agent at this repo
 
-> **"Read `~/skeletor/AGENTS.md` and follow it to set up this repo."**
+> **"Read `AGENTS.md` in your skeletor checkout and follow it to set up this
+> repo."**
 
 [`AGENTS.md`](AGENTS.md) is a one-page instruction sheet written for exactly that
 prompt, and it is the same file the skill above hands you off to. This route just
@@ -196,7 +198,8 @@ skips the install.
 ### 3. Run it yourself
 
 ```bash
-~/skeletor/bin/skeletor-new . --force \
+# $SKELETOR is wherever you cloned this repo; run this from the target repo.
+"$SKELETOR"/bin/skeletor-new . --force \
   --name "My Project" --cli mp --tagline "What it is." --tier core
 ```
 
