@@ -21,6 +21,9 @@ on:
       - '**.md'
       - '.claude/**'
       - 'AGENTS.md'
+      # Ships only with `--agent claude`; a path filter naming an absent file
+      # is inert, which is why this is a declaration rather than a condition.
+      # SCAFFOLD-OPTIONAL CLAUDE.md
       - 'CLAUDE.md'
       - '.github/DOCS_INDEX.md'
       # The checkers and the ratchet baseline themselves. Without these, a PR

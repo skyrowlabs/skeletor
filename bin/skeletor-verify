@@ -1216,10 +1216,21 @@ def agentless_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     results.append(Result(f"--agent none: scaffold {tier}", True, time.time() - started, output))
 
     started = time.time()
-    stray = sorted(p.relative_to(target).as_posix() for p in target.rglob(".claude"))
+    # A file, not only a directory. `CLAUDE.md` shipped at `core` for a long
+    # while, so `--agent none` produced a tree with no `.claude/` and a
+    # vendor-named file at its root — the most visible vendor artifact there is,
+    # in a tree whose author had just said no vendor tooling. This gate asked
+    # only about the directory, which is why the flag looked honoured. It is a
+    # pointer rather than tooling, which is what made it easy to leave: the
+    # question the flag asks is not "does this do anything" but "is this
+    # somebody's brand", and a pointer answers the second one too.
+    stray = sorted(
+        p.relative_to(target).as_posix()
+        for p in [*target.rglob(".claude"), *target.rglob("CLAUDE.md")]
+    )
     results.append(
         Result(
-            "--agent none: no vendor directory",
+            "--agent none: no vendor directory or file",
             not stray,
             time.time() - started,
             f"unexpected: {stray}" if stray else "",

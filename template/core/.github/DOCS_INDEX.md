@@ -45,8 +45,10 @@ and makes the relevant part harder to find, not easier.
 ## Agents, Skills & Shared Assets
 
 [`AGENTS.md`](../AGENTS.md) at the repo root is the file every agent reads
-first — the Critical Rules and the documentation routing table. `CLAUDE.md` is a
-pointer to it, never a second copy.
+first — the Critical Rules and the documentation routing table.
+<!-- SCAFFOLD-IF CLAUDE.md -->
+`CLAUDE.md` is a pointer to it, never a second copy.
+<!-- /SCAFFOLD-IF -->
 
 - **Rules** (`docs/rules/`) — the conventions, one file per domain. Plain
   markdown, read because `AGENTS.md` names them. Any agent can be pointed here.

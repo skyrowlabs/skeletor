@@ -6,9 +6,19 @@
 > Never load the whole tree — a typical task needs one or two documents.
 
 This file is the one every agent reads. `AGENTS.md` is the convention shared
-across tools; `CLAUDE.md` is a pointer to it rather than a copy, because two
-files stating the same rules drift within the week and the copy that is wrong is
-the one that happens to get loaded. Put rules here, never there.
+across tools.
+
+<!-- SCAFFOLD-IF CLAUDE.md -->
+`CLAUDE.md` is a pointer to this file rather than a copy, because two files
+stating the same rules drift within the week and the copy that is wrong is the
+one that happens to get loaded. Put rules here, never there.
+<!-- /SCAFFOLD-IF -->
+<!-- SCAFFOLD-IF-NOT CLAUDE.md -->
+Put rules here. There is no vendor-named pointer file beside it in this tree; if
+you add one for a tool that looks for it by name, make it a pointer to this file
+and not a copy, because two files stating the same rules drift within the week
+and the copy that is wrong is the one that happens to get loaded.
+<!-- /SCAFFOLD-IF -->
 
 The detailed rule files are in `docs/rules/`, and they are plain markdown with
 no tool-specific syntax. They sit under `docs/` rather than in a vendor
