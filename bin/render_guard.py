@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 #: What a render reads. `bin/render_guard.py` is here because a change to this
 #: file changes which dirt counts — leaving it out would make the guard unable
@@ -94,6 +94,69 @@ def uncommitted(target: Path, *, untracked: bool = False) -> Optional[List[str]]
     if result.returncode != 0:
         return None
     return sorted(line[3:] for line in result.stdout.splitlines() if line.strip())
+
+
+def head_standing(checkout: Path) -> Tuple[Optional[int], Optional[int], Optional[str]]:
+    """`(commits past the last tag, commits not on the upstream, upstream name)`.
+
+    `render_dirt` answers *is uncommitted content reaching this render*, which
+    is one rung of a four-rung ladder and the only one anything asked about:
+
+    ===============  =====================  ==========================
+    state            resolvable by others   before this
+    ===============  =====================  ==========================
+    uncommitted      never                  refused, loudly
+    unpushed         this machine only      silent
+    pushed, untagged anywhere               silent
+    tagged           anywhere               silent, correctly
+    ===============  =====================  ==========================
+
+    stash.flow found rungs two and three by being unable to take an upgrade
+    twice for different reasons — and the second time the report had gone quiet,
+    because **committing the work satisfied the only question being asked.**
+    The plans were identical row for row; what changed is that the first run
+    said the content was unreleased and the second did not. So the report was at
+    its most reassuring in the state where an adopter could verify least.
+
+    Rung two is the tool's rather than an adopter's policy, and the reason is
+    that `--dirty` and unpushed differ by one word. A dirty base *"names a
+    render nobody can resolve"*; an unpushed base names one nobody can resolve
+    **yet**, and *yet* does no work at all against an amend, a rebase or a
+    dropped branch. `base_checkout()` does `git worktree add`, so a manifest
+    stamped `v0.14.0-2-g8d9bddb` is reproducible on exactly one machine.
+
+    Both counts are `None` when git cannot say, and a checkout with no upstream
+    returns `(n, None, None)` — which is its own answer and not a zero: nothing
+    in it is reachable from anywhere else, so there is no count to give.
+    """
+
+    def count(spec: str) -> Optional[int]:
+        result = subprocess.run(
+            ["git", "-C", str(checkout), "rev-list", "--count", spec],
+            capture_output=True,
+            text=True,
+        )
+        return int(result.stdout.strip()) if result.returncode == 0 and result.stdout.strip().isdigit() else None
+
+    upstream = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "--abbrev-ref", "@{u}"],
+        capture_output=True,
+        text=True,
+    )
+    tracking = upstream.stdout.strip() if upstream.returncode == 0 else None
+
+    described = subprocess.run(
+        ["git", "-C", str(checkout), "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"],
+        capture_output=True,
+        text=True,
+    )
+    tag = described.stdout.strip() if described.returncode == 0 else None
+
+    return (
+        count(f"{tag}..HEAD") if tag else None,
+        count("@{u}..HEAD") if tracking else None,
+        tracking,
+    )
 
 
 def render_dirt(checkout: Path) -> List[str]:

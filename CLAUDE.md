@@ -804,6 +804,19 @@ a workflow can run the same procedure instead of three copies of it.
 
 
 
+**What an upgrade renders from is the live checkout, and the report now says
+where that stands.** There is no `--ref`; `--from-dir` overrides the *base*. The
+only question ever asked about the rendering checkout was *is it dirty*, so
+committing unreleased work silenced the caveat while changing nothing about
+whether an adopter could reach it — stash.flow was blocked twice by the same 52
+lines and got a warning only the first time, on identical plans. `head_standing()`
+answers the rest of the ladder: **unpushed is the tool's problem** (a manifest
+stamped `v0.14.0-2-g8d9bddb` is resolvable on one machine, and `base_checkout()`
+needs `git worktree add`), while **untagged is an adopter's policy** and this
+tool holds no opinion about it. The `⚠️` is on the writing path only, because an
+unpushed HEAD is the normal state between a commit and a push here and a warning
+that fires through every grid run is one nobody reads.
+
 `bin/skeletor-components` is the provenance half of adoption, for a repository
 that took files by hand. It reports and never merges, so **its whole failure
 surface is a sentence somebody mis-takes** — and the sentence that shipped

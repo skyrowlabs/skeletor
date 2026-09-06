@@ -3505,6 +3505,84 @@ the state that is already correct.** The assertion now spans both trees and
 compares the machine field, and the plant that establishes it is the shipped bug
 itself: collapsing `unknown` back into `matched` turns it red.
 
+
+### Committing the work silenced the warning without changing the risk
+
+`skeletor-upgrade` renders `ours` from the **live checkout**, not from a ref —
+there is no `--ref`, and `--from-dir` overrides the *base*. So whatever is at
+skeletor's HEAD is what an adopter gets, and the only question the report ever
+asked about that checkout was *is it dirty*.
+
+stash.flow was blocked twice by the same content and the second time the report
+had gone quiet. The runs are the finding:
+
+```
+DIRTY (before the commit)         CLEAN (after it)
+⚠️  6 uncommitted change(s)        → base: skeletor @ v0.12.0
+✅ 6 updated  · cli/check.py       ✅ 6 updated  · cli/check.py
+                                   (no caveat of any kind)
+```
+
+**The plans were identical, row for row** — the same 52 lines of `cli/check.py`
+in both. What changed is that committing satisfied the only predicate anybody
+was checking, while nothing about whether a third party could reach that content
+had changed at all. The report was at its most reassuring in the state where an
+adopter could verify least.
+
+There is a ladder here and `render_dirt` answers one rung of it:
+
+| state | resolvable by others | before this |
+| --- | --- | --- |
+| uncommitted | never | refused, loudly |
+| unpushed | this machine only | silent |
+| pushed, untagged | anywhere | silent |
+| tagged | anywhere | silent, correctly |
+
+**Rung two is the tool's problem and rung three is the adopter's**, and the line
+between them is worth stating because it decides what the fix is allowed to do.
+An adopter who wants HEAD is entitled to HEAD, so *untagged* is a policy this
+tool must not hold an opinion about — stash.flow's loop takes tags and declines;
+somebody else's does not. But **no policy makes a one-machine ref acceptable.**
+`base_checkout()` resolves a recorded ref with `git worktree add`, so a manifest
+stamped `v0.14.0-2-g8d9bddb` while those two commits are unpushed is
+reproducible on exactly one computer.
+
+Which is this repository's own `-dirty` defect with the clock run forward, and
+the sentence needs one word changed: a dirty base *names a render nobody can
+resolve*; an unpushed base names one nobody can resolve **yet** — and *yet* does
+no work whatever against an amend, a rebase, or a branch that is dropped. The
+guard reads `git status --porcelain`, which went quiet the instant the work was
+committed, while the durability question it exists to protect was untouched.
+**A ref that resolves is not a ref that means anything to the reader, and the
+gate only ever checked the first.**
+
+`head_standing()` reports the other rungs, and the split is between a *fact* and
+a *judgement* rather than between two paths. Every run — dry or not — opens with
+the position and **both** counts:
+
+```
+→ head: skeletor @ v0.14.0-2-g8d9bddb (2 past the last release tag, 2 not on origin/main)
+```
+
+The `⚠️` is on the writing path alone. That line took a correction from
+stash.flow after they had already taken the first version: it reported distance
+from the tag and stayed silent on the push state, so the fact with an acceptable
+policy behind it was shown and the fact with none was not — **the argument for
+keeping the mark off the dry run is an argument about the mark, not about the
+fact**, and the dry run is the path a peer session reads while the writing path
+is read by somebody who has already decided.
+Warning on every dry run would fire through this repository's own grid, where an
+unpushed HEAD is the ordinary state between a commit and a push — **a true
+warning that fires constantly is one nobody reads**, which is the failure mode
+this whole document is about, arriving as the fix rather than as the bug.
+
+Verified in all four states rather than in the one that motivated it: unpushed
+warns with a count, **pushed goes silent**, no upstream warns differently
+(`None` is not zero — nothing is reachable, so there is no count to give), and a
+dry run states the position without the mark. The pushed case is the one that
+matters, because a warning that never clears is indistinguishable from a warning
+that is not looking.
+
 ---
 
 ## Honest assessment: what is over-built

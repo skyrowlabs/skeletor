@@ -89,7 +89,7 @@ from typing import Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from render_guard import render_dirt, uncommitted  # noqa: E402
+from render_guard import head_standing, render_dirt, uncommitted  # noqa: E402
 
 SKELETOR = Path(__file__).resolve().parents[1]
 MANIFEST_NAME = ".skeletor.json"
@@ -925,6 +925,46 @@ def main() -> int:
             json.loads((head_tree / MANIFEST_NAME).read_text(encoding="utf-8")).get("skeletor_ref") or "?"
         )
 
+        # Where the render's own source stands, said plainly, because until now
+        # this report answered "is it dirty" and nothing else — and committing
+        # the work is enough to satisfy that question while changing nothing
+        # about whether an adopter can reach what they are being handed.
+        # stash.flow's two runs had identical plans, row for row, and only the
+        # first carried a caveat.
+        past_tag, unpushed, tracking = head_standing(SKELETOR)
+        # BOTH facts on this line, and the split is the one drawn a paragraph
+        # below: the `⚠️` is a judgement and belongs where the act is, the
+        # facts are not and belong where the decision is made. A dry run is
+        # what a peer session reads; the writing path is read by somebody who
+        # has already chosen. stash.flow asked for the second clause after
+        # taking the first — the position line said `2 past the last release
+        # tag`, which has an acceptable policy behind it, and stayed silent on
+        # `2 not on origin/main`, which by this tool's own argument has none.
+        notes = []
+        if past_tag:
+            notes.append(f"{past_tag} past the last release tag")
+        if tracking is None:
+            notes.append("no upstream")
+        elif unpushed:
+            notes.append(f"{unpushed} not on {tracking}")
+        standing = f"head: skeletor @ {head_ref}" + (f" ({', '.join(notes)})" if notes else "")
+        say("→", standing)
+        # The ⚠️ is on the writing path alone, and the split is the same one
+        # `warn_a_dirty_base`/`refuse_a_dirty_base` already make: a dry run
+        # reports, and stamping somebody's manifest is the act. Warning on every
+        # dry run would fire through this repository's own grid, where an
+        # unpushed HEAD is the ordinary state between a commit and a push —
+        # which is how a true warning becomes one nobody reads.
+        if not args.dry_run:
+            if tracking is None:
+                say("⚠️ ", f"this checkout tracks no branch — nothing at {head_ref} is reachable elsewhere")
+                detail("The manifest this stamps names a commit only this machine has.")
+            elif unpushed:
+                say("⚠️ ", f"{unpushed} commit(s) here are not on {tracking} — stamping {head_ref} anyway")
+                detail("`base_checkout()` resolves a recorded ref with `git worktree add`, so until")
+                detail("these are pushed the base this records is reproducible on this machine only.")
+                detail("An amend or a rebase makes it unreproducible everywhere.")
+
         base_files: Dict[str, Path] = {}
         if base_src is not None:
             base_tree = workdir / "base"
@@ -1309,6 +1349,13 @@ def main() -> int:
                         # the same ambiguity the human line had: current with
                         # what?
                         "head_ref": head_ref,
+                        # The other three rungs of the ladder `render_dirt`
+                        # answers one of. `head_unpushed` is null when the
+                        # checkout tracks nothing, which is not zero — see
+                        # `head_standing`.
+                        "head_past_tag": past_tag,
+                        "head_unpushed": unpushed,
+                        "head_upstream": tracking,
                         # The predicate, not a suffix inside a version string.
                         # `head_ref` is the render's stamped `git describe
                         # --tags --always --dirty`, so its `-dirty` answers *is
