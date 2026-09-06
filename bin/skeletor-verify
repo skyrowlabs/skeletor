@@ -485,12 +485,146 @@ def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     results += lint_gates(tree, venv_python)
     results += pyright_gate(tree, venv_python, pyright_ok)
     results += actionlint_gate(tree, venv_python.parent)
+    results += informational_step_gate(tree, venv_python.parent)
     # Last, because it is the only gate here that WRITES into the tree — a
     # module and a test of its own, to move the one variable the refusal turns
     # on. It puts them back, and running it after everything else means a
     # cleanup that ever fails is a failure of this gate rather than a puzzle in
     # the next one.
     results += check_the_baseline_is_refused_on_a_fresh_tree(tree, venv_python)
+    return results
+
+
+def informational_step_gate(tree: Path, venv_bin: Path) -> List[Result]:
+    """The bait file: supply the lint debt this harness can never have.
+
+    `flake8 (informational)` in `ci.yml` ends in `|| true`, and the claim is
+    two-part — **swallow the exit code without swallowing the information.**
+    Neither half is observable on a fresh scaffold, because a fresh scaffold has
+    nothing for that step to find: it exits 0 having said nothing, and it would
+    do that under `|| true`, under `continue-on-error`, and under a step that
+    had been deleted. Every one of those is green, and the green is the same.
+
+    That was written down as a structural limit — *a harness that can only ever
+    observe the empty case* — and stash.flow supplied the way out. The limit is
+    real for a tree the grid **finds**; it is not real for a tree the grid
+    **writes**. So this plants four lines of deliberately bad python, runs the
+    step's own command verbatim from the tree root, and requires the two halves
+    separately.
+
+    It got worse before it got better, which is why the fixture is synthetic
+    rather than borrowed: stash.flow was the one tree in the fleet carrying real
+    complexity debt, and they cleared it in `363fdf6` — before the `|| true` fix
+    landed. The only available witness removed itself, and asking a repository
+    to keep lint debt so somebody else's harness has something to look at is not
+    a thing to ask.
+
+    ## Read, never repeated
+
+    The command comes out of `ci.yml`. A copy here would be a second home for
+    the flags, and would keep passing after somebody changed the step — which
+    is the failure this gate is a member of the class of.
+
+    ## The plant is the half that proves the bait landed
+
+    Exit 0 with findings printed is consistent with `|| true` working and with a
+    bait file flake8 never read — the second being exactly the *"a plant that
+    did not land is indistinguishable from a gate that works"* case. So the
+    `|| true` is then removed and the same command must come back non-zero. A
+    bait flake8 cannot see fails that assertion, loudly.
+    """
+    results: List[Result] = []
+    started = time.time()
+    workflow = tree / ".github" / "workflows" / "ci.yml"
+    text = workflow.read_text(encoding="utf-8")
+
+    # The step's `run:`, taken from the file. Matched on the step NAME rather
+    # than on `flake8 ... || true`, because the thing under test is the step,
+    # and a pattern naming the fix cannot notice the fix being removed.
+    match = re.search(
+        r"- name: flake8 \(informational\)\n\s+run: (?P<command>.+)\n",
+        text,
+    )
+    if not match:
+        return [
+            Result(
+                "informational step: the step is in ci.yml",
+                False,
+                time.time() - started,
+                "no `- name: flake8 (informational)` step with a one-line `run:` in ci.yml",
+            )
+        ]
+    command = match.group("command").strip()
+
+    # Four findings, three kinds, and none of them in the BLOCKING set — the
+    # blocking step is `--select=E9,F63,F7,F82,F401`, so an unused import would
+    # make the tree red for real. These are style and complexity: what the
+    # informational channel exists to report and nothing else acts on.
+    bait = tree / "bait_for_the_informational_step.py"
+    bait.write_text(
+        "import os, sys\n"  # E401 multiple imports on one line
+        "x=1\n"  # E225 missing whitespace around operator
+        "def f( a ):\n"  # E201/E202 whitespace after/before bracket
+        "    return os.path, sys.path, a ;\n",  # E703 statement ends with a semicolon
+        encoding="utf-8",
+    )
+    # `env_extra`, never a whole environment: `run()` builds the rest through
+    # `subprocess_env`, and a gate that assembles its own drops the git identity
+    # that installs — the forgetting that function's own comment warns about.
+    env = {"PATH": f"{venv_bin}{os.pathsep}{os.environ['PATH']}"}
+    try:
+        code, output = run(["bash", "-c", command], cwd=tree, env_extra=env)
+        # Findings are attributed BY PATH: `flake8 . --statistics` prints a
+        # count per code, and a total says nothing about which file it read.
+        saw_the_bait = bait.name in output
+        results.append(
+            Result(
+                "informational step: swallows the exit code and still reports",
+                code == 0 and saw_the_bait,
+                time.time() - started,
+                f"exit {code}, bait named in output: {saw_the_bait}\n"
+                f"--- {command}\n{output[-2000:]}",
+            )
+        )
+
+        # The plant, on the command rather than on the file: strip the trailer
+        # the step ends with and the same run must fail. If this comes back 0,
+        # flake8 never read the bait and the assertion above was vacuous.
+        started = time.time()
+        unswallowed = re.sub(r"\s*\|\|\s*true\s*$", "", command)
+        planted = unswallowed != command
+        code, output = run(["bash", "-c", unswallowed], cwd=tree, env_extra=env)
+        results.append(
+            Result(
+                "informational step: without `|| true` the same bait fails",
+                planted and code != 0,
+                time.time() - started,
+                f"plant landed (a trailer was removed): {planted}\nexit {code}\n"
+                f"--- {unswallowed}\n{output[-2000:]}",
+            )
+        )
+    finally:
+        bait.unlink(missing_ok=True)
+
+    # The control, and without it the plant above is a lucky hit. A tree with
+    # any informational finding of its own fails the unswallowed command
+    # whether or not flake8 ever opened the bait — and a fresh scaffold having
+    # none is a property of today's template, not a guarantee. So the same
+    # command runs once more with the bait gone: exit 0 here is what makes the
+    # non-zero above attributable. **A detector is validated by finding the
+    # site, not the file**, and this is the site.
+    started = time.time()
+    code, output = run(["bash", "-c", unswallowed], cwd=tree, env_extra=env)
+    results.append(
+        Result(
+            "informational step: the tree's own debt is not what failed it",
+            code == 0,
+            time.time() - started,
+            f"exit {code} with the bait removed — non-zero means this tree carries its own\n"
+            f"informational findings, so the plant above proved nothing about the bait.\n"
+            f"--- {unswallowed}\n{output[-2000:]}",
+        )
+    )
     return results
 
 
