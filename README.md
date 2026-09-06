@@ -241,7 +241,7 @@ maintain, not the one that looks most thorough.
 | `template/core/`            | Tier 1 — always take this                              |
 | `template/governed/`        | Tier 2                                                 |
 | `template/agentic/`         | Tier 3                                                 |
-| `template/python/`, `node/` | Language overlays (lint, types, formatting)            |
+| `template/python/`, `node/` | Language overlays — your PRODUCT's language. The python toolchain that lints the shell ships at `core`. |
 | `docs/SETUP_GUIDE.md`       | The full procedure, including adoption into an existing repo |
 | `docs/TIERS.md`             | What each tier buys, and what it costs                 |
 | `docs/DESIGN_RATIONALE.md`  | The incident behind each mechanism                     |

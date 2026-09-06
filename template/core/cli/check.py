@@ -27,7 +27,59 @@ def lint() -> None:
     sys.exit(_lint())
 
 
+#: language -> (what declares it is here, the configs `_lint()` needs before it
+#: will read that language at all). Globs anchored at the project root, so the
+#: walk never reaches `.venv` or `node_modules` where the answer is always yes
+#: and never about this tree.
+#:
+#: Declaration rather than a bare "any file of this type" on purpose: a single
+#: vendored `.js` beside no eslint config is not a project that forgot its
+#: linter, and a check that cannot tell those apart goes red in somebody else's
+#: repository over a file they did not write. Python is declared by the three
+#: roots this project owns — the same three `pyrightconfig.json` names in
+#: `include` — and node by its manifest.
+#:
+#: The gates below run a linter only when its config exists, which was written
+#: as tolerance and reads as a claim. A missing config makes the source it
+#: governs *invisible*, and invisible renders as green: a `--language node`
+#: tree shipped 52 python files with no `.flake8` and no `pyrightconfig.json`,
+#: ran eslint alone, and printed `all 1 gates passed`. Nothing in that line is
+#: false and nothing in it is the answer. Absence is two questions — *is this
+#: language here* and *is anything checking it* — and they are asked separately
+#: now.
+#:
+#: Kept as plain data because two readers need it. `bin/skeletor-verify` parses
+#: this literal to ask the question no single tree can: whether every
+#: CONFIGURATION the generator can produce ships the linter for the source it
+#: ships. A tree only ever knows its own.
+LANGUAGE_CONFIGS = (
+    ("python", ("cli/**/*.py", "scripts/**/*.py", "tests/**/*.py"), (".flake8", "pyrightconfig.json")),
+    ("node", ("package.json",), ("eslint.config.js",)),
+)
+
+
+def _unlinted() -> list[str]:
+    """Languages this tree holds source for that no configured linter reads."""
+    gaps = []
+    for language, declares, configs in LANGUAGE_CONFIGS:
+        if not any(next(PROJECT_ROOT.glob(pattern), None) for pattern in declares):
+            continue
+        for config in configs:
+            if not (PROJECT_ROOT / config).exists():
+                gaps.append(f"{language}: {config} is missing, so nothing here lints it")
+    return gaps
+
+
 def _lint() -> int:
+    gaps = _unlinted()
+    if gaps:
+        fail(
+            "source is present that no gate reads:\n  "
+            + "\n  ".join(gaps)
+            + "\nRestore the config, or delete the source it was meant to govern."
+        )
+        return 1
+
     results = []
     if (PROJECT_ROOT / ".flake8").exists():
         results.append(

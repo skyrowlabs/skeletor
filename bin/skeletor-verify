@@ -4694,6 +4694,139 @@ def entry_point_gate() -> Result:
     )
 
 
+def unlinted_source_gate(workdir: Path) -> List[Result]:
+    """Every language a configuration ships source for ships its linter too.
+
+    `cli/check.py` runs a linter only when its config file exists. Written as
+    tolerance, it reads as a claim, and the two come apart the moment a config
+    ships at a different overlay than the source it governs. `.flake8`,
+    `pyproject.toml` and `pyrightconfig.json` lived in `template/python/` while
+    `cli/`, `scripts/` and `tests/` ship at `core` — so a `--language node`
+    tree arrived with 52 python files, no python config, and a `check lint`
+    that ran eslint alone and printed `✅ all 1 gates passed`.
+
+    **This is the same defect as the setup-block one, on the same flag, one
+    artifact over.** `docs/DESIGN_RATIONALE.md` already records that
+    `--language` reads as three symmetric choices and is not: every scaffold is
+    a python project and the flag only ever ADDS. That finding fixed
+    `setup_commands()`, which is how the toolchain is *documented* — and left
+    the toolchain's own *config* in the overlay the same argument had just
+    shown was the wrong home. Naming a failure mode does not immunise you
+    against it; the second instance was thirteen days after the first.
+
+    Two more shipped behind it, both invisible for the same reason. The pyright
+    hook's entry is `pyright --project pyrightconfig.json`, so
+    `pre-commit run --all-files` — the README's first command — could not pass
+    in a node tree; and `tests/test_marker_coverage.py` reads `pyproject.toml`
+    unconditionally and raised `FileNotFoundError`. Both are invariant 5, and
+    the second is a documented sync pair (`pyproject.toml` says *keep this
+    block in step with tests/pytest.ini*) whose halves shipped at different
+    overlays — the tier-composition class on the language axis.
+
+    **Nothing here could see any of it.** `gated_language = "python"`: a node
+    tree is scaffolded, so an unrendered placeholder is caught, and its own
+    suite is never run. dream-doll found it by being the first `--language
+    node` adopter. So this gate asks the structural question directly, for
+    every language the parser offers rather than the one the grid executes.
+
+    The table is READ from the tree's own `cli/check.py`, so a fourth linter
+    added there is covered here on the next run. Its ten-line evaluation is
+    deliberately re-implemented rather than imported: `cli.check` needs click
+    and a venv, and a gate that depends on the tree being installed cannot run
+    for the languages this one exists to reach. The plant below is what keeps
+    that re-implementation honest, and the python trees run the real `_lint()`
+    through `check pre-push` anyway.
+
+    `--language none` is included, and is not in `configurations()` — that
+    helper enumerates `LANGUAGE_OVERLAYS`, which has no `none` key because the
+    choice ships no overlay. It is still a documented choice, and it is the one
+    with the least shipped alongside the python that ships regardless.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    parser = scaffolder.build_parser()
+    languages = next(a.choices for a in parser._actions if a.dest == "language")
+
+    def table(tree: Path):
+        """`LANGUAGE_CONFIGS` out of the generated tree, as data."""
+        source = (tree / "cli" / "check.py").read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == "LANGUAGE_CONFIGS":
+                return ast.literal_eval(node.value)
+        return None
+
+    def gaps(tree: Path, rows) -> List[str]:
+        found = []
+        for language, declares, configs in rows:
+            if not any(next(tree.glob(pattern), None) for pattern in declares):
+                continue
+            found += [f"{language}: {config}" for config in configs if not (tree / config).exists()]
+        return found
+
+    results = []
+    trees = {}
+    for language in languages:
+        result, tree = scaffold("core", language, workdir, name=f"unlinted-{language}")
+        if not result.ok:
+            results.append(result)
+            continue
+        rows = table(tree)
+        if not rows:
+            results.append(
+                Result(
+                    f"unlinted source: {language}",
+                    False,
+                    time.time() - started,
+                    "cli/check.py declares no LANGUAGE_CONFIGS — the table this gate reads is gone",
+                )
+            )
+            continue
+        trees[language] = (tree, rows)
+        missing = gaps(tree, rows)
+        results.append(
+            Result(
+                f"unlinted source: --language {language} ships a linter for everything it ships",
+                not missing,
+                time.time() - started,
+                "source ships that no gate reads:\n  " + "\n  ".join(missing) if missing else "",
+            )
+        )
+
+    # The plant. A green negative above is identical whether every config ships
+    # or the evaluation is blind, and this gate re-implements that evaluation —
+    # so it asserts the target exists before removing it, and requires the
+    # removal to be seen. `--language node` is the tree it actually shipped
+    # broken in, which is why the plant is made there rather than in the
+    # convenient one.
+    planted = "node" if "node" in trees else next(iter(trees), None)
+    if planted:
+        tree, rows = trees[planted]
+        victim = tree / ".flake8"
+        if not victim.exists():
+            results.append(
+                Result(
+                    "unlinted source: the plant lands",
+                    False,
+                    time.time() - started,
+                    f"{victim.name} is not in the {planted} tree — the plant would prove nothing",
+                )
+            )
+        else:
+            victim.unlink()
+            seen = gaps(tree, rows)
+            victim.write_text("[flake8]\n", encoding="utf-8")
+            results.append(
+                Result(
+                    f"unlinted source: removing .flake8 from the {planted} tree is seen",
+                    bool(seen),
+                    time.time() - started,
+                    "" if seen else "the evaluation reported nothing with a config deleted",
+                )
+            )
+
+    return results
+
+
 def tagline_required_gate(workdir: Path) -> Result:
     """Omitting `--tagline` is refused, rather than rendering placeholder text.
 
@@ -4782,6 +4915,7 @@ def main() -> int:
         results.append(entry_point_gate())
         results.append(manifest_args_gate())
         results.append(tagline_required_gate(workdir))
+        results += unlinted_source_gate(workdir)
         venv_python = make_venv(workdir, args.quiet)
         results.append(shadow_gate(workdir, venv_python))
         results.append(dirty_scope_gate(workdir))

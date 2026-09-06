@@ -453,7 +453,7 @@ isort used to have the same problem for a different reason and no longer does:
 `.isort.cfg` at this repo's root names `cli` and `scripts` as first-party, which
 they are not *here* — they exist only under `template/<overlay>/` — so without it
 isort read them as third-party and stripped the blank line before `click` in
-twenty files. Keep that file in step with `template/python/pyproject.toml`.
+twenty files. Keep that file in step with `template/core/pyproject.toml`.
 
 Always run all tiers when a change touches `template/core/`, since `governed`
 and `agentic` compose on top of it. That is the default; `--tier` is for

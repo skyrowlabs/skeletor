@@ -1127,6 +1127,61 @@ appends. What generalises is narrower than "test every flag combination":
 actually ship**, because the asymmetry lives in the overlay layout and the flag's
 own signature cannot show it.
 
+#### The same flag, thirteen days later, one artifact over
+
+That fix corrected how the toolchain is **documented** — `setup_commands()` —
+and left the toolchain's own **config** in the overlay the argument above had
+just shown was the wrong home. `.flake8`, `pyproject.toml` and
+`pyrightconfig.json` stayed in `template/python/` while the source they govern
+shipped at `core`.
+
+So a `--language node` tree arrived with 52 python files and nothing configured
+to read them, and three things followed:
+
+- `cli/check.py` runs each linter only when its config exists. With both python
+  configs absent it ran eslint alone and printed `✅ all 1 gates passed` — the
+  "worked fine, told nobody" shape, where **the absence of a config reads as the
+  absence of a language.** Green, over 52 unread files.
+- The pyright hook's entry is `pyright --project pyrightconfig.json`, so
+  `pre-commit run --all-files` — the first command the README gives a new user —
+  could not pass. Invariant 5, in the tier that is documented as *take this
+  always*.
+- `tests/test_marker_coverage.py` reads `pyproject.toml` unconditionally and
+  raised `FileNotFoundError`. That file's own comment says *keep this block in
+  sync with tests/pytest.ini* — a documented sync pair whose two halves shipped
+  at **different overlays**, which is stash.flow's tier-composition class with
+  the axis changed from tier to language.
+
+**Why the paragraph above did not prevent it.** It is filed as a fact about
+`setup_commands()`, and the sentence that generalises it says to check a flag
+against *what the tiers actually ship*. Nobody re-ran that check when the
+subject was a config file rather than a documented command, because the finding
+had a fix attached and a fixed thing reads as a closed thing. Naming a failure
+mode does not immunise you against it — this repository has said so once
+already, about a completeness claim written in the hour after committing a fix
+for exactly that sentence.
+
+**Why no gate here saw it.** `bin/skeletor-verify` sets
+`gated_language = "python"`: every language is scaffolded, so an unrendered
+placeholder in the node overlay is still caught, and only the python trees have
+their own suites executed. The question "does this configuration ship a linter
+for the source it ships" is therefore invisible in exactly the configurations
+where the answer was no. It took dream-doll, the first `--language node`
+adopter, to find it — which is the founding rule of this file arriving on the
+language axis: **a tree only ever knows its own configuration, and the
+generator's question is the one across all of them.**
+
+`unlinted_source_gate` asks it directly, for every `--language` the parser
+offers rather than the one the grid executes. It reads `LANGUAGE_CONFIGS` out
+of the generated `cli/check.py`, so a fourth linter added there is covered on
+the next run. Reverting the move turns it red on `node` and on `none` and green
+on `python` and `both`, which is the tier signature the defect predicts.
+
+`--language none` is worth its own line: it was equally broken and it is **not
+in `configurations()`**, because that helper enumerates `LANGUAGE_OVERLAYS` and
+`none` ships no overlay to enumerate. A documented choice that the composition
+gate cannot see is the registry hazard wearing the shape of an absence.
+
 ### Two questions about one artifact, and only one of them is the tree's
 
 stash.flow prototyped the setup-block drift check in their tree and it ships here

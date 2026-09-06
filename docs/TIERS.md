@@ -16,6 +16,12 @@ bin/skeletor-new ../my-project --tagline "What it is." --tier agentic
 Tiers compose in order (`agentic` includes `governed` includes `core`), and a
 language overlay (`--language python|node|both|none`) is applied on top.
 
+`--language` names your **product's** language and only ever adds. `cli/`,
+`scripts/` and `tests/` are python and ship at `core` whatever you pass — and so,
+since v0.15.0, does the toolchain that lints them (`.flake8`, `pyproject.toml`,
+`pyrightconfig.json`). Before that they shipped in the python overlay, so a
+`--language node` tree got 52 python files with nothing configured to read them.
+
 ---
 
 ## Tier 1 — `core`
