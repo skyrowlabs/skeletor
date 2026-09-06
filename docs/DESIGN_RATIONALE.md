@@ -1271,6 +1271,32 @@ place you are looking* rather than *a value you are recording* — and a
 prediction is a recorded value. Pin a stated expectation to an immutable ref, or
 it is not falsifiable by the time anybody checks it.
 
+### The path that could not say where it came from
+
+`state_dir()` resolved `os.environ.get(STATE_ROOT_ENV) or STATE_ROOT_DEFAULT` and
+returned a `Path`, which is correct and **cannot say which of the two answered**.
+jam.sense spent an investigation on a broken pane whose entire answer was *the
+variable was not exported in this context, so the default answered* — and the
+default had moved one release earlier. One field would have closed it in a line.
+
+`state_root()` returns `(path, source)` and `state_dir()` goes through it. The
+`source` is reported and never acted on: a caller that behaved differently
+depending on how the root was found would have made the override mean two
+things.
+
+**The test for it shipped as a tautology first, and a plant said so.** The
+obvious assertion is to set the variable and require
+`state_dir(...) == state_root().path / ...` — which passes under a *split*
+resolver, because two independent lookups of one environment agree. Planting the
+pre-change code, which reads the environment separately, came back green on
+exactly the test written to forbid it.
+
+Two copies of a mistake agree with each other, which is this document's oldest
+lesson arriving inside a five-line test. The assertion is structural now:
+replace `state_root` and require the path to follow. Nothing but a call can do
+that, and the plant that was green is red.
+
+
 ### A report and its remedy can share a root
 
 Three peers sent reports in one night, each with a proposed fix, and all three

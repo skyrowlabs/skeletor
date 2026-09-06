@@ -26,6 +26,7 @@ pytestmark = [pytest.mark.unit]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scanning import scanned  # noqa: E402
+from scripts import paths  # noqa: E402
 from scripts.paths import (  # noqa: E402
     CLI_DIR,
     PROJECT_ROOT,
@@ -34,6 +35,7 @@ from scripts.paths import (  # noqa: E402
     STATE_ROOT_ENV,
     STATE_SLUG,
     state_dir,
+    state_root,
 )
 
 #: The one module allowed to name the root. Everything else asks it.
@@ -81,6 +83,40 @@ def test_the_override_is_honoured_when_the_path_is_used(monkeypatch, tmp_path):
     """A constant would freeze this at import, and the knob would be a comment."""
     monkeypatch.setenv(STATE_ROOT_ENV, str(tmp_path))
     assert state_dir("ledger").parent == tmp_path / STATE_SLUG
+
+
+def test_the_root_says_which_answer_produced_it(monkeypatch, tmp_path):
+    """Both directions, because a source that is always one value says nothing.
+
+    A `Path` cannot report where it came from, and the question is not academic:
+    the whole answer to a broken run can be *the variable was not exported here,
+    so the default answered* — and the default may have moved since.
+    """
+    monkeypatch.delenv(STATE_ROOT_ENV, raising=False)
+    assert state_root() == (STATE_ROOT_DEFAULT, "default")
+
+    monkeypatch.setenv(STATE_ROOT_ENV, str(tmp_path))
+    assert state_root() == (tmp_path, "environment")
+
+
+def test_state_dir_resolves_through_the_reporter(monkeypatch, tmp_path):
+    """`state_dir()` goes THROUGH `state_root()`, rather than agreeing with it.
+
+    A `state_root()` that read the environment separately would report the
+    source of a path nobody resolved — the split-resolver defect this module
+    exists to prevent, wearing the costume of the function that reports on it.
+
+    The obvious test is the one that cannot see it. Setting the variable and
+    asserting `state_dir(...) == state_root().path / ...` passes under the
+    split, because two independent lookups of one environment agree — it was
+    written that way here first, and the plant that should have failed it came
+    back green. Two copies of a mistake agree with each other.
+
+    So the assertion is structural: replace the reporter and require the path to
+    follow. Nothing but a call can do that.
+    """
+    monkeypatch.setattr(paths, "state_root", lambda: paths.StateRoot(tmp_path, "planted"))
+    assert state_dir("ledger") == tmp_path / STATE_SLUG / "ledger"
 
 
 def test_nothing_else_names_the_state_root():

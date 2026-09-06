@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import NamedTuple
 
 #: The repository root. The only place in the tree this is worked out.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -181,6 +182,41 @@ INFLIGHT = "inflight"  # what is running right now; removed in a `finally`
 PRODUCT = "product"  # a job's own output, overwritten every run
 
 
+class StateRoot(NamedTuple):
+    """The root, and which of the two answers produced it."""
+
+    path: Path
+    #: `"environment"` or `"default"`. A string rather than a bool because the
+    #: set of answers is not closed — a config file would be a third — and a
+    #: bool would have to be renamed to admit one.
+    source: str
+
+
+def state_root() -> StateRoot:
+    """The state root, and **where it came from**.
+
+    `state_dir()` returns a `Path`, and a `Path` cannot say which of the
+    override and the default produced it. That is not a cosmetic gap:
+    jam.sense spent an investigation on a broken pane whose whole answer was
+    *the environment variable was not exported here, so the default answered*,
+    and the default had moved. One field would have closed it in a line.
+
+    The two are the same lookup by construction — `state_dir()` calls this
+    rather than repeating `os.environ.get`. A second copy of the resolution is
+    the defect this module exists to prevent, and it would be a particularly
+    quiet one here: a provenance function that read the environment separately
+    would report the source of a path nobody resolved.
+
+    Reported, never acted on. Nothing in this tree should branch on `source` —
+    a caller that behaves differently depending on how the root was found has
+    made the override mean two things.
+    """
+    override = os.environ.get(STATE_ROOT_ENV)
+    if override:
+        return StateRoot(Path(override), "environment")
+    return StateRoot(STATE_ROOT_DEFAULT, "default")
+
+
 def state_dir(*parts: str) -> Path:
     """This project's state root, plus any path below it.
 
@@ -204,5 +240,4 @@ def state_dir(*parts: str) -> Path:
     live one. It passes, and proves nothing. That is not hypothetical: it is
     why this function exists instead of the three definitions it replaced.
     """
-    root = os.environ.get(STATE_ROOT_ENV) or STATE_ROOT_DEFAULT
-    return Path(root, STATE_SLUG, *parts)
+    return Path(state_root().path, STATE_SLUG, *parts)
