@@ -104,7 +104,14 @@ GIT_IDENTITY = {
 }
 
 
-def run(cmd: List[str], cwd: Path, env_extra: Optional[dict] = None) -> Tuple[int, str]:
+def subprocess_env(env_extra: Optional[dict] = None) -> dict:
+    """The environment every subprocess here gets.
+
+    Split out of `run()` because a gate that needs stdout and stderr APART
+    cannot use `run()` — it merges them — and would otherwise build its own
+    environment and drop the identity below. That is the forgetting `run()`'s
+    own comment warns about, one level up.
+    """
     import os
 
     env = dict(os.environ)
@@ -122,7 +129,13 @@ def run(cmd: List[str], cwd: Path, env_extra: Optional[dict] = None) -> Tuple[in
     env.update(GIT_IDENTITY)
     if env_extra:
         env.update(env_extra)
-    proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, env=env)
+    return env
+
+
+def run(cmd: List[str], cwd: Path, env_extra: Optional[dict] = None) -> Tuple[int, str]:
+    proc = subprocess.run(
+        cmd, cwd=str(cwd), capture_output=True, text=True, env=subprocess_env(env_extra)
+    )
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
@@ -462,6 +475,7 @@ def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     results.append(check_docs_gate_sees_the_tree(tree))
     results += check_empty_suite_is_not_red(tree, venv_python)
     results.append(check_upgrade_is_noop(tree))
+    results.append(check_upgrade_json_is_pure(tree))
     results.append(check_groups_register(tree))
     results.append(check_script_targets(tree))
     results.append(check_version_resolves(tree))
@@ -767,6 +781,67 @@ def check_upgrade_is_noop(tree: Path) -> Result:
         passed,
         time.time() - started,
         output + "\n" + offline_output,
+    )
+
+
+def check_upgrade_json_is_pure(tree: Path) -> Result:
+    """`skeletor-upgrade --json` puts a parseable object on stdout and the human
+    report on stderr — on every path a fresh tree can reach, refusals included.
+
+    The template ships `tests/test_output_contract.py`, which asserts exactly
+    this over every `scripts/check_*.py` in a generated tree. skeletor's own
+    tools were never held to it. stash.flow reported the envelope as unparseable
+    from outside, and answering took a hand audit of every `subprocess.run` in
+    the tool, because there was nothing standing to ask. It did not reproduce;
+    the hole that made it expensive to check is real either way, and it is this
+    repository's recurring one — a rule shipped to everybody and not applied
+    here.
+
+    **The second gate that cannot use `run()`**, for the same reason as the
+    pyright one: `run()` merges the streams, and stream separation is the entire
+    question. A gate built on it would report the contract satisfied by
+    construction. `subprocess_env()` exists so that does not also mean losing
+    the git identity.
+
+    Both directions, because "nothing but JSON on stdout" is equally satisfied
+    by a tool that says nothing at all — the human half must still reach stderr.
+    """
+    started = time.time()
+    upgrade = [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--dry-run", "--json"]
+    manifest = tree / ".skeletor.json"
+    recorded = manifest.read_text(encoding="utf-8")
+
+    def check(label: str, extra: List[str]) -> List[str]:
+        proc = subprocess.run(upgrade + extra, cwd=str(tree), capture_output=True, text=True, env=subprocess_env())
+        problems = []
+        try:
+            json.loads(proc.stdout)
+        except ValueError as exc:
+            problems.append(f"{label}: stdout is not one JSON object ({exc})\n{proc.stdout[:400]}")
+        if not proc.stderr.strip():
+            problems.append(f"{label}: nothing reached stderr — the human half went missing")
+        return problems
+
+    problems = check("rendered base", ["--from-dir", str(SKELETOR)])
+    problems += check("offline", ["--no-base"])
+
+    # The refusal, and the path a consumer is likeliest to be parsing when
+    # something has gone wrong. Manufactured the way `sidecar_gate` manufactures
+    # skew — one recorded hash tampered — and restored in a `finally`, because
+    # every gate after this one reads the same tree.
+    payload = json.loads(recorded)
+    payload["files"][sorted(payload["files"])[0]] = "0" * 64
+    try:
+        manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        problems += check("manifest-drift refusal", ["--from-dir", str(SKELETOR)])
+    finally:
+        manifest.write_text(recorded, encoding="utf-8")
+
+    return Result(
+        "skeletor-upgrade --json: stdout parses, the report stays on stderr (3 paths)",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
     )
 
 

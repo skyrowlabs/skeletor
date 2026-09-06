@@ -819,7 +819,7 @@ def main() -> int:
         action="store_true",
         help="run the tree's own formatters over both rendered sides before merging",
     )
-    parser.add_argument("--json", action="store_true", help="emit the result on stdout as well")
+    parser.add_argument("--json", action="store_true", help="the machine-readable result on stdout")
     parser.add_argument(
         "--repair-manifest",
         action="store_true",

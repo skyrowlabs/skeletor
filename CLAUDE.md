@@ -225,6 +225,23 @@ covers a **real** coverage run is the generator's, and the plant that
 establishes it is a `skeletor-new` dropping one file from the manifest: the gate
 goes red and the tree's own six tests stay green.
 
+The refusal is the degenerate case, and above zero the composition is shown
+rather than judged. stash.flow supplied the measured reason, from a tree I had
+predicted was safe: it measures 2222 statements of which 1935 are the
+scaffold's, because bare `--cov` measures what the run *imports* and what the
+scaffold's tests import is the scaffold's scripts. **`populated repository` is
+the wrong predicate for `populated measured set`** — the coverage configuration
+governs, not the repository's history — and it is the predicate anybody would
+reach for, failing in the reassuring direction. So the number is printed before
+the instruction instead of inferred, and no threshold is invented, because
+nothing here knows the distribution of adopted trees.
+
+They then narrowed their own finding and were right to: theirs is a *paused*
+tree, mid-rebuild, so it establishes that the predicate is wrong and nothing
+about what is typical. My first write-up had said "the normal case" — a verified
+number with an unverified description attached, which is a failure this repo had
+already named, committed while writing up somebody else's correction.
+
 That was queued as `--suites`/`--stage` and measuring it killed the flag. Empty
 suites already report as empty and `check health` already says `nothing to probe
 yet`; node-zero's measurement covers the rest, since all 136 tests in a fresh

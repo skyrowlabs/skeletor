@@ -1202,6 +1202,101 @@ got** — a control expected green and a plant expected red cannot both be
 satisfied by an empty run.
 
 
+### The instrument built to tolerate the thing it was detecting
+
+A third face of the same rule, and it arrived as a bug report against this
+repository that turned out not to exist.
+
+stash.flow reported that `skeletor-upgrade --json` puts prose on stdout, so an
+envelope cannot be piped. Answering it took a hand audit of every
+`subprocess.run` in the tool and four measured paths, and it did not reproduce:
+stdout carries the envelope alone on all of them, `detail()` is
+`file=sys.stderr`, and every child process captures. They found their own cause
+in one move and stated it better than the finding:
+
+```
+concluded from:   … --json $T 2>&1 | json.load(sys.stdin)
+                                ^^^^ merged stderr INTO stdout
+"confirmed" by:   … --json $T 2>/dev/null | t=read(); json.loads(t[t.find('{'):])
+                                                             ^^^^^^^^^ tolerates a prefix either way
+```
+
+> **A lenient parser cannot disconfirm the claim that parsing fails.**
+
+Where a plant that does not land means the instrument could not *reach* the
+defect, this is an instrument that could not *notice* it — and the tell is the
+one worth carrying, because it is not carelessness: **the lenient step felt like
+robustness.** `find('{')` is what a careful person writes. So the rule has a
+positive form now: when a check exists to detect malformed input, every
+tolerance in the checker is a place the answer can come from.
+
+**The hole it exposed was real and is the one that cost the hour.** The template
+ships `tests/test_output_contract.py`, which asserts stdout-parses and
+stderr-speaks over every `scripts/check_*.py` in a generated tree — and nothing
+had ever asked it of skeletor's own tools. That is this repository's recurring
+failure, a rule shipped to everybody and not applied here, and it is why the
+answer had to be assembled by hand instead of read off a green check.
+`check_upgrade_json_is_pure` now runs it on every scaffolded tree across three
+paths, the `manifest-drift` refusal included, since a non-zero exit is when a
+consumer is most likely to be parsing.
+
+It is the **second** gate here that cannot use `run()`, for the same reason as
+the pyright one: `run()` merges the streams, and stream separation is the whole
+question, so a gate built on it would report the contract satisfied by
+construction. `subprocess_env()` was split out of `run()` so that "cannot use
+`run()`" does not also mean "builds its own environment and drops the git
+identity", which is the forgetting `run()`'s own comment warns about, one level
+up.
+
+**A withdrawn finding that leaves a standing check behind is worth more than a
+confirmed one that does not.**
+
+A fourth face, from the same peer the same night, and it is the cheapest to
+miss because nothing is written to a file. They pre-registered a prediction
+about an upgrade — good practice, and the habit this document already
+recommends — pinned to `origin/main`. The tag was one commit away, so the
+prediction was about whatever that ref happened to be at read time.
+
+They had argued that morning against storing a "last checked at" field in the
+manifest, on the grounds that *am I current* is not a fact about a tree but
+about its relationship to a moving target, so such a field is stale on write.
+Their own statement of the repeat:
+
+> **The "am I current" asymmetry applies to claims, not only to fields.** A
+> claim whose subject is named by a moving ref goes stale exactly the way the
+> field would, and it is harder to see because nothing was written to a file.
+
+The reason it does not feel like the same mistake is that a ref reads as *a
+place you are looking* rather than *a value you are recording* — and a
+prediction is a recorded value. Pin a stated expectation to an immutable ref, or
+it is not falsifiable by the time anybody checks it.
+
+### A report and its remedy can share a root
+
+Three peers sent reports in one night, each with a proposed fix, and all three
+fixes were withdrawn by their authors while all three findings held. That ratio
+is not a coincidence about those three.
+
+- sky.boss: a real defect in `skeletor-components`, with a discriminator the
+  tool's own docstring already refutes.
+- stash.flow: a real question about `--json`, with the instrument above.
+- jam.sense: a real finding — no estate-wide vintage view — proposing a sibling
+  glob in `skeletor-maintain`, which would bake this workspace's parent
+  directory into a tool other people run. **That is the v0.9.0 defect they had
+  come to report, one level up**, and green over zero siblings is not a passing
+  check but an absent one, which is this repository's empty-set rule.
+
+Their own statement of it is the general one:
+
+> The report and the bad recommendation had the same root.
+
+A remedy proposed from inside a blind spot inherits the blind spot, and it
+arrives carrying the authority of somebody who has just been right — which is
+precisely when nobody checks it. So **a report and its patch are evaluated
+separately even when the report is correct**, and the finder being right about
+the defect is not evidence about the fix.
+
+
 ### The manifest advanced past a file it had just refused to touch
 
 A run that applied some files and conflicted on others copied the head render's
@@ -2595,12 +2690,53 @@ Three things it is careful about:
   adopted by hand or delete the file, and refusing there would make an optional
   file load-bearing for an unrelated command. It is a third value, `None`, and
   the envelope reports it as `null` rather than as a zero.
-- **The refusal is only the degenerate case, and the edge is named rather than
-  guarded.** One test file of your own lifts a tree out of it while the baseline
-  is still 99% the shell. No percentage separates those honestly, so both paths
-  that record or recommend the number now state the composition — `9 of 2786
-  measured statements are your own` — and the reader decides. A threshold would
-  have been a number nobody can defend.
+- **The refusal is only the degenerate case, and what it leaves open is not an
+  edge.** Both paths that record or recommend the number state the composition
+  — `287 of 2222 measured statements are your own` — with the fact printed
+  before the instruction, and the reader decides. A threshold would have been a
+  number nobody can defend.
+
+I put that down as a named edge, reachable but unusual. stash.flow reached it
+from a tree I had just told them was safe from it: an adopted, populated
+repository, 2222 statements measured, **1935 the scaffold's and 287 their own**,
+with the floor still at `0.00%` and the tool offering 76.42%.
+
+I had predicted the opposite to them, in as many words: *"stash.flow adopted
+into a populated repo, so your measured population has your own source in it
+from the start and the refusal will never fire."* The conclusion was right and
+the reason was wrong, which is the worse combination, because a right conclusion
+stops anybody checking. Theirs:
+
+> **Adoption into a populated repository does not imply a populated measured
+> set.** What determines the measured population is the coverage configuration,
+> not the repository's history.
+
+The template ships no `[tool.coverage]` section, so bare `--cov` measures what
+the run *imports*, and what the scaffold's own tests import is the scaffold's
+own scripts. Product source that is not yet under test contributes nothing to
+the denominator however old the repository is. The property I was reasoning
+about was *does this repo have code*; the property that governs is *does the
+measured set contain the adopter's code*, and a populated repo does not
+automatically satisfy the second.
+
+**The claim stops there, and stash.flow stopped it.** I wrote that they had
+measured the shell-dominated case as *the normal* one, and their own throttle
+came back at me: their tree is mid-rebuild, with four directories named in
+`known_first_party` that are not on disk, so it is what a **paused** adopted
+tree looks like. One measurement of one paused tree establishes nothing about
+the distribution. A verified number with an unverified description attached to
+it — the failure this document names two sections earlier, walked into while
+writing up somebody else's correction.
+
+What survives is enough, and it is the better argument anyway. I had been
+justifying the composition line as *most adopted trees are shell-heavy, so show
+the number*, which nobody has measured. The version that does not need the
+distribution: **no cheap predicate tells an adopter whether their measured set
+is shell-dominated**, the obvious one is the one stash.flow falsified, and it
+fails in the reassuring direction. With the predicate a reader would reach for
+wrong and no second one available, the number has to be shown rather than
+inferred. The refusal is the one point on that range where no judgement is
+possible.
 
 #### The half no tree can ask about itself
 

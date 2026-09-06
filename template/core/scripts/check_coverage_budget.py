@@ -31,11 +31,28 @@ until the suite covers source of your own. `own_statements` is the question, and
 the suppression is narrow: it stops the two paths that would WRITE that number
 down, never the comparison. A drop below an existing baseline is still a drop.
 
-The refusal is only the **degenerate** case, and the edge it leaves open is
-named rather than guarded: one test file of your own lifts a tree out of it
-while the baseline is still 99% the shell. No percentage separates those
-honestly, so both paths that record or recommend the number state the
-composition beside it and the reader decides.
+The refusal is only the **degenerate** case, and the range above zero is where
+the judgement lives. It is shown rather than judged for one measured reason:
+
+> **`populated repository` is the wrong predicate for `populated measured set`.**
+
+stash.flow found that from an adopted tree — 2222 statements measured, 1935 of
+them the scaffold's — and the mechanism is the coverage configuration rather
+than the repository's history. With no `[tool.coverage]` section, coverage
+measures what the run *imports*, and what the scaffold's own tests import is the
+scaffold's own scripts. Product source that is not yet under test contributes
+nothing to the denominator however old the repository is.
+
+That matters because it is the predicate anybody would reach for, and it fails
+in the reassuring direction: *this repo is populated, so the number must be
+about us.* With the obvious predicate wrong and no second one going spare, the
+composition has to be **shown** instead of inferred — so both paths that record
+or recommend the number state it, and the fact prints before the instruction.
+
+No threshold is invented, because nothing here knows the distribution of adopted
+trees and a number that guessed at it would be worse than the reader's own eyes.
+Zero earns a refusal because zero is the one point where no judgement is
+possible.
 """
 
 from __future__ import annotations
@@ -96,7 +113,7 @@ def main() -> int:
     parser.add_argument("--suite", default="unit")
     parser.add_argument("--xml", type=Path, default=DEFAULT_XML)
     parser.add_argument("--update", action="store_true", help="record the observed percentage as the new baseline")
-    parser.add_argument("--json", action="store_true", help="emit the result on stdout as well")
+    parser.add_argument("--json", action="store_true", help="the machine-readable result on stdout")
     args = parser.parse_args()
 
     def done(payload: dict, status: int) -> int:
@@ -184,9 +201,9 @@ def main() -> int:
             # undo the one thing the scaffolder got right.
             detail(f"Not yet: {nothing_of_yours}.")
             return done({"state": "unrepresentative", **measured}, 0)
-        detail(f"Lock it in: python scripts/check_coverage_budget.py --suite {args.suite} --update")
         if own is not None:
             detail(composition)
+        detail(f"Lock it in: python scripts/check_coverage_budget.py --suite {args.suite} --update")
         return done({"state": "above", **measured}, 0)
 
     ok(f"{args.suite}: {observed:.2f}% (baseline {baseline:.2f}%)")
