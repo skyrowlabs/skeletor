@@ -278,7 +278,22 @@ def _list_dirty(dirty: List[str]) -> None:
         item(f"... and {len(dirty) - 10} more")
 
 
-def warn_a_dirty_base(base: Path) -> None:
+def render_dirt(checkout: Path) -> List[str]:
+    """Uncommitted content this checkout would render, untracked included.
+
+    The one predicate for *does unversioned content reach this render*, because
+    it had two homes and they disagreed. `copy_overlay` walks the template
+    directory, so an untracked file under `template/` is rendered as readily as
+    a committed one and is exactly as absent from history; a tracked edit
+    outside the render inputs cannot change a byte of it. Both halves matter and
+    `git describe --dirty` gets both wrong — it is untracked-blind and
+    repo-wide, which are precisely the two properties this predicate exists to
+    fix, and it re-entered through a version string.
+    """
+    return [path for path in uncommitted(checkout, untracked=True) or [] if reaches_a_render(path)]
+
+
+def warn_a_dirty_base(base: Path, role: str) -> None:
     """The dry run's half of `refuse_a_dirty_base`: say it, do not refuse it.
 
     Never refusing is right and the silence was not. `--dry-run` writes nothing,
@@ -296,19 +311,29 @@ def warn_a_dirty_base(base: Path) -> None:
     the head render — and with `--from-dir .` those are one directory, so the
     unguarded version printed the same four lines about the same two files. The
     refusal never showed that because it exits on the first call.
+
+    **`role` because two different checkouts arrive here and the noun was
+    hardcoded.** `:902` really is the base; `:938` is the checkout that renders
+    `ours`, which is a different tree whenever the base is a worktree at a tag —
+    and *"the base checkout"* cannot be right at both. node-zero printed the
+    contradiction in one invocation: this line naming their dirty
+    `bin/skeletor-new` as "the base checkout" while the base was a clean
+    worktree at `v0.9.0`, three lines above a sentence that had to say *"the
+    checkout that rendered this"* in order to be true. The fix for one and the
+    proof of the other were in the same output.
     """
-    dirty = [path for path in uncommitted(base, untracked=True) or [] if reaches_a_render(path)]
+    dirty = render_dirt(base)
     if not dirty or base in _WARNED_DIRTY:
         return
     _WARNED_DIRTY.add(base)
-    say("⚠️ ", f"the base checkout has {len(dirty)} uncommitted change(s) — this plan includes them")
+    say("⚠️ ", f"the {role} has {len(dirty)} uncommitted change(s) — this plan includes them")
     _list_dirty(dirty)
     detail()
     detail("A real run from a committed base will differ, and is refused from this one.")
     detail("Read the plan as a statement about a tree that exists on one machine.")
 
 
-def refuse_a_dirty_base(base: Path, writing: str) -> None:
+def refuse_a_dirty_base(base: Path, writing: str, role: str) -> None:
     """A base render nobody can reproduce must not be written into a manifest.
 
     Everything the `files` map promises rests on the base being re-renderable.
@@ -343,17 +368,17 @@ def refuse_a_dirty_base(base: Path, writing: str) -> None:
     general. (proto.pilot's narrowing, and a fair one — the first draft of this
     argued from "write".)
     """
-    dirty = [path for path in uncommitted(base, untracked=True) or [] if reaches_a_render(path)]
+    dirty = render_dirt(base)
     if not dirty:
         return
-    say("❌", f"the base checkout has {len(dirty)} uncommitted change(s) to what it renders:")
+    say("❌", f"the {role} has {len(dirty)} uncommitted change(s) to what it renders:")
     _list_dirty(dirty)
     detail()
     detail(f"{writing} would record hashes of a render that exists in no commit, so the")
     detail("next run resolves the recorded ref, renders something else, and refuses —")
-    detail("permanently. Commit the base checkout first, or use --dry-run to look.")
+    detail(f"permanently. Commit the {role} first, or use --dry-run to look.")
     detail()
-    detail("If the base is somebody else's checkout and they are mid-pass, clone it at a")
+    detail(f"If the {role} is somebody else's and they are mid-pass, clone it at a")
     detail("tag and run THAT copy with no flags:")
     detail()
     detail(f"  git clone {base} /tmp/skeletor-clean && git -C /tmp/skeletor-clean checkout <tag>")
@@ -899,10 +924,10 @@ def main() -> int:
         elif args.from_dir:
             base_src = Path(args.from_dir).expanduser().resolve()
             if args.dry_run:
-                warn_a_dirty_base(base_src)
+                warn_a_dirty_base(base_src, "base checkout")
             else:
                 refuse_a_dirty_base(
-                    base_src, "--repair-manifest" if args.repair_manifest else "The upgrade"
+                    base_src, "--repair-manifest" if args.repair_manifest else "The upgrade", "base checkout"
                 )
             say("→", f"base: {base_src}")
         elif not ref:
@@ -935,9 +960,9 @@ def main() -> int:
         # scaffolded dirty, upgraded, and got `-dirty` back — refreshed, and
         # still unresolvable, because verify runs from a working checkout.
         if args.dry_run:
-            warn_a_dirty_base(SKELETOR)
+            warn_a_dirty_base(SKELETOR, "checkout this renders from")
         else:
-            refuse_a_dirty_base(SKELETOR, "The upgrade")
+            refuse_a_dirty_base(SKELETOR, "The upgrade", "checkout this renders from")
         render_with(SKELETOR, recorded, head_tree)
         head_files = files_under(head_tree)
         # The version this run is comparing the tree against, read out of the
@@ -1545,7 +1570,7 @@ def main() -> int:
             # at base v0.6.0 against skeletor v0.6.1, which is exactly the pair
             # the sentence could not distinguish.
             say("✅", f"already current with skeletor @ {head_ref} — nothing to carry over")
-            if head_ref.endswith("-dirty"):
+            if _WARNED_DIRTY:
                 # The dirty-base warning above says *this plan includes
                 # uncommitted edits*, which is the right thing to say about a
                 # plan and the wrong shape for this line: "already current" does
@@ -1560,14 +1585,34 @@ def main() -> int:
                 # is permanently invisible, and it is the answer a reader most
                 # wants to receive.
                 #
-                # Stated here because what makes it *safe* is a second,
-                # unrelated mechanism: a real run is refused from a dirty base,
-                # so a provisional verdict can never be recorded. That
-                # dependency is worth naming — narrow the dirty-base refusal any
-                # further and this line silently becomes recordable.
-                detail("Provisional: the checkout that rendered this is dirty, so the comparison")
-                detail("includes uncommitted template edits. Commit them, or ask a clean clone at")
-                detail("a tag, before treating 'nothing to carry over' as settled.")
+                # **Conditioned on `_WARNED_DIRTY`, which is the set the
+                # warning above put there — so this note cannot disagree with
+                # it, by construction rather than by assertion.** The first
+                # version keyed on `head_ref.endswith("-dirty")`, and stash.flow
+                # showed both directions of what that costs: a tracked edit to
+                # `docs/` printed "includes uncommitted template edits" when
+                # there were none, and an untracked file under `template/` —
+                # which a render really does read — printed nothing, not even
+                # the `-dirty` suffix this paragraph had called the only signal.
+                # `git describe --dirty` is untracked-blind and repo-wide, the
+                # two properties `reaches_a_render` exists to remove, arriving
+                # back through a version string.
+                #
+                # The tell is worth more than the fix: **the guard was derived
+                # from the text of the line rather than from the claim the line
+                # makes.** `head_ref` was already in that sentence, so reaching
+                # for it cost nothing and read as consistent.
+                #
+                # An earlier comment here claimed the note was kept safe by the
+                # dirty-base refusal, and that coupling did not exist: the
+                # refusal used one predicate and this line another, so they
+                # could already disagree. Now there is one predicate and this is
+                # a rendering of the warning's own finding, so the dependency is
+                # real. What it buys is still the same: a real run is refused,
+                # so a provisional verdict can never be recorded.
+                detail("Provisional: uncommitted content reaches this render, so the comparison")
+                detail("includes it. Commit it, or ask a clean clone at a tag, before treating")
+                detail("'nothing to carry over' as settled.")
             if ref and ref != head_ref:
                 detail(f"{MANIFEST_NAME} still records {ref}, and will keep doing so: it is")
                 detail("re-copied only by a run that applies something. Being behind by a ref and")

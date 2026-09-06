@@ -1844,13 +1844,65 @@ Every other verdict is tested by what happens next — a bad merge shows up, a
 conflict stops you. This one has no next step to fail, so a wrong answer is
 permanently invisible, and it is the answer a reader most wants to receive.
 
-The verdict now says it is provisional when the renderer is dirty. Worth being
-explicit about why this was a message rather than a bug: what makes it *safe* is
-a second, unrelated mechanism — a real run is refused from a dirty base, so a
-provisional verdict can never be recorded. **The safety is the intersection of
-two guards and nothing stated the dependency.** Narrow the dirty-base refusal
-any further and this line silently becomes recordable. That is `a301ca8`
-pointed forward instead of back, and the note is at the site.
+The verdict now says it is provisional when uncommitted content reaches the
+render — and the first version of that fix got the predicate wrong in both
+directions at once, which is the more useful half of the story.
+
+It keyed on `head_ref.endswith("-dirty")`. `git describe --dirty` is
+**untracked-blind and repo-wide**, which are precisely the two properties
+`reaches_a_render` exists to remove — after one untracked `notes.md` at this
+repository's root refused every adopter in a five-repository round — and it
+walked straight back in through a version string. stash.flow measured both
+rows: a tracked edit to `docs/`, unreadable by any render, printed *"includes
+uncommitted template edits"* when there were none; an untracked file under
+`template/`, which a render really does read, printed nothing at all — not even
+the `-dirty` suffix this document had just called *the only signal that any of
+it is provisional*.
+
+> **The guard was derived from the text of the line rather than from the claim
+> the line makes.** `head_ref` was already in that sentence, so reaching for it
+> cost nothing and read as consistent.
+
+That is the third condition-mismatch in three releases and the first with both
+errors in one expression: too small in the `--ported` guard, too large in the
+currency test, and here too small for untracked and too large for
+outside-`template/` — because it answered *is this checkout modified* where the
+question was *does unversioned content reach this render*.
+
+**And the paragraph that stood here was wrong in a way worth leaving visible.**
+It said the note was kept safe by the dirty-base refusal, and called that an
+unstated dependency between two guards. There was no dependency: the refusal
+used `reaches_a_render` and this line used `head_ref`, so the two could already
+disagree, and stash.flow's second row is them disagreeing. An argument that two
+mechanisms are coupled is not the same as their being coupled.
+
+They are now. `render_dirt()` is the single predicate, and the note is
+conditioned on `_WARNED_DIRTY` — the set the warning itself populated — so the
+verdict cannot contradict the line three above it by construction rather than by
+assertion. What the coupling buys is unchanged: a real run is refused, so a
+provisional verdict can never be recorded.
+
+The same finding carried a second one out with it. `warn_a_dirty_base` and
+`refuse_a_dirty_base` hardcoded *"the base checkout"*, and **two different
+checkouts reach them** — the recorded base, and the checkout that renders
+`ours`, which are different trees whenever the base is a worktree at a tag.
+node-zero printed the contradiction in one invocation: their dirty
+`bin/skeletor-new` named as "the base checkout" three lines above a sentence
+that had to say *"the checkout that rendered this"* in order to be true. Both
+functions take a role now.
+
+`dirty_signals_gate`'s third case is the only configuration in which a hardcoded
+noun can be caught at all — base and renderer as genuinely different trees.
+Every other gate here runs them as one directory, where a wrong name is
+indistinguishable from a right one.
+
+Two things it cannot do, stated rather than implied. The pair *already current*
+**and** *provisional* is only reachable with render-reaching dirt that changes no
+rendered byte — a comment in `bin/skeletor-new` — because an untracked file under
+`template/` reaches the render by **adding** a file and therefore always has
+something to carry. And stash.flow's own plant is the method note worth keeping:
+their first attempt put a file at `template/` root, which is not an overlay
+source, so it rendered nothing and **looked exactly like a clean negative**.
 
 ### The scaffold's last word was an instruction to run the thing it had broken
 

@@ -3237,6 +3237,130 @@ def adopted_repo_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     return results
 
 
+def dirty_signals_gate(workdir: Path) -> List[Result]:
+    """The dirt a run reports, and the checkout it names, are both measured.
+
+    Two defects with one shape, found by two trees in one evening.
+
+    **The provisional note keyed on `git describe --dirty`.** That predicate is
+    untracked-blind and repo-wide — precisely the two properties
+    `reaches_a_render` was written to remove, after one untracked `notes.md` at
+    this repository's root refused every adopter in a five-repository round —
+    and it re-entered through a version string. stash.flow measured both
+    directions: a tracked edit to `docs/`, which no render can read, printed
+    *"includes uncommitted template edits"* when there were none; and an
+    untracked file under `template/`, which a render really does read, printed
+    nothing at all, not even the `-dirty` suffix the rationale had called the
+    only signal. Too large in one direction and too small in the other, from one
+    wrong predicate.
+
+    The tell generalises past this: **the guard was derived from the text of the
+    line rather than from the claim the line makes.** `head_ref` was already in
+    that sentence, so reaching for it cost nothing and read as consistent.
+
+    **And the dirty-checkout warning hardcoded "the base checkout"** while two
+    different checkouts reach it — the base at `:912`, the renderer at `:948`,
+    which are different trees whenever the base is a worktree at a tag. node-zero
+    printed the contradiction in one invocation: their dirty `bin/skeletor-new`
+    named as "the base checkout" three lines above a sentence that had to say
+    *"the checkout that rendered this"* in order to be true.
+
+    So the third case here is the one where base and renderer are genuinely
+    different trees, because that is the only configuration in which the noun
+    can be wrong — every other gate runs them as one directory, where a
+    hardcoded name is indistinguishable from a correct one.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    tier = min(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
+    clean = clean_skeletor(workdir)
+    scratch = workdir / "dirty-signals-skeletor"
+    if not scratch.exists():
+        run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(scratch)], cwd=workdir)
+
+    def scaffold_from(checkout: Path, name: str) -> Path:
+        tree = workdir / name / "probe"
+        if tree.exists():
+            shutil.rmtree(tree.parent)
+        run(
+            [sys.executable, str(checkout / "bin" / "skeletor-new"), str(tree),
+             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
+             "--tier", tier, "--language", "python", "--force"],
+            cwd=SKELETOR,
+        )
+        return tree
+
+    def report(tree: Path) -> str:
+        return run([sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree), "--dry-run"], cwd=tree)[1]
+
+    tree = scaffold_from(scratch, "dirty-signals")
+    results = []
+
+    # Outside the render inputs. `docs/` is this repository's own prose: tracked,
+    # so `git describe` calls the tree dirty, and unreadable by any render.
+    outside = scratch / "docs" / "DESIGN_RATIONALE.md"
+    original = outside.read_text(encoding="utf-8")
+    outside.write_text(original + "\n", encoding="utf-8")
+    quiet = report(tree)
+    outside.write_text(original, encoding="utf-8")
+    results.append(
+        Result(
+            "dirty signals: a tracked edit no render reads is not called provisional",
+            "already current" in quiet and "Provisional" not in quiet,
+            time.time() - started,
+            quiet,
+        )
+    )
+
+    # Inside them, and deliberately output-neutral: a comment appended to
+    # `bin/skeletor-new` reaches a render and changes no rendered byte, which is
+    # the only way to reach "already current" AND the provisional note in one
+    # run. An untracked file under `template/` reaches the render by *adding* a
+    # file, so it always has something to carry and can never exercise this pair.
+    started = time.time()
+    renderer = scratch / "bin" / "skeletor-new"
+    was = renderer.read_text(encoding="utf-8")
+    renderer.write_text(was + "\n# a comment: reaches a render, changes no rendered byte\n", encoding="utf-8")
+    loud = report(tree)
+    renderer.write_text(was, encoding="utf-8")
+    results.append(
+        Result(
+            "dirty signals: render-reaching dirt is warned about and the verdict says provisional",
+            "uncommitted change(s)" in loud and "already current" in loud and "Provisional" in loud,
+            time.time() - started,
+            loud,
+        )
+    )
+
+    # Base and renderer as different trees, which is the only shape that can
+    # catch a hardcoded noun.
+    started = time.time()
+    tags = run(["git", "-C", str(scratch), "tag", "--sort=-creatordate"], cwd=scratch)[1].split()
+    if not tags:
+        results.append(Result("dirty signals: no tag to render a separate base from", False, 0.0, ""))
+        return results
+    older = workdir / "dirty-signals-base"
+    if older.exists():
+        run(["git", "-C", str(scratch), "worktree", "remove", "--force", str(older)], cwd=scratch)
+    run(["git", "-C", str(scratch), "worktree", "add", "--detach", "--quiet", str(older), tags[0]], cwd=scratch)
+    try:
+        split = scaffold_from(older, "dirty-signals-split")
+        renderer.write_text(was + "\n# dirty in the RENDERER, while the base worktree is clean\n", encoding="utf-8")
+        named = report(split)
+        renderer.write_text(was, encoding="utf-8")
+    finally:
+        run(["git", "-C", str(scratch), "worktree", "remove", "--force", str(older)], cwd=scratch)
+    results.append(
+        Result(
+            "dirty signals: a dirty renderer is not reported as the base checkout",
+            "renders from has" in named and "the base checkout has" not in named,
+            time.time() - started,
+            named,
+        )
+    )
+    return results
+
+
 def normalise_gate(workdir: Path) -> List[Result]:
     """A conflict written by the adopter's own formatter is resolved by it.
 
@@ -4133,6 +4257,9 @@ def main() -> int:
         results.append(leak)
 
         for gate in ported_only_conflict_gate(workdir):
+            results.append(gate)
+
+        for gate in dirty_signals_gate(workdir):
             results.append(gate)
 
         for gate in normalise_gate(workdir):
