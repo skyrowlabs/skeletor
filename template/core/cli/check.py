@@ -13,6 +13,7 @@ import sys
 import click
 
 from cli.helpers import PROJECT_ROOT, fail, module, ok, run, script, summarize
+from scripts.paths import TMP_DIR
 
 
 @click.group()
@@ -107,19 +108,48 @@ def merge_drivers() -> None:
 @check.command(name="pre-push")
 @click.option("--quick", is_flag=True, help="lint and docs only — skip the test suites")
 def pre_push(quick: bool) -> None:
-    """Everything CI blocks on, in the order that fails fastest.
+    """Every gate CI blocks on that can run on this host, in fail-fastest order.
 
     Lint first because it is seconds and catches most of what CI would reject;
     tests last because they are the expensive half. Every gate still runs even
     after one fails — one fix per round trip is the thing this exists to avoid.
+
+    **The sentence used to be "everything CI blocks on", and it was false.** It
+    omitted `check_skip_budget.py` and `check_commit_subjects.py` — both of
+    which CI blocks on and both of which run fine here — so a reader got a
+    completeness claim from a command that had not run two of the gates about to
+    fail. proto.pilot ran it four times across four upgrades, watched it pass,
+    pushed, and CI went red on the skip budget. **A command that claims a
+    coverage it does not have is worse than one that stays quiet**, because the
+    sentence is doing active work to stop somebody looking.
+
+    Both are here now. The junit report is why `pytest` grew `--junitxml`: the
+    ratchet reads a report rather than a process, and *"I could not measure" is
+    not "the budget is respected"* — it refuses a missing one.
+
+    What is still missing is named rather than implied: **the integration
+    suite**, which CI blocks on and which needs a stack this host does not have.
+    That is the whole of the difference, and `tests/test_pre_push_covers_ci.py`
+    is what keeps this paragraph true — it recomputes the two sets from
+    `ci.yml` and from this function, and fails when a gate is in neither.
     """
     results = [
         ("lint", _lint()),
         ("output discipline", script("scripts/check_output_discipline.py")),
         ("docs", _docs()),
+        # No `--range`, which means HEAD alone — what a local run wants, and the
+        # same script CI runs over the PR's range. Self-guarding: with no
+        # release automation in the tree there is no contract to check and it
+        # says so.
+        ("commit subjects", script("scripts/check_commit_subjects.py")),
     ]
     if not quick:
-        results.append(("unit tests", module("pytest", "tests/", "-m", "unit", "-q")))
+        junit = TMP_DIR / "junit-unit.xml"
+        junit.parent.mkdir(parents=True, exist_ok=True)
+        results.append(("unit tests", module("pytest", "tests/", "-m", "unit", "-q", f"--junitxml={junit}")))
+        results.append(
+            ("skip budget", script("scripts/check_skip_budget.py", "--suite", "unit", "--junit", str(junit)))
+        )
     sys.exit(summarize(results))
 
 

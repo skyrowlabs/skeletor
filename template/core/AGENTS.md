@@ -23,7 +23,7 @@ look optional to anybody not using that tool.
 
 ```bash
 {{SETUP_COMMANDS}}
-./{{CLI}} check pre-push   # everything CI blocks on; green on a fresh tree
+./{{CLI}} check pre-push   # every host-runnable CI gate; green on a fresh tree
 ./{{CLI}} test unit        # the fast suite
 ./{{CLI}} check health     # is the local stack up? (SCAFFOLD: wire the probes)
 ```

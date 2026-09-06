@@ -887,14 +887,30 @@ def check_version_resolves(tree: Path) -> Result:
     git_in(work, "tag", f"v{declared}")
     released = version()
 
+    # And that it names the COMMAND. `prog_name` shipped as the wordmark, so a
+    # tree announced itself with the product's name — which in an adopted repo
+    # is a second command claiming to report the same product's version and
+    # disagreeing with the first. Asserted on the rendered output rather than on
+    # the source line, because the defect is what a reader sees; and both
+    # directions, since `--cli` and `--name` are distinct arguments here only
+    # because this gate passes them that way.
+    # click's format is exactly `{prog_name}, version {version}`, so this is the
+    # whole claim rather than a substring search. The fixture's two candidates —
+    # `--name Probe` and `--cli probe` — differ only in case, which is a weaker
+    # discriminator than this repository likes; the plant is what settles it,
+    # and putting `{{PROJECT_NAME}}` back into `prog_name=` turns this red.
+    announces = f"{CLI_NAME}, version "
+    names_the_command = untagged.startswith(announces)
+
     ok = (
         declared in untagged  # the VERSION fallback is reachable
         and "archive/v1" not in non_release  # a non-release tag is not a version
         and declared in non_release
         and f"v{declared}" in released  # a release tag wins when there is one
+        and names_the_command
     )
     return Result(
-        f"--version reports a release, not any tag ({declared})",
+        f"--version reports a release, not any tag, and names `{CLI_NAME}` ({declared})",
         ok,
         time.time() - started,
         f"untagged: {untagged}\nnon-release tag: {non_release}\nreleased: {released}",

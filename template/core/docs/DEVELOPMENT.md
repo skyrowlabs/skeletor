@@ -55,11 +55,15 @@ refuses to boot rather than failing on the first request that needs the value.
 
 ## The Gates
 
-Everything CI blocks on is runnable locally, with the same invocation:
+Every gate CI blocks on is runnable locally with the same invocation, **except
+the integration suite**, which needs the stack up and so has no host equivalent.
+That one exception is declared in `tests/test_pre_push_covers_ci.py`, which fails
+when CI grows a blocking gate `pre-push` neither runs nor declares — the earlier
+version of this sentence said "everything" and was wrong about three gates.
 
 ```bash
-./{{CLI}} check pre-push        # all of it, in fail-fastest order
-./{{CLI}} check pre-push --quick # lint + docs only, no test suites
+./{{CLI}} check pre-push        # every host-runnable one, in fail-fastest order
+./{{CLI}} check pre-push --quick # no test suites; the rest still run
 ./{{CLI}} check lint            # the blocking lint set
 ./{{CLI}} check docs            # indexes, tables, links, refs, report anchors
 ```

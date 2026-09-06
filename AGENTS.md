@@ -107,7 +107,7 @@ tier. Full flags: `skeletor-new --help`.
 python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
 npm install             # node/both trees only — eslint is a blocking gate
 ./<cli> --help          # every command group registers
-./<cli> check pre-push  # lint + docs + unit tests, all of it
+./<cli> check pre-push  # lint, docs, commit subjects, unit tests, skip budget
 ```
 
 `check pre-push`, not `check docs` and `test unit` separately: those two skip

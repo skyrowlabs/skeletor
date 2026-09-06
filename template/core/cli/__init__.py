@@ -73,7 +73,24 @@ def get_version() -> str:
 
 
 @click.group()
-@click.version_option(version=get_version(), prog_name="{{PROJECT_NAME}}")
+# `prog_name` is the COMMAND, not the wordmark, and this is the only place in
+# this file where that is true. The module docstring, the `requires 'click'`
+# message and the group docstring below are all prose *about the product*, where
+# the dotted form is correct — a file-wide substitution would fix this line and
+# break those three, in the direction the naming canon actually warns about.
+#
+# What a program prints when announcing itself is the thing you type. It shipped
+# as `{{PROJECT_NAME}}`, so `./mh --version` said `mind.head, version unknown`
+# two lines from a `Usage: mh` that was right — and in an adopted tree that is
+# two commands both claiming to report the version of one product and
+# disagreeing, because they are answering different questions: this reports the
+# REPOSITORY's version and the product's CLI reports the product's.
+#
+# It survived because the file contains no correct instance to copy from. click
+# derives the usage line from `sys.argv[0]` itself, so the neighbouring
+# correctness is the framework's, and a reader who checks `--help` sees the
+# right answer and stops. mind.head's, from a tree where both commands exist.
+@click.version_option(version=get_version(), prog_name="{{CLI}}")
 def cli() -> None:
     """{{PROJECT_NAME}} — {{TAGLINE}}"""
 

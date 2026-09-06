@@ -15,9 +15,12 @@
 ./{{CLI}} check pre-push
 ```
 
-`check pre-push` is everything CI blocks on, in the order that fails fastest. On
-a freshly scaffolded tree it passes — if it does not, that is a bug in the
-scaffold, not something to work around.
+`check pre-push` runs every gate CI blocks on that this host can run, in the
+order that fails fastest. The exception is the integration suite, which needs the
+stack up; `tests/test_pre_push_covers_ci.py` holds the two sets to each other, so
+a gate that is in neither is a test failure rather than a surprise on CI. On a
+freshly scaffolded tree it passes — if it does not, that is a bug in the scaffold,
+not something to work around.
 
 ---
 

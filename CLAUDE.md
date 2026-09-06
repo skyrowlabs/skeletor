@@ -856,6 +856,28 @@ interlock, and which you cannot understand from one file:
   `cli/report.py` *generates* its subcommands from it, and
   `tests/test_reporting_jobs.py` asserts both directions plus the prompt files,
   heartbeat variables and cron-collision rules.
+- **`check pre-push` and the partition that keeps its docstring true.** The
+  command opened with *"Everything CI blocks on"* and omitted three gates, two of
+  them host-runnable; proto.pilot found it by pushing four times and watching CI
+  go red on a skip budget `pre-push` had never run.
+  `tests/test_pre_push_covers_ci.py` requires every blocking check in `ci.yml` to
+  be either reachable from `pre_push` or declared in `UNREACHABLE` with a reason
+  — a partition, because "everything is reachable" is red on a fresh tree, the
+  integration suite needing a stack this host does not have. **Blocking is
+  derived from `needs:`, and markers from `pytest.ini`**, which is what stopped
+  the gate's first draft from inventing a suite called `pytest` out of `python -m
+  pytest` and from demanding `pre-push` run the `ui` job that `ci.yml`
+  deliberately keeps out of `needs:`. Both were true statements about `ci.yml`
+  and wrong answers to the question asked.
+
+  The part worth carrying is what the gate could not do: **the false sentence had
+  five homes and fixing the command's docstring left four** — the README,
+  `AGENTS.md`, `docs/rules/testing.md`, and a section heading in
+  `docs/DEVELOPMENT.md` stating it as a property of the repository. A gate proves
+  the behaviour and does nothing for an unlinked restatement of it. A prose gate
+  was considered and declined; the reason is in
+  [`docs/DESIGN_RATIONALE.md`](docs/DESIGN_RATIONALE.md) so the drift is recorded
+  rather than merely unguarded.
 - **The dead-reference check and its clone depth.**
   `tests/test_docs_name_live_code.py` fails when a reference doc names a callable
   the tree once defined and no longer does — it asks git, so a name that was never

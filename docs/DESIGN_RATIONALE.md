@@ -3219,6 +3219,83 @@ cosmetic form of shipping a gate that is red on arrival.
 
 ---
 
+### The completeness claim that stopped four people looking
+
+`check pre-push` opened with *"Everything CI blocks on, in the order that fails
+fastest."* It was not. It omitted `check_skip_budget.py` and
+`check_commit_subjects.py` — both blocking, both perfectly runnable on a host —
+and the integration suite, which is blocking and genuinely is not.
+
+proto.pilot paid for it the expensive way: `pre-push` green, push, CI red on the
+skip budget, four times across four upgrades. The missing gate is not the
+interesting part. **The sentence was doing active work to stop them looking** —
+a gate that is absent announces itself the first time something slips through,
+and a gate that is absent *behind a completeness claim* converts every red CI
+run into a puzzle about CI. This repository ranks that failure worst, and had
+committed it in the docstring of the command it tells every new user to run
+first.
+
+`tests/test_pre_push_covers_ci.py` is the answer, and it is a **partition**
+rather than the obvious assertion. Every blocking check is either reachable from
+`pre_push` or declared in `UNREACHABLE` with a reason; **a check in neither is
+the failure.** The obvious version — every blocking gate is reachable — is red
+on a fresh scaffold, because the integration job needs a stack this host does not
+have. proto.pilot proposed that version and withdrew it on exactly that ground.
+The partition is `cli/test_cmds.py`'s `scheduled` / `UNSCHEDULED` shape reused:
+an exemption has to say which kind it is, and both staleness directions are
+asserted, so an entry outlives its reason loudly.
+
+**The gate found two bugs in itself on its first run, and both are the same
+bug.** `-m` is two flags: `python -m pytest` names a module and `pytest -m unit`
+names a marker, so a pattern that took whatever followed `-m` reported a blocking
+suite called `pytest` — a check that does not exist, invented by the gate whose
+entire job is noticing checks that are missing. And scanning `ci.yml` whole
+reported the `ui` suite, which no job `needs:` and which therefore holds no push
+up. Both are *true statements about `ci.yml` and wrong answers to the question
+asked*, which is this repository's most-repeated failure arriving inside the
+instrument built to catch a version of it.
+
+The `ui` one is worth more than its fix. Left in, the gate would have demanded
+`pre-push` run a suite `ci.yml` deliberately keeps out of `needs:` — and `ci.yml`
+says why, at the `release-please` job: `ui` is the one job a repo with nothing
+marked `ui` deletes, and a `needs:` naming a deleted job is a `startup_failure`
+rather than a red job. So **the correction for a claim that was too weak was, on
+the first run, a claim that was too strong**, in the same file, about the same
+command. The remedy is not a filter on the output: markers are read from
+`pytest.ini` and blocking is derived from `needs:`, which makes both wrong
+answers unrepresentable rather than excluded.
+
+Four plants, each asserting it landed before writing: drop a script from
+`pre_push`, add `ui` to `needs:`, drop `integration` from `needs:`, and point
+`pre_push`'s pytest call at the integration marker. Each goes red on exactly one
+of the four tests. The second is the load-bearing one — without it, `ui` passing
+is indistinguishable from `ui` being skipped for the wrong reason.
+
+**The sentence had five homes and fixing the docstring left four.** The README
+said "everything CI blocks on", `AGENTS.md` said "everything CI blocks on",
+`docs/rules/testing.md` said "everything CI runs, locally", and
+`docs/DEVELOPMENT.md` opened a section with the strongest form of all —
+*"Everything CI blocks on is runnable locally, with the same invocation"* — as a
+property of the repository rather than a note on a command. The docstring is the
+copy the author is looking at while fixing the command; the other four are the
+copies a reader consults. A test that holds the *behaviour* to the truth does
+nothing at all for four prose copies of the false claim, which is the limit
+worth stating: **a gate proves the thing, and every unlinked restatement of the
+thing is still unproven.**
+
+A prose gate was considered and declined, with the reason recorded here rather
+than left as silence. A sound derived predicate exists — the tree knows
+`UNREACHABLE`, so while it is non-empty any doc asserting `pre-push == CI` is
+false — but the only enrolment available is "a line naming `check pre-push`",
+and the only requirement expressible is "the surrounding block names the
+exception". That would force a one-line quickstart comment to carry the
+integration caveat in four documents whose job is to be short. The alternative,
+a word list of superlatives, is the registry Rule 2 exists to refuse. So the
+five sentences are simply true now, and this paragraph is the record that the
+drift is unguarded.
+
+---
+
 ## Honest assessment: what is over-built
 
 Not everything here is worth copying, and the shell reflects that.
