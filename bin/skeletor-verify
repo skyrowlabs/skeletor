@@ -4694,6 +4694,143 @@ def entry_point_gate() -> Result:
     )
 
 
+#: The one site where a home-relative path to this checkout is correct, and the
+#: reason, checked against the file on every run. `bin/skeletor-install-skill`
+#: rewrites this line with `sed "s|^SKELETOR=.*|SKELETOR=$SKELETOR|"` and then
+#: VERIFIES the rewrite with `grep -qxF` — because `sed` matching nothing exits
+#: 0 and would leave the skill aimed at a path on nobody's machine. So the value
+#: committed here is a placeholder that cannot reach a user unrewritten, which
+#: is the opposite of every other occurrence: those are read as written.
+#:
+#: One entry, and that is the bar. If this needs a second, the predicate is
+#: wrong and the fix is a tighter predicate — the rule this repository reached
+#: from the ledger detector, which shipped with an allowlist of five and a
+#: predicate that was describing the wrong shape.
+PATH_LITERAL_ALLOWED = {
+    ".claude/skills/new-project/SKILL.md": (
+        "^SKELETOR=",
+        "bin/skeletor-install-skill rewrites this line per checkout and verifies the rewrite",
+    ),
+}
+
+
+def checkout_path_literal_gate() -> List[Result]:
+    """No file names the author's own path to this checkout.
+
+    `README.md` shipped three of them — the install-skill bootstrap, the Route 2
+    prompt, and the `skeletor-new` invocation — each naming a directory that
+    exists on one machine. The bootstrap is the one that proves the class: it is
+    the command that INSTALLS the skill, so it provably runs before any
+    `SKELETOR=` rewrite could have happened, and a reader following it verbatim
+    is a reader with no such directory.
+
+    `d5ab96c` fixed the three and shipped no mechanism, which left this
+    repository carrying a live instance of a class it had just named in prose —
+    `AGENTS.md` says *a path in prose is wrong for every checkout but the one it
+    was authored on*, and a rule whose only enforcement is a sentence stating it
+    is the thing that sentence is about.
+
+    **The needle is derived, not written.** It is `SKELETOR.name` behind a home
+    prefix, so this file contains no occurrence of the string it hunts and
+    cannot be its own finding. That is not tidiness: the alternative is
+    exempting the detector's own source, which would be a second allowlist entry
+    for a reason unrelated to the first, and the count is how you notice a
+    predicate is wrong. It also fixes the sharper failure — **a pattern that
+    matches the thing doing the matching** — which cost the other skeletor
+    session a killed verify run this afternoon, when `pkill -f
+    "bin/skeletor-verify"` matched the shell running it.
+
+    Deriving from the directory name rather than hardcoding one also states the
+    right rule. The defect is not the six letters; it is *this checkout's own
+    location, written down where a stranger will read it*.
+    """
+    started = time.time()
+    # Assembled rather than spelled — see the docstring. The prefixes are the
+    # three spellings a shell expands to the same place.
+    needle = "/" + SKELETOR.name
+    pattern = re.compile("(" + "|".join(re.escape(h) for h in ("~", "$HOME", "${HOME}")) + ")" + re.escape(needle))
+
+    results = []
+
+    # The plant, both directions, before anything is scanned. A detector that
+    # finds nothing and one that cannot find anything are the same green.
+    if not pattern.search("cd ~" + needle + " && bin/skeletor-new"):
+        results.append(Result("path literals: the detector finds a planted path", False, time.time() - started, ""))
+        return results
+    if pattern.search("a path in prose is wrong for every checkout"):
+        results.append(Result("path literals: the detector fires on innocent prose", False, time.time() - started, ""))
+        return results
+
+    code, listing = run(["git", "-C", str(SKELETOR), "ls-files"], cwd=SKELETOR)
+    if code != 0:
+        results.append(Result("path literals: git could not list the tree", False, time.time() - started, listing))
+        return results
+    tracked = [line for line in listing.splitlines() if line.strip()]
+    if len(tracked) < 50:
+        results.append(
+            Result(
+                "path literals: the scan found the tree",
+                False,
+                time.time() - started,
+                f"git ls-files returned {len(tracked)} path(s) — a scan this small proves nothing",
+            )
+        )
+        return results
+
+    # Every allowlist entry is checked against the thing it exempts, on every
+    # run. An entry whose file left the tree is worse than one whose file was
+    # fixed: the path can come back for something else and arrive pre-exempted.
+    stale = []
+    for path, (line_pattern, _reason) in PATH_LITERAL_ALLOWED.items():
+        target = SKELETOR / path
+        if not target.exists():
+            stale.append(f"{path} — exempted, but not in the tree any more")
+            continue
+        lines = [ln for ln in target.read_text(encoding="utf-8").splitlines() if re.search(line_pattern, ln)]
+        if not lines:
+            stale.append(f"{path} — no line matches {line_pattern!r}; the exemption names nothing")
+        elif not any(pattern.search(ln) for ln in lines):
+            stale.append(f"{path} — the {line_pattern!r} line no longer holds the literal; delete this entry")
+    results.append(
+        Result(
+            f"path literals: every exemption is still true ({len(PATH_LITERAL_ALLOWED)} entry)",
+            not stale,
+            time.time() - started,
+            "\n  ".join(stale),
+        )
+    )
+
+    findings = []
+    for relative in tracked:
+        target = SKELETOR / relative
+        try:
+            text = target.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        allowed = PATH_LITERAL_ALLOWED.get(relative)
+        for number, line in enumerate(text.splitlines(), 1):
+            if not pattern.search(line):
+                continue
+            if allowed and re.search(allowed[0], line):
+                continue
+            findings.append(f"{relative}:{number}: {line.strip()[:100]}")
+
+    results.append(
+        Result(
+            f"path literals: no file names this checkout's own path ({len(tracked)} tracked)",
+            not findings,
+            time.time() - started,
+            (
+                "a reader in another checkout follows these to a path they do not have:\n  "
+                + "\n  ".join(findings)
+            )
+            if findings
+            else "",
+        )
+    )
+    return results
+
+
 def unlinted_source_gate(workdir: Path) -> List[Result]:
     """Every language a configuration ships source for ships its linter too.
 
@@ -4916,6 +5053,7 @@ def main() -> int:
         results.append(manifest_args_gate())
         results.append(tagline_required_gate(workdir))
         results += unlinted_source_gate(workdir)
+        results += checkout_path_literal_gate()
         venv_python = make_venv(workdir, args.quiet)
         results.append(shadow_gate(workdir, venv_python))
         results.append(dirty_scope_gate(workdir))

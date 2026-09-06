@@ -3585,6 +3585,114 @@ that is not looking.
 
 ---
 
+### A gate that ran on every laptop and in no CI anywhere
+
+`tests/test_pre_push_covers_ci.py` compares two sets and subtracts them in one
+direction:
+
+```python
+orphans = sorted(set(blocking) - reached - set(UNREACHABLE))
+```
+
+`blocking` is what `ci.yml` gates on, `reached` is what `pre_push` runs. Its
+three sibling tests all police `UNREACHABLE` itself. Every one of them takes
+`ci.yml` as the authority and asks whether `pre-push` keeps up — which is the
+right premise for every check the template shipped, and inverts for the one it
+did not.
+
+**No shipped workflow installed node.** Zero occurrences of
+`npm|setup-node|vitest|eslint|yarn|pnpm` across `ci.yml`,
+`docs-validation.yml`, `pr-draft-discipline.yml` and `coverage-nightly.yml`, and
+`template/node/` ships no workflow of its own. Meanwhile `cli/check.py::_lint()`
+runs `npm run lint:check` whenever `eslint.config.js` exists, and `pre_push`
+calls `_lint()`. So eslint was a gate that ran on every developer's machine and
+in no CI anywhere, and **`nothing computes `_pre_push_reaches() - blocking``**,
+so the set difference that would have found it is the one nobody wrote.
+
+The reason it survived here is a variant rather than a repeat of
+`gated_language`. `bin/skeletor-verify` **does** run `npm run lint:check` and
+`npm run format:check`, on the `agentic/both` tree. The node lints were covered
+— in the generator's grid. **A gate that runs upstream can mask its own absence
+downstream**, and from inside this repository that coverage looked general.
+dream-doll found it by being the fleet's only `--language node` adopter and
+watching six green jobs run none of their product's checks.
+
+The steps go in the existing `lint` job rather than a new one, and that is a
+constraint rather than a preference: `lint` is already in `release-please`'s
+`needs:`, so a new job would put a fifth name in that list, and a `needs:`
+naming a job a tree deletes is the `startup_failure` this document already
+records against the `ui` marker. They guard the way the release job guards its
+config — a `run:` step setting an output from `[ -f package.json ]`, an
+`::notice` when absent, and `if:` on the four that follow — so the job still
+runs and still reports whatever a tree ships.
+
+Two narrowings, because the first report overstated in the direction that makes
+a fix look more urgent. The template's `package.json` ships `lint:check`,
+`lint:fix`, `format:check` and `format` and no `test`, `build` or `typecheck`,
+so *"CI never tests the product"* is true of an adopter who added those and
+overstated for a fresh scaffold, where there is nothing yet to test. And the
+`ui` and `integration` jobs collecting zero tests and passing is the empty-suite
+tolerance working, not a symptom of this.
+
+`lts/*` rather than a pinned node, deliberately: this template ships no lockfile
+and no `engines` field, so there is no version here to be faithful **to**, and a
+number invented in a generator is one every adopter inherits and nobody
+maintains. `npm install --no-audit --no-fund` rather than `npm ci` for the same
+reason — `ci` needs the lockfile — and it is the flag set `bin/skeletor-verify`
+already uses, so the grid and the tree install identically.
+
+### A detector that would have been its own first finding
+
+`d5ab96c` removed three home-relative literals naming this checkout from
+`README.md` and shipped no mechanism, which left this repository carrying a live instance of a class it had
+just named in prose: `AGENTS.md` says *a path in prose is wrong for every
+checkout but the one it was authored on*, and a rule whose only enforcement is a
+sentence stating it is precisely the thing that sentence is about.
+
+The gate is unremarkable. What is worth recording is the shape of the trap it
+had to avoid, because it was demonstrated the same afternoon: a session ran
+`pkill -f "bin/skeletor-verify"` inside a compound command whose own argv
+contained that string, matched the shell running it, and killed its own grid at
+the first statement — reported as `exit 144` with empty output, which reads
+exactly like a failed verification rather than a self-inflicted one. **A pattern
+that matches the thing doing the matching.**
+
+A scan for `~/<checkout>` written the obvious way is that bug: the detector's
+own source contains the literal, so the gate is its own first finding. The
+available answers are to exempt the detector's own file — a second allowlist
+entry, for a reason unrelated to the first, and the count of entries is how you
+notice a predicate is wrong — or to make the collision impossible. The needle is
+assembled from `SKELETOR.name` behind a home prefix, so no occurrence of the
+string exists in the file that hunts it. **A gate that cannot be its own finding
+by construction beats one that is careful not to be.**
+
+Deriving it also states the better rule: the defect was never those six letters,
+it is *this checkout's own location, written where a stranger will read it*.
+
+**Its first red was this section.** The paragraph above originally spelled the
+literal it describes, so the gate's opening run failed on the document
+explaining the gate — which is the vocabulary problem sky.boss named from a
+doc-link check: prose *about* a notation that no predicate over the notation can
+see out of. The available fix was a second allowlist entry, and the bar this
+repository sets is that a second entry means the predicate is wrong. The prose
+was reworded instead, to *three home-relative literals naming this checkout*,
+which is both exempt-free and the more accurate sentence — the finding was never
+about those six characters. **An exemption would have bought a worse document.**
+
+**What it cannot see, written down rather than guarded.** `SKELETOR.name` is
+where the repository *sits*, not what it *is*. In a checkout cloned to another
+name the gate hunts for a needle nobody would write and finds nothing —
+silently, which is the direction that does not announce itself. The same
+confusion is a live bug one function away in `author_tokens()`, whose docstring
+says *"the checkout's own name is excluded"* and implements it as
+`part != SKELETOR.name`; a `git clone .` records origin as `<path>/.`, the owner
+regex reads the trailing `.` as the repository and shifts one component left
+onto `skeletor` itself, and the exclusion is looking somewhere else entirely.
+Both want identity from the remote rather than from the directory, and the
+malformed-origin case defeats the naive version of that fix too — the repo
+component of `<path>/.` is `.`. Filed, unfixed, and stated here so the next
+reader does not have to rediscover that the two are one bug.
+
 ## Honest assessment: what is over-built
 
 Not everything here is worth copying, and the shell reflects that.

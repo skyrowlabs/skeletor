@@ -136,6 +136,40 @@ cannot see is written down instead of guarded — another repo's path that
 *collides* with one of ours reads as a local dangling reference, which is how
 jam.sense's `cli/worktree.py` surfaced.
 
+Two gates ask questions about **languages the grid does not execute**, which is
+the standing hole `gated_language = "python"` leaves: every language is
+scaffolded, so an unrendered placeholder is caught, and only python trees have
+their own suites run.
+
+`unlinted_source_gate` asserts that every configuration ships a linter for the
+source it ships, for every `--language` the parser offers — `none` included,
+which is **not** in `configurations()`, since that helper enumerates
+`LANGUAGE_OVERLAYS` and `none` ships no overlay to enumerate. It reads
+`LANGUAGE_CONFIGS` out of the generated `cli/check.py`, so a fourth linter added
+there is covered on the next run. It exists because `.flake8`,
+`pyproject.toml` and `pyrightconfig.json` shipped in `template/python/` while
+the source they govern ships at `core`, so a `--language node` tree arrived with
+52 python files, ran eslint alone, and printed `✅ all 1 gates passed`.
+
+`checkout_path_literal_gate` forbids a home-relative path to this checkout in
+any tracked file. Its needle is **assembled from `SKELETOR.name`, never
+spelled**, so the file that hunts the string contains no occurrence of it and
+cannot be its own first finding — the alternative being an allowlist entry for
+the detector's own source, which is the second entry that means the predicate is
+wrong. One entry, `SKILL.md`'s `^SKELETOR=` line, checked three ways every run:
+the file exists, a line matches, and that line still holds the literal.
+
+**Both are limited by the same confusion and it is written down rather than
+guarded.** `SKELETOR.name` is where this repository *sits*, not what it *is*, so
+in a checkout cloned to another name the path gate hunts a needle nobody would
+write and finds nothing, silently. `author_tokens()` has the live form of it:
+its docstring says the checkout's own name is excluded and implements that as
+`part != SKELETOR.name`, while a `git clone .` records origin as `<path>/.` and
+the owner regex reads the trailing `.` as the repository, shifting the capture
+one component left onto `skeletor` itself. Identity belongs to the remote rather
+than the directory, and the malformed-origin case defeats the naive version of
+that fix as well.
+
 That empty-suite gate named `integration` until it had to name two things. A
 suite whose tests a scaffold cannot ship is red on arrival unless the CLI
 tolerates an empty selection, and the gate is what proves the tolerance — so

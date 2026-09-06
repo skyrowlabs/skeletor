@@ -166,6 +166,56 @@ jobs:
           pip install pyright==1.1.411
           pyright --project pyrightconfig.json
 
+      # ── Node, when this project has one ─────────────────────────────────
+      # SCAFFOLD-OPTIONAL package.json
+      # Absent under `--language python` and `--language none`. Guarded the way
+      # the release job guards its config, and for the same reason: this job is
+      # in `release-please`'s `needs:`, so it must RUN and REPORT whatever a
+      # tree ships. It just has nothing to do here.
+      #
+      # These four steps exist because nothing shipped them. `.flake8`,
+      # `eslint.config.js` and `package.json` all configure gates that
+      # `{{CLI}} check pre-push` runs, and until now only the python half was
+      # ever run by CI — so a `--language node` tree lint-checked its product on
+      # the author's laptop and nowhere else. `tests/test_pre_push_covers_ci.py`
+      # could not see it: it asks whether `pre-push` keeps up with `ci.yml`, and
+      # this was the opposite gap, a gate in `pre-push` and in no CI at all.
+      - name: Is there a node toolchain
+        id: node
+        run: |
+          if [ -f package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Node::no package.json here — this repository ships no node toolchain"
+          fi
+
+      # `lts/*` rather than a pin, and deliberately: this template ships no
+      # lockfile and no `engines` field, so there is no node version here to be
+      # faithful TO, and a number invented in a generator is one every adopter
+      # inherits and nobody maintains. Pin it in your own tree once you have a
+      # lockfile. No `cache: npm` for the same reason — it fails outright
+      # without one.
+      - uses: actions/setup-node@v4
+        if: steps.node.outputs.present == 'true'
+        with:
+          node-version: 'lts/*'
+
+      # Same flags as `bin/skeletor-verify` uses, so the generator's grid and
+      # the tree's own CI install the toolchain identically. `npm ci` would be
+      # stricter and needs the lockfile this template does not ship.
+      - name: Install node toolchain
+        if: steps.node.outputs.present == 'true'
+        run: npm install --no-audit --no-fund
+
+      - name: eslint
+        if: steps.node.outputs.present == 'true'
+        run: npm run lint:check
+
+      - name: prettier
+        if: steps.node.outputs.present == 'true'
+        run: npm run format:check
+
   # ── Unit tests ──────────────────────────────────────────────────────────
   # Ungated by full_suite: the host-side suite is minutes, and it is the check
   # most likely to catch the thing a docs-only detector got wrong.
