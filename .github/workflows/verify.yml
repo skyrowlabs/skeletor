@@ -47,9 +47,28 @@ jobs:
       # scaffolder rather than repeated here: a hard-coded version would be a
       # second copy that goes stale the day the default moves, and it would go
       # stale silently — green CI on an interpreter no user gets.
+      #
+      # Asked of the PARSER, not of the source text. This was a `sed` matching
+      # `"--python", default="..."` on one line, and it broke the day that
+      # argument grew a `help=` and black split it across four — the value was
+      # unchanged and its spelling was not. `${version:?}` turned that into a
+      # loud failure rather than an empty interpreter, which is the only reason
+      # it cost ten seconds instead of a green run on the wrong python.
+      #
+      # `bin/skeletor-verify` reads the same defaults the same way
+      # (`load_scaffolder`, `build_parser`), so the grid and this workflow now
+      # agree by construction rather than by two readers of one file.
       - id: python
         run: |
-          version=$(sed -n 's/.*"--python", default="\([0-9.]*\)".*/\1/p' bin/skeletor-new)
+          version=$(python3 - <<'READ'
+          import importlib.machinery, importlib.util
+          loader = importlib.machinery.SourceFileLoader("scaffolder", "bin/skeletor-new")
+          spec = importlib.util.spec_from_loader(loader.name, loader)
+          module = importlib.util.module_from_spec(spec)
+          loader.exec_module(module)
+          print(module.build_parser().get_default("python"))
+          READ
+          )
           echo "version=${version:?could not read the scaffold default from bin/skeletor-new}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@v7
