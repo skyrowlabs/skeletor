@@ -1797,6 +1797,50 @@ resolver now. And `AGENTS.md`'s Rule 14 stated the path in prose, which
 Python. The rule forbidding a second definition of the path contained one; it
 names `state_dir()` and tells the reader to ask it.
 
+### The record was right and the report was not
+
+`skeletor-components report` said `⬆️ scripts/paths.py — upstream moved since
+v0.7.0; this copy is untouched` about a file sky.boss had cut from 159 lines to
+63 **before recording it**. `local_sha` is captured at `record` time, so it
+baselines whatever the file was at that moment: edit-then-record and take-as-is
+are indistinguishable from then on, permanently. The sentence is accurate about
+what the hash measures and wrong about what a reader takes from it.
+
+It is not an edge case. **Adoption is when nearly all forking happens** — you
+take a file, cut what does not apply, record — so the blind case is the common
+one. It reproduces in jam.sense at a different ref for a different adopter, with
+two of three "untouched" lines false, and the row worth fixing first is the
+green one: a fork rendering as `✅ current` is the same false claim on a line a
+reader skimming for `⬆️` never stops at.
+
+The consequence compounds in the costly direction. On a fork, *"upstream moved"*
+usually means *check whether the change even applies to what you kept* — and
+sky.boss's `paths.py` was the state-root fix, which they had already answered by
+**deleting** the block rather than re-defaulting it. A reader trusting
+"untouched" pulls back in the thing they removed on purpose.
+
+**The obvious repair is unsound, and the tool's own docstring already said so.**
+`source_sha != local_sha` at record time looks like the fork signal and is not:
+`source_sha` is raw template and `local_sha` is the adapted copy, so the two
+differ for every file carrying a `{{...}}` placeholder however faithfully it was
+taken. `scripts/paths.py` has two. Adopting that rule reports a fork for every
+verbatim take of a templated file — the same false reading facing the other way,
+and harder to doubt, because it fires on real forks too.
+
+So the fix is words, and only words: every sentence now says **"since you
+recorded it"**, which is exactly what the comparison measures. Telling a fork
+from a verbatim take needs a fact the record does not hold, and saying less
+beats saying it wrongly.
+
+sky.boss named the class, and it is the one this document has been accumulating
+all round: **the record was right and the report was not.** `--force` recorded
+its overwrites correctly and printed them after the write; `--ported` performed
+or skipped the advance correctly and announced it unconditionally; the currency
+verdict computed correctly and was gated out of existence. Four instances, one
+shape — *the artifact is sound and the sentence about it is not* — which is
+worth more than any of them individually, because it says where to look next in
+a tool whose entire product is a report.
+
 ### The justification travelled to the other door and the mechanism did not
 
 `bin/skeletor-upgrade` has refused a dirty base since `5230a7c`, because a

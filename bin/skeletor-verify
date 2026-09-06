@@ -3988,8 +3988,12 @@ def components_gate(workdir: Path) -> List[Result]:
         payload = json.loads(out[out.index("{") : out.rindex("}") + 1])
         return {row["path"]: row["state"] for rows in payload["components"].values() for row in rows}
 
+    def human() -> str:
+        return run([sys.executable, str(tool), "report", str(consumer)], cwd=workdir)[1]
+
     started = time.time()
     fresh = states()
+    fresh_prose = human()
 
     data = json.loads(recorded.read_text(encoding="utf-8"))
     files = data["components"]["output-contract"]["files"]
@@ -3999,6 +4003,7 @@ def components_gate(workdir: Path) -> List[Result]:
     files["scripts/allowlist.py"]["local_sha"] = "0" * 64  # we edited ours
     recorded.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     falsified = states()
+    moved_prose = human()
 
     data["components"]["output-contract"]["files"]["scripts/output.py"]["local_sha"] = "0" * 64
     recorded.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -4027,6 +4032,32 @@ def components_gate(workdir: Path) -> List[Result]:
     clean["components"]["output-contract"]["files"][first]["local_sha"] = "0" * 64
     recorded.write_text(json.dumps(clean, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     local_edit_only = drift_exit()
+
+    # The report is the entire product — this tool never merges and never writes
+    # — so a sentence a reader mis-takes is the whole failure surface. It said
+    # *"this copy is untouched"*, which is true of the hash and false of the
+    # file: the baseline is `record` time, so a file forked BEFORE recording
+    # reads as pristine for ever. sky.boss found it on a copy they had cut from
+    # 159 lines to 63, and it reproduced in jam.sense — two of three "untouched"
+    # lines false, at a different ref for a different adopter. Adoption is when
+    # nearly all forking happens, so the blind case is the common one.
+    #
+    # Asserted on both the ⬆️ line and the ✅ one, because the green state is the
+    # same false claim on a line a reader skimming for drift never stops at.
+    # Word-level and deliberately so: the record cannot support a stronger
+    # assertion, and the fix was to stop claiming more than it measures.
+    qualified = "since you recorded it"
+    results.append(
+        Result(
+            "components: no report line claims the copy is untouched",
+            qualified in fresh_prose
+            and qualified in moved_prose
+            and "untouched" not in fresh_prose
+            and "untouched" not in moved_prose,
+            0.0,
+            f"current:\n{fresh_prose}\nupstream moved:\n{moved_prose}",
+        )
+    )
 
     results.append(
         Result(

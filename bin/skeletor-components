@@ -165,6 +165,37 @@ def classify(tree: Path, entry: dict) -> Tuple[str, str]:
 
     Two comparisons that never touch each other — see the module docstring on
     why one hash cannot serve both.
+
+    **Every sentence here says "since you recorded it", and the words are the
+    fix.** They used to say *"this copy is untouched"*, which is accurate about
+    what the hash measures and wrong about what a reader takes from it: the
+    baseline is the file at `record` time, so a file forked *before* being
+    recorded is indistinguishable from one taken verbatim, for ever. sky.boss
+    read `⬆️ scripts/paths.py — this copy is untouched` about a file they had cut
+    from 159 lines to 63 before recording, and it reproduces in jam.sense at a
+    different ref for a different adopter — two of three "untouched" lines false
+    there.
+
+    **Adoption is when nearly all forking happens**, so the blind case is the
+    common one, and the consequence runs the wrong way: on a fork, *"upstream
+    moved"* usually means *check whether the change even applies to what you
+    kept*, and a reader trusting "untouched" pulls back in a block they deleted
+    on purpose. sky.boss's `paths.py` was exactly that — the state-root fix,
+    which they had already answered by deleting the block.
+
+    The state that reads worst is the green one. A fork showing `✅` is the same
+    false claim on a line a reader skimming for `⬆️` never stops at, which is why
+    that sentence changed too.
+
+    **What this deliberately does not do is guess which it was.** The obvious
+    discriminator — `source_sha != local_sha` at record time — is unsound, and
+    the module docstring already says why: `source_sha` is raw template and
+    `local_sha` is the adapted copy, so the two differ for every file carrying a
+    `{{...}}` placeholder however faithfully it was taken. `scripts/paths.py`
+    has two. Adopting that rule would report a fork for every verbatim take of a
+    templated file — the same false reading facing the other way, and harder to
+    doubt because it fires on real forks too. Telling the two apart needs a fact
+    the record does not hold, and saying less is better than saying it wrongly.
     """
     ref = entry["ref"]
     source = entry["source"]
@@ -181,12 +212,12 @@ def classify(tree: Path, entry: dict) -> Tuple[str, str]:
     edited = local_now != entry.get("local_sha")
 
     if moved and edited:
-        return "both", f"upstream moved since {ref}, and this copy was edited"
+        return "both", f"upstream moved since {ref}, and this copy changed since you recorded it"
     if moved:
-        return "upstream", f"upstream moved since {ref}; this copy is untouched"
+        return "upstream", f"upstream moved since {ref}; your copy is unchanged since you recorded it"
     if edited:
-        return "local", f"this copy was edited; upstream unchanged since {ref}"
-    return "current", f"unchanged since {ref}"
+        return "local", f"this copy changed since you recorded it; upstream unchanged since {ref}"
+    return "current", f"unchanged on both sides since you recorded it at {ref}"
 
 
 def report(tree: Path, as_json: bool, fail_on_drift: bool = False) -> int:
