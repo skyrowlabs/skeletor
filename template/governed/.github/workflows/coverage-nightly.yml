@@ -12,6 +12,32 @@ name: Nightly Coverage
 # ci.yml had, so three tests failed every run for two days and had never once
 # been green, while the same tests passed on pull requests.
 
+# NEITHER TRIGGER BELOW FIRES UNTIL THIS FILE REACHES THE DEFAULT BRANCH, and
+# that is a property of the repository's settings rather than of anything here.
+# `skeletor-new` defaults to `--base-branch develop` while `gh repo create`
+# commonly leaves `default_branch` at `main`, so a scaffolded tree is in that
+# state by construction and nothing in it can say so.
+#
+# Measured across seven trees: one with this file on its default branch has four
+# successful `schedule` runs; one with the identical file on a non-default
+# branch went five days and five cron windows with zero scheduled runs of any
+# workflow. `workflow_dispatch` is not the escape hatch it looks like either —
+# `gh workflow run` answers `404: workflow not found on the default branch`
+# until some event has fired this file, so **the manual override is unavailable
+# exactly when the automatic one has not run.**
+#
+# The remedy is one API call, and it is written here rather than behind a
+# pointer because the pointer was wrong: the first draft of this comment sent
+# you to the generator's own setup guide, which no scaffolded tree ships. This
+# tree's `scripts/check_source_doc_refs.py` caught it, which is the check
+# working — a fact that lives outside every file still has to be actionable
+# from inside this one.
+#
+#     gh api -X PATCH repos/<org>/<slug> -f 'default_branch=<this branch>'
+#
+# Until then this job is not red and not skipped — it is unregistered, which is
+# the state with nothing to query. Locking in a coverage ratchet and giving it
+# no runner is `continue-on-error` reporting success one workflow over.
 on:
   schedule:
     - cron: '15 4 * * *'

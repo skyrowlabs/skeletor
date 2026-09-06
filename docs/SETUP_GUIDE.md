@@ -288,10 +288,53 @@ survive are that nobody has measured that guarded form on a runner, and that
 an extra step is a different shape and costs a verification grid this project
 does not have. Both are reasons to wait, not reasons it is impossible.
 
-**This is the one setup step no gate here can check.** Every check a scaffolded
-tree ships asks whether the tree is consistent with itself; this is a fact about
-the account the tree runs under. A repository can be entirely green and still
-have a release pipeline that fails the first time somebody uses it.
+**Set the default branch, and it is not the same field as `--base-branch`.**
+`skeletor-new` defaults to `--base-branch develop`, so `git init -b develop`
+gives the tree one branch called `develop` — and `gh repo create` sets the
+repository's `default_branch` to whatever it pushes first. Those are two
+different fields and only one of them governs whether a workflow runs:
+
+```bash
+gh api -X PATCH repos/<org>/<slug> -f 'default_branch=develop'
+```
+
+Three things were measured across this fleet, and the second is the one that
+surprises people:
+
+* **A scheduled workflow does not fire until its file has reached the default
+  branch.** One tree with the file on its default branch: four successful
+  `schedule` runs. One tree with the identical file on a non-default branch:
+  five days, five cron windows, **zero** runs of any scheduled workflow. That is
+  `coverage-nightly.yml`, and it is the only trigger here that is branch-bound.
+* **`workflow_dispatch` cannot be pulled on a file no event has yet fired.**
+  `gh workflow run` answers `404: workflow not found on the default branch` —
+  and the message is wrong about its own reason. In the same repository, on the
+  same non-default branch, with no `.github/workflows` directory on the default
+  branch at all, `ci.yml` dispatches successfully. The difference is not the
+  branch; it is that a `push` had already fired `ci.yml` and nothing had ever
+  fired the other. So the manual override is unavailable **exactly when** the
+  automatic trigger has not run, which is when you would reach for it.
+* **`push` resolves the workflow from the branch's own ref.** That is why
+  `ci.yml` works from the first push whatever the default branch is, and it is
+  the control that disproves the 404's stated reason.
+
+`pull_request` is the one trigger nobody has been able to measure — no tree in
+the fleet has opened a PR since being scaffolded — so `docs-validation.yml` and
+`pr-draft-discipline.yml` are best read as **dormant rather than dead**: their
+first PR is expected to register them, and nothing has tested it.
+
+The general lesson is worth more than the setting, and stash.flow stated it:
+**a rejection's text is a claim, not a measurement.** It tells you that you were
+refused; the reason it offers is the refuser's account of itself. Discriminating
+takes a control that violates the stated condition and succeeds — and here that
+control was sitting in the same directory the whole time.
+
+**Step 4 is the one setup step no gate here can check**, and now for two
+reasons. Every check a scaffolded tree ships asks whether the tree is consistent
+with itself; the Actions switch is a fact about the account the tree runs under,
+and `default_branch` is a fact about the repository's settings. Neither is in
+any file, so a repository can be entirely green while shipping a release
+pipeline that fails on first use and a nightly job that has never run.
 
 ---
 
