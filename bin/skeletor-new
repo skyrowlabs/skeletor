@@ -732,7 +732,12 @@ def build_parser() -> argparse.ArgumentParser:
     #: and leave a scaffolder judging a user's prose; presence is checkable,
     #: content is not.
     parser.add_argument("--tagline", required=True, help="one line: what this project is")
-    parser.add_argument("--tier", choices=sorted(TIERS), default="core")
+    parser.add_argument(
+        "--tier",
+        choices=sorted(TIERS),
+        default="core",
+        help="how much governance ships. Cumulative: governed adds core, agentic adds both.",
+    )
     parser.add_argument(
         "--versioning",
         choices=sorted(VERSIONING),
@@ -746,7 +751,18 @@ def build_parser() -> argparse.ArgumentParser:
             "file is then a second copy of a number git already holds."
         ),
     )
-    parser.add_argument("--language", choices=["python", "node", "both", "none"], default="python")
+    parser.add_argument(
+        "--language",
+        choices=["python", "node", "both", "none"],
+        default="python",
+        help=(
+            "which language your PRODUCT is in, and nothing more. This does not choose the "
+            "shell's language: cli/, scripts/ and tests/ are python and ship at every tier, "
+            "with the toolchain that lints them, whatever you pass here. So this flag only "
+            "ever ADDS — `node` appends eslint, package.json and the javascript rule doc; "
+            "`none` subtracts nothing."
+        ),
+    )
     parser.add_argument(
         "--agent",
         choices=sorted(AGENTS),
@@ -761,9 +777,28 @@ def build_parser() -> argparse.ArgumentParser:
              "and which of your files it would overwrite; writes nothing",
     )
     parser.add_argument("--base-branch", default="develop", help="the integration branch")
-    parser.add_argument("--release-branch", default="main")
-    parser.add_argument("--python", default="3.12")
-    parser.add_argument("--line-length", type=int, default=120)
+    parser.add_argument(
+        "--release-branch",
+        default="main",
+        help="the branch a release is cut from; the CI badge is pinned to it",
+    )
+    parser.add_argument(
+        "--python",
+        default="3.12",
+        help=(
+            "the OLDEST python this project must stay valid for, not the interpreter you "
+            "happen to be running. It renders into pyrightconfig.json's pythonVersion and "
+            "black's target-version, which are floors — and into CI's setup-python, which "
+            "is not, so CI tests on the floor. Naming a version newer than your floor lets "
+            "BLACK REWRITE YOUR CODE into syntax older interpreters cannot parse."
+        ),
+    )
+    parser.add_argument(
+        "--line-length",
+        type=int,
+        default=120,
+        help="the column limit black, isort and flake8 all enforce",
+    )
     parser.add_argument(
         "--org",
         default=ORG_UNSET,
