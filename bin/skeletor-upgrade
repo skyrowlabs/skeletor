@@ -890,7 +890,7 @@ def main() -> int:
                 # The history is gone, but the hashes can still say what is
                 # untouched. Degraded on purpose, and it says so.
                 say("⚠️ ", f"skeletor has no reachable '{ref}' — falling back to the recorded hashes")
-                detail("Files you never touched are still updated. Files you edited cannot be")
+                detail("Files you never touched are still updated. Files that differ cannot be")
                 detail("merged without the base text, so they are reported and left alone.")
                 args.no_base = True
             else:
@@ -1100,6 +1100,35 @@ def main() -> int:
 
                 # The recorded hash is the hash of the OLD RENDER, so it answers
                 # both halves of the matrix — not just "did the user touch it".
+                #
+                # Which is why `edited` is a variable name and not a sentence.
+                # It means "differs from what skeletor rendered", and the user
+                # is the usual author of that difference but not the only one:
+                # `register_shipped_docs` and `regen.py` read the tree they
+                # write into, so on a `--force` adoption they see the user's own
+                # docs and plans, while the manifest records
+                # `pristine_post_copy()`'s render, which by construction cannot.
+                # Those files then differ for a reason nobody hand-typed. The
+                # handling is right either way — a merge preserves the row the
+                # step exists to add, and recording the target's hash instead
+                # would read as "template moved, user untouched" and drop it
+                # silently — so what was wrong was only ever the report saying
+                # "you edited this" to somebody who did not.
+                #
+                # Measured, at `agentic`, into a tree holding one doc and one
+                # plan: `.github/DOCS_INDEX.md`, `docs/TODO/README.md` and
+                # `docs/todo_index.json` all diverge, and an empty target
+                # diverges on nothing — 135/135 hashes match. The count is one
+                # per post-copy generator that finds pre-existing content, so it
+                # is a property of the adopter's tree rather than of this tool.
+                #
+                # Not auto-classified, because the honest predicate does not
+                # exist here: the three files carry three different generated
+                # markers and `.github/DOCS_INDEX.md` carries none at all, so a
+                # banner scan would quietly find the convenient subset. Naming
+                # the paths would be the list Rule 2 forbids — it goes stale the
+                # next time `regen.py` learns to emit an index, and silently.
+                # The label states what is provable and stops there.
                 edited = sha256(live_path) != recorded_hash
                 changed = sha256(head_files[rel]) != recorded_hash
 
@@ -1327,7 +1356,7 @@ def main() -> int:
         for label, group, symbol in (
             (f"new file(s){verb} added", added, "✅"),
             (f"file(s) you never touched{verb} updated", updated, "✅"),
-            (f"file(s) you edited{verb} merged cleanly", merged, "✅"),
+            (f"file(s) that differ from the template{verb} merged cleanly", merged, "✅"),
         ):
             if group:
                 say(symbol, f"{len(group)} {label}")
@@ -1337,7 +1366,7 @@ def main() -> int:
                     detail(f"… and {len(group) - 20} more")
 
         if conflicted:
-            say("❌", f"{len(conflicted)} file(s) you edited — merge conflicts, LEFT ALONE")
+            say("❌", f"{len(conflicted)} file(s) that differ from the template — merge conflicts, LEFT ALONE")
             for rel in conflicted:
                 item(rel)
             detail()
