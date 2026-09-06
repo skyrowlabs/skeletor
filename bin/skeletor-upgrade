@@ -1045,6 +1045,10 @@ def main() -> int:
         #: Conflicts that a run of the tree's own formatters over both rendered
         #: sides would have resolved. Reported, never acted on without the flag.
         formatting_only: List[str] = []
+        #: What `render_dirt` found in the checkout that renders `ours` — the
+        #: same predicate the warning and the refusal use, published so a
+        #: machine consumer is not left reading `-dirty` off a version string.
+        renderer_dirt = render_dirt(SKELETOR)
         #: The actionable half of `declined`, set inside its report block below
         #: and read by the currency test after it. Empty is the honest default:
         #: with no declines there is nothing the template can have changed.
@@ -1325,6 +1329,21 @@ def main() -> int:
                         # the same ambiguity the human line had: current with
                         # what?
                         "head_ref": head_ref,
+                        # The predicate, not a suffix inside a version string.
+                        # `head_ref` is the render's stamped `git describe
+                        # --tags --always --dirty`, so its `-dirty` answers *is
+                        # this checkout modified* — untracked-blind and
+                        # repo-wide, which is the guard deleted from this tool
+                        # one release ago, still reachable through the API. A
+                        # consumer filtering on that suffix inherits both of its
+                        # errors with nothing in the envelope to say the
+                        # predicate moved. stash.flow's, and the standing rule
+                        # here is that a `--json` field with a second reader is
+                        # exactly where these live: the string answers *which
+                        # version*, this answers *does unversioned content reach
+                        # it*, and they are different questions that happened to
+                        # share a spelling.
+                        "render_dirt": renderer_dirt,
                         "dry_run": args.dry_run,
                         # What is on disk in tmp/upgrade/, so a machine consumer
                         # is not left inferring it from `dry_run` the way a human
@@ -1570,6 +1589,15 @@ def main() -> int:
             # at base v0.6.0 against skeletor v0.6.1, which is exactly the pair
             # the sentence could not distinguish.
             say("✅", f"already current with skeletor @ {head_ref} — nothing to carry over")
+            if not _WARNED_DIRTY and head_ref.endswith("-dirty"):
+                # The suffix without the hazard. `-dirty` is the most prominent
+                # token in the one line this round agrees reads as a settled
+                # conclusion, and here it means somebody touched a README — so
+                # the line said nothing about why and left the reader to assume
+                # the worse of the two readings. Naming the case costs one line
+                # and only in the case that needs it.
+                detail("The `-dirty` suffix is git's and repo-wide: this checkout is modified,")
+                detail("but nothing uncommitted reaches what it renders, so the comparison stands.")
             if _WARNED_DIRTY:
                 # The dirty-base warning above says *this plan includes
                 # uncommitted edits*, which is the right thing to say about a

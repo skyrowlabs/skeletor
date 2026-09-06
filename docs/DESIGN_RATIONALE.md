@@ -1896,13 +1896,38 @@ noun can be caught at all — base and renderer as genuinely different trees.
 Every other gate here runs them as one directory, where a wrong name is
 indistinguishable from a right one.
 
-Two things it cannot do, stated rather than implied. The pair *already current*
-**and** *provisional* is only reachable with render-reaching dirt that changes no
-rendered byte — a comment in `bin/skeletor-new` — because an untracked file under
-`template/` reaches the render by **adding** a file and therefore always has
-something to carry. And stash.flow's own plant is the method note worth keeping:
-their first attempt put a file at `template/` root, which is not an overlay
-source, so it rendered nothing and **looked exactly like a clean negative**.
+That paragraph originally closed with a stated limit, and the limit was wrong:
+it said the pair *already current* **and** *provisional* was only reachable with
+render-reaching dirt that changes no rendered byte, because an untracked file
+under `template/` reaches the render by *adding* a file. `RENDER_INPUTS` matches
+`template/` at its **root**, and the root is not an overlay source —
+`copy_overlay` runs per overlay — so `template/ZZ_PLANT.md` is render-reaching
+and renders nothing, and one `echo >` produces all three lines. stash.flow found
+it by planting the case I had written off.
+
+> **A documented limit is read as a fact about the tool.** That one was a fact
+> about the fixture I had tried, and it would have discouraged exactly the plant
+> that disproved it.
+
+Which is the same shape as their own method note, and the reason it is kept:
+their first attempt at that plant put the file at `template/` root **expecting
+it to render**, and it rendered nothing — so a plant that lands out of scope is
+indistinguishable from a plant that proves absence. The property that made it a
+bad plant for their purpose is what makes it the right fixture for this one.
+
+**And the predicate was replaced in the condition and left in the label.**
+`head_ref` is the render's own `git describe --tags --always --dirty`, so its
+`-dirty` still answers *is this checkout modified* — the untracked-blind,
+repo-wide question this tool had just stopped asking — in the one line everybody
+agrees reads as a settled conclusion, and in `--json` where a consumer filtering
+on that suffix inherits both of the deleted guard's errors with nothing in the
+envelope to say the predicate moved. The envelope carries `render_dirt` now: the
+string answers *which version*, the list answers *does unversioned content reach
+it*, and they are different questions that happened to share a spelling. The
+human line names the case when the suffix appears without the hazard.
+
+> **Deleting a guard from the condition does not delete it from the API.** The
+> published field is where a replaced predicate keeps running.
 
 ### The scaffold's last word was an instruction to run the thing it had broken
 

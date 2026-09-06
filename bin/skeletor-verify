@@ -3269,6 +3269,18 @@ def dirty_signals_gate(workdir: Path) -> List[Result]:
     different trees, because that is the only configuration in which the noun
     can be wrong — every other gate runs them as one directory, where a
     hardcoded name is indistinguishable from a correct one.
+
+    A limit this gate stated was wrong and is kept as a correction. It said the
+    pair *already current* **and** *provisional* was only reachable with
+    render-reaching dirt that changes no rendered byte, because an untracked
+    file under `template/` reaches the render by *adding* a file. False:
+    `RENDER_INPUTS` matches `template/` at its **root**, and the root is not an
+    overlay source — `copy_overlay` runs per overlay — so `template/ZZ_PLANT.md`
+    is render-reaching and renders nothing, and one `echo >` produces all three
+    lines. **A documented limit is read as a fact about the tool, and that one
+    was a fact about the fixture I had tried.** stash.flow found it by planting
+    the case I had written off; it is also the cheaper fixture, editing no
+    tracked file and leaving the shared clone exactly as found.
     """
     started = time.time()
     scaffolder = load_scaffolder()
@@ -3290,8 +3302,10 @@ def dirty_signals_gate(workdir: Path) -> List[Result]:
         )
         return tree
 
-    def report(tree: Path) -> str:
-        return run([sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree), "--dry-run"], cwd=tree)[1]
+    def report(tree: Path, *extra: str) -> str:
+        return run(
+            [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree), "--dry-run", *extra], cwd=tree
+        )[1]
 
     tree = scaffold_from(scratch, "dirty-signals")
     results = []
@@ -3312,23 +3326,68 @@ def dirty_signals_gate(workdir: Path) -> List[Result]:
         )
     )
 
-    # Inside them, and deliberately output-neutral: a comment appended to
-    # `bin/skeletor-new` reaches a render and changes no rendered byte, which is
-    # the only way to reach "already current" AND the provisional note in one
-    # run. An untracked file under `template/` reaches the render by *adding* a
-    # file, so it always has something to carry and can never exercise this pair.
+    # Row 1's other half: the ref still carries git's `-dirty`, which is honest
+    # about the checkout and answers the question this tool stopped asking. Said
+    # so, in the only case where the suffix appears without the hazard.
+    results.append(
+        Result(
+            "dirty signals: a `-dirty` ref with no render-reaching dirt says which case it is",
+            "suffix is git's and repo-wide" in quiet,
+            0.0,
+            quiet,
+        )
+    )
+
+    # Inside the render inputs and rendering nothing: `template/` root matches
+    # `RENDER_INPUTS` and is not an overlay source, so this is the whole fixture
+    # for "already current" AND the provisional note in one run. Untracked, so
+    # cleanup is an unlink and the shared clone is left as found.
     started = time.time()
-    renderer = scratch / "bin" / "skeletor-new"
-    was = renderer.read_text(encoding="utf-8")
-    renderer.write_text(was + "\n# a comment: reaches a render, changes no rendered byte\n", encoding="utf-8")
+    plant = scratch / "template" / "ZZ_PLANT.md"
+    plant.write_text("planted: reaches a render, renders nothing\n", encoding="utf-8")
     loud = report(tree)
-    renderer.write_text(was, encoding="utf-8")
+    envelope = report(tree, "--json")
+    plant.unlink()
+    # From the first line that IS `{`, not the first `{` anywhere: the human
+    # half can carry braces in prose (`tmp/upgrade/<path>`), and slicing from
+    # one of those parses as nothing and reads as "no envelope" — which is the
+    # same green-looking silence a missing field would give. The human half also
+    # goes to stderr, so on this path the envelope starts at offset 0 and a
+    # newline-anchored search finds nothing; both cases are handled because the
+    # first draft handled only the other one and failed with `render_dirt: null`
+    # against an envelope that carried it.
+    machine = {}
+    start = 0 if envelope.startswith("{") else envelope.find("\n{") + 1
+    if start > 0 or envelope.startswith("{"):
+        try:
+            # `raw_decode`, because the envelope is not the end of the stream —
+            # the human footer follows it. `json.loads` raises "Extra data" on
+            # exactly the output this is meant to read, and an except clause
+            # that swallows it leaves `machine` empty, which is
+            # indistinguishable from a field that was never published. Two
+            # drafts failed that way with `render_dirt: null` beside an envelope
+            # visibly carrying it.
+            machine = json.JSONDecoder().raw_decode(envelope[start:])[0]
+        except json.JSONDecodeError:
+            machine = {}
     results.append(
         Result(
             "dirty signals: render-reaching dirt is warned about and the verdict says provisional",
             "uncommitted change(s)" in loud and "already current" in loud and "Provisional" in loud,
             time.time() - started,
             loud,
+        )
+    )
+    results.append(
+        Result(
+            "dirty signals: --json publishes the predicate, not a suffix on a version string",
+            machine.get("render_dirt") == ["template/ZZ_PLANT.md"]
+            and not machine.get("head_ref", "").endswith("-dirty"),
+            0.0,
+            # A consumer filtering `head_ref` for `-dirty` inherits the deleted
+            # guard, and this is the configuration where the two answers differ:
+            # dirt that reaches the render, on a clean ref.
+            json.dumps({k: machine.get(k) for k in ("head_ref", "render_dirt")}, indent=2) + "\n" + envelope[:400],
         )
     )
 
@@ -3345,6 +3404,8 @@ def dirty_signals_gate(workdir: Path) -> List[Result]:
     run(["git", "-C", str(scratch), "worktree", "add", "--detach", "--quiet", str(older), tags[0]], cwd=scratch)
     try:
         split = scaffold_from(older, "dirty-signals-split")
+        renderer = scratch / "bin" / "skeletor-new"
+        was = renderer.read_text(encoding="utf-8")
         renderer.write_text(was + "\n# dirty in the RENDERER, while the base worktree is clean\n", encoding="utf-8")
         named = report(split)
         renderer.write_text(was, encoding="utf-8")
