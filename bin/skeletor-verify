@@ -3167,6 +3167,13 @@ def adopted_repo_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     (target / "README.md").write_text("# Theirs\n\nfrom before.\n", encoding="utf-8")
     run(["git", "-C", str(target), "add", "-A"], cwd=target)
     run(["git", "-C", str(target), "commit", "-q", "-m", "pre-existing"], cwd=target)
+    # Work in progress, deliberately left unstaged. node-zero planted for this
+    # and the reason is that **file counts are identical whether or not `git add
+    # -A` was used, unless something unstaged exists to be swept** — so both
+    # remedies proposed for this bug would have co-opted an adopter's own work
+    # into a changeset labelled as the scaffold's, and every count anybody
+    # verified would have looked the same under either.
+    (target / "mine.txt").write_text("work in progress\n", encoding="utf-8")
 
     code, output = run(
         [sys.executable, str(SKELETOR / "bin" / "skeletor-new"), str(target),
@@ -3195,11 +3202,14 @@ def adopted_repo_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
             "\n".join(untracked[:20]) or "",
         ),
         Result(
-            "adopted repo: the scaffold leaves nothing untracked at all",
-            not loose,
+            "adopted repo: what is left untracked is the adopter's file and nothing else",
+            loose == ["mine.txt"],
             0.0,
-            "skeletor wrote these and staged none of them — the fixture's own files are all "
-            f"committed, so every one of these is ours:\n" + "\n".join(loose[:20]) if loose else "",
+            # One assertion, two facts, no allowlist: anything else left behind
+            # is skeletor's and was not staged, and a missing `mine.txt` means it
+            # was swept into the staged set with everything the tool wrote.
+            "expected exactly ['mine.txt'] — the planted work in progress, untouched — and got:\n"
+            + "\n".join(loose[:20]) if loose != ["mine.txt"] else "",
         ),
     ]
 
@@ -3917,6 +3927,30 @@ def declined_gate(tier: str, workdir: Path) -> List[Result]:
             time.time() - started,
             f"{dropped} restored: {(tree / dropped).exists()}\n"
             f"{arriving} arrived: {(tree / arriving).exists()}\n" + json.dumps(again, indent=2),
+        )
+    )
+
+    # Standing state is not work, and the currency test is about work. `declined`
+    # and `dropped` sat in that `any()`, so a tree carrying one **never** saw
+    # "already current" — not on that release and not on any future one. The
+    # tree that most needs the sentence is exactly the tree that could not
+    # receive it: an adopter whose manifest will read one ref for ever cannot
+    # otherwise tell "I upgraded and there was nothing in it" from "I never ran
+    # the upgrade", which is the ambiguity the sentence exists to resolve.
+    #
+    # mind.head reported it with a control — same render, same upgrade, four
+    # standing declines the only difference. This asserts both halves in one
+    # run, which is what makes it a statement about the condition rather than
+    # about either line: the decline is still reported AND the verdict is still
+    # printed.
+    started = time.time()
+    _, current = run([*upgrade[:-1], "--dry-run"], cwd=tree)
+    results.append(
+        Result(
+            "declined: a standing decline does not suppress the currency verdict",
+            "already current" in current and "NOT restored" in current,
+            time.time() - started,
+            current,
         )
     )
     return results

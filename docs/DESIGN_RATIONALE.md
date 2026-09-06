@@ -1797,6 +1797,61 @@ resolver now. And `AGENTS.md`'s Rule 14 stated the path in prose, which
 Python. The rule forbidding a second definition of the path contained one; it
 names `state_dir()` and tells the reader to ask it.
 
+### Standing state counted as work, and the verdict that cannot fail later
+
+Two findings against the same block, from two trees, and both are about a
+sentence rather than a computation.
+
+**A standing decline suppressed the currency verdict, permanently.** The test
+for *nothing to carry over* read `any((added, updated, merged, conflicted,
+collided, declined, dropped))`, and the last two are standing state by
+construction: a file you deleted is not restored, a file the template stopped
+shipping is not removed, and both are reported on every run for ever. So an
+adopter carrying one **never saw "already current"** — not on that release and
+not on any future one.
+
+The tree that most needs the sentence is exactly the tree that could not receive
+it. mind.head's manifest will read `v0.9.0` indefinitely, because the manifest
+is re-copied only by a run that applies something; the sentence beneath the
+verdict exists to say so, and to let them tell *"I upgraded and there was
+nothing in it"* from *"I never ran the upgrade"*. Four permanent declines from a
+toolchain swap made that distinction unreachable. They reported it with a
+control — same render, same upgrade, the declines the only difference, present
+in one run and absent in the other.
+
+**It is the `--ported` guard one release later**, and the mirror image: there the
+term set was too small and excluded a conflict, here it is too large and
+includes two things that are not work. Both make a true statement unreachable
+for exactly the adopters it describes. The term is `fresh` now — the actionable
+half of a decline, where the template has moved since — because a decline can
+become news again and a drop cannot: nothing records that you were told.
+
+**And "already current" from a dirty base reads as a conclusion, not a plan.**
+stash.flow ran it against a base whose `bin/skeletor-new` — the thing that
+renders `ours` — carried 17 uncommitted insertions. The dirty-base warning fires
+and says *this plan includes them*, which is right about a plan and the wrong
+shape for this line: it wears a ✅, the manifest note under it is stated as
+settled fact, and the only signal that any of it is provisional is a `-dirty`
+suffix inside a version string. They could only learn the answer was right by
+cloning the tag and asking again.
+
+Their reason for checking is the general one:
+
+> **"Do nothing" is the only verdict that cannot fail later, so it is the one
+> that has to be checked now.**
+
+Every other verdict is tested by what happens next — a bad merge shows up, a
+conflict stops you. This one has no next step to fail, so a wrong answer is
+permanently invisible, and it is the answer a reader most wants to receive.
+
+The verdict now says it is provisional when the renderer is dirty. Worth being
+explicit about why this was a message rather than a bug: what makes it *safe* is
+a second, unrelated mechanism — a real run is refused from a dirty base, so a
+provisional verdict can never be recorded. **The safety is the intersection of
+two guards and nothing stated the dependency.** Narrow the dirty-base refusal
+any further and this line silently becomes recordable. That is `a301ca8`
+pointed forward instead of back, and the note is at the site.
+
 ### The scaffold's last word was an instruction to run the thing it had broken
 
 `--force` into a repository somebody already works in — which `AGENTS.md` calls
@@ -1869,6 +1924,21 @@ stays green.
 skyrow-workspace found it with one command against a real tree, and said the
 thing worth keeping: reading the diff would not have shown it, **because the
 code was correct about the set it named.**
+
+Why it had never bitten: all four adopters have `.skeletor.json` tracked, and
+**not because the tool tracked it.** Measured across the fleet, every one of
+them scaffolded into a populated existing repository and a human ran `git add`
+afterwards. *"All four have it tracked"* is not evidence about the tool; it is
+evidence that four people did the same manual step. The defect was masked in
+every tree that could have reported it, and stayed invisible until a run into a
+repo where nobody tidied up — which is what `adopted_repo_gate` is.
+
+The fix has a property the counts cannot show, and node-zero planted for it: an
+unstaged `mine.txt` left in the target before scaffolding must stay out. **File
+counts are identical whether or not `git add -A` was used, unless something
+unstaged exists to be swept** — so both remedies proposed for this bug would
+have co-opted an adopter's work-in-progress into a commit labelled as the
+scaffold's, and the verification of either would have looked the same.
 
 ### A formatter is a second author with commit rights and no changelog
 

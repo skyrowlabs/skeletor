@@ -1020,6 +1020,10 @@ def main() -> int:
         #: Conflicts that a run of the tree's own formatters over both rendered
         #: sides would have resolved. Reported, never acted on without the flag.
         formatting_only: List[str] = []
+        #: The actionable half of `declined`, set inside its report block below
+        #: and read by the currency test after it. Empty is the honest default:
+        #: with no declines there is nothing the template can have changed.
+        fresh: List[str] = []
         normaliser = Normaliser(target, workdir)
         if args.normalise and not normaliser:
             die(f"--normalise: {normaliser.reason}")
@@ -1422,7 +1426,9 @@ def main() -> int:
             detail("Recorded in the manifest, absent from the tree: a decision you made, which")
             detail("an upgrade does not re-make for you. Standing state, reported every run.")
             # The subset that is actually actionable: the template has moved
-            # since the decline, so there is something new to say no to.
+            # since the decline, so there is something new to say no to. It is
+            # also the only part of `declined` the currency test below may look
+            # at — see the reason there.
             fresh = [rel for rel in declined if sha256(head_files[rel]) != hashes.get(rel)]
             if fresh:
                 detail()
@@ -1504,7 +1510,29 @@ def main() -> int:
                 detail("--allow-dirty: the commit above is the last COMMIT, not the tree this run")
                 detail("started from. Your own uncommitted edits are in that diff too.")
 
-        if not any((added, updated, merged, conflicted, collided, declined, dropped)):
+        # **Standing state is not work, and this test is about work.** `declined`
+        # and `dropped` are both permanent by construction — a file you deleted
+        # is not restored, a file the template stopped shipping is not removed,
+        # and both are reported on every run for ever. Counting them as
+        # this-run activity suppressed "already current" **permanently** for any
+        # tree carrying one, which is exactly the tree that most needs the
+        # sentence: an adopter whose manifest will read `v0.9.0` for ever cannot
+        # otherwise tell "I upgraded and there was nothing in it" from "I never
+        # ran the upgrade", and that ambiguity is the whole reason the sentence
+        # was written. mind.head reported it with a control — same render, same
+        # upgrade, four standing declines the only difference, and the message
+        # present in one run and absent in the other.
+        #
+        # `fresh` rather than `declined`, because the actionable half of a
+        # decline is real work: the template has moved since, and there is
+        # something new to say no to. `dropped` has no such half — nothing
+        # records that you were told, so it cannot become news again.
+        #
+        # This is the `--ported` guard one release later, and the same mistake:
+        # a condition whose term set does not match the question it is asking.
+        # There the set was too small and excluded a conflict; here it is too
+        # large and includes two things that are not work.
+        if not any((added, updated, merged, conflicted, collided, fresh)):
             # Name the version it is current *with*. This compares the tree
             # against a render of skeletor's HEAD, so that is the claim — but the
             # manifest is only re-copied by a run that applies something, so a
@@ -1517,6 +1545,29 @@ def main() -> int:
             # at base v0.6.0 against skeletor v0.6.1, which is exactly the pair
             # the sentence could not distinguish.
             say("✅", f"already current with skeletor @ {head_ref} — nothing to carry over")
+            if head_ref.endswith("-dirty"):
+                # The dirty-base warning above says *this plan includes
+                # uncommitted edits*, which is the right thing to say about a
+                # plan and the wrong shape for this line: "already current" does
+                # not read as part of a plan. It reads as a conclusion, wears a
+                # ✅, and the manifest note below it is stated as settled fact —
+                # with a `-dirty` suffix inside a version string as the only
+                # signal that any of it is provisional. stash.flow hit it
+                # against a base whose `bin/skeletor-new` carried 17 uncommitted
+                # insertions, got this verdict, and could only find out it was
+                # right by cloning the tag and asking again. **"Do nothing" is
+                # the only verdict with no next step to fail**, so a wrong one
+                # is permanently invisible, and it is the answer a reader most
+                # wants to receive.
+                #
+                # Stated here because what makes it *safe* is a second,
+                # unrelated mechanism: a real run is refused from a dirty base,
+                # so a provisional verdict can never be recorded. That
+                # dependency is worth naming — narrow the dirty-base refusal any
+                # further and this line silently becomes recordable.
+                detail("Provisional: the checkout that rendered this is dirty, so the comparison")
+                detail("includes uncommitted template edits. Commit them, or ask a clean clone at")
+                detail("a tag, before treating 'nothing to carry over' as settled.")
             if ref and ref != head_ref:
                 detail(f"{MANIFEST_NAME} still records {ref}, and will keep doing so: it is")
                 detail("re-copied only by a run that applies something. Being behind by a ref and")
