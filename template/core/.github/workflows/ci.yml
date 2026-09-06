@@ -144,9 +144,26 @@ jobs:
       - name: flake8 (blocking set)
         run: flake8 . --select=E9,F63,F7,F82,F401 --show-source --statistics
 
+      # `|| true` rather than `continue-on-error:`, and the difference is the
+      # whole point. `continue-on-error` lets the JOB pass while the STEP still
+      # reports failure — so GitHub attaches an untitled red annotation,
+      # `Process completed with exit code 1`, to every green run of a repository
+      # with one complexity finding. dream-doll and proto.pilot found it
+      # independently within minutes of each other, both while auditing
+      # annotations rather than conclusions.
+      #
+      # proto.pilot's framing is the one worth keeping: **a channel whose
+      # severity does not mean what it says.** This step is informational by
+      # construction, so its annotation should be too — and a reader who learns
+      # to ignore the red learns to ignore the `::notice` lines beside it, which
+      # are the honest half of the same surface. Accumulation is not the
+      # mechanism; calibration is.
+      #
+      # `continue-on-error` is gone rather than kept alongside: with the exit
+      # code swallowed it can never fire, and a guard that cannot fire is one
+      # the next reader has to prove is dead before touching it.
       - name: flake8 (informational)
-        run: flake8 . --max-complexity=15 --max-line-length={{LINE_LENGTH}} --statistics
-        continue-on-error: true
+        run: flake8 . --max-complexity=15 --max-line-length={{LINE_LENGTH}} --statistics || true
 
       - name: isort
         run: isort --check-only --diff .
@@ -196,7 +213,7 @@ jobs:
       # inherits and nobody maintains. Pin it in your own tree once you have a
       # lockfile. No `cache: npm` for the same reason — it fails outright
       # without one.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.node.outputs.present == 'true'
         with:
           node-version: 'lts/*'
