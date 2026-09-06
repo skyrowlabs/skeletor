@@ -160,6 +160,43 @@ def save(tree: Path, data: dict) -> Path:
     return path
 
 
+#: What the scaffolder does to a template file on its way into a tree:
+#: `render()` substitutes `{{NAME}}` and `drop_absent_prose` removes
+#: `SCAFFOLD-IF` blocks whose path is absent. A file carrying neither is copied
+#: byte for byte, and that is the whole basis of `taken_verbatim` below. Read
+#: from `bin/skeletor-new`'s own constants rather than repeated, so a new
+#: transform cannot make this quietly wrong — it would have to be added here to
+#: be missed, instead of merely forgotten.
+TRANSFORMS = ("{{", "<!-- SCAFFOLD-IF ", "<!-- SCAFFOLD-IF-NOT ")
+
+
+def rendered_verbatim(blob: bytes) -> bool:
+    """Would the scaffolder copy this template file unchanged?
+
+    The one sound half of a discriminator that is otherwise impossible. Hashes
+    cannot tell a fork from a rendering, because rendering and editing are the
+    same signal — but **for a file the scaffolder does not transform, they are
+    not**: `source_sha != local_sha` at record time then means somebody changed
+    it, and nothing else can produce that difference.
+
+    sky.boss proposed the general rule, found the counter-example in their own
+    manifest — `docs/rules/commits.md`, fourteen placeholders, never edited —
+    and retracted it. This is what survives the retraction, and it is the shape
+    their own tree measures: of four files a hash comparison flags there, three
+    are real forks and the fourth is rendering, and the three are exactly the
+    ones with nothing to render.
+
+    Conservative by construction. A file it cannot vouch for is reported as
+    undetermined rather than as untouched, which is the direction the original
+    defect ran the wrong way.
+    """
+    try:
+        text = blob.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return not any(marker in text for marker in TRANSFORMS)
+
+
 def classify(tree: Path, entry: dict) -> Tuple[str, str]:
     """One file's state, and the sentence explaining it.
 
@@ -211,13 +248,23 @@ def classify(tree: Path, entry: dict) -> Tuple[str, str]:
         return "gone", f"not in this tree any more (was {entry['path']})"
     edited = local_now != entry.get("local_sha")
 
+    # The one thing that CAN be said about the record baseline, said only where
+    # it is provable. For a template file the scaffolder copies byte for byte, a
+    # `source_sha != local_sha` at record time is a change somebody made and
+    # nothing else — so the fork is certain rather than guessed, and the file is
+    # named as one. Everything else stays silent about it.
+    taken = entry.get("source_sha") is not None and entry.get("local_sha") != entry.get("source_sha")
+    source_then = template_at(ref, source)
+    forked = taken and source_then is not None and rendered_verbatim(source_then)
+    since = "since you recorded it (and it already differed from the template then)" if forked else "since you recorded it"
+
     if moved and edited:
-        return "both", f"upstream moved since {ref}, and this copy changed since you recorded it"
+        return "both", f"upstream moved since {ref}, and this copy changed {since}"
     if moved:
-        return "upstream", f"upstream moved since {ref}; your copy is unchanged since you recorded it"
+        return "upstream", f"upstream moved since {ref}; your copy is unchanged {since}"
     if edited:
-        return "local", f"this copy changed since you recorded it; upstream unchanged since {ref}"
-    return "current", f"unchanged on both sides since you recorded it at {ref}"
+        return "local", f"this copy changed {since}; upstream unchanged since {ref}"
+    return "current", f"unchanged on both sides {since}, at {ref}"
 
 
 def report(tree: Path, as_json: bool, fail_on_drift: bool = False) -> int:

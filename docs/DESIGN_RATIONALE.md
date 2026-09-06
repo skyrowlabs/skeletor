@@ -1827,10 +1827,31 @@ taken. `scripts/paths.py` has two. Adopting that rule reports a fork for every
 verbatim take of a templated file — the same false reading facing the other way,
 and harder to doubt, because it fires on real forks too.
 
-So the fix is words, and only words: every sentence now says **"since you
-recorded it"**, which is exactly what the comparison measures. Telling a fork
-from a verbatim take needs a fact the record does not hold, and saying less
-beats saying it wrongly.
+So the first half of the fix is words, and only words: every sentence says
+**"since you recorded it"**, which is exactly what the comparison measures.
+
+The second half is what survives the retraction, and sky.boss found it in the
+same message they withdrew the general rule: **hashes cannot tell a fork from a
+rendering because rendering and editing are the same signal — but for a file the
+scaffolder does not transform, they are not.** A template file with no `{{`
+substitution and no `SCAFFOLD-IF` block is copied byte for byte, so
+`source_sha != local_sha` at record time can only mean somebody changed it. That
+fork is *provable*, needs no schema change, and is computed from what the
+manifest already holds.
+
+It is deliberately partial and says so by silence. Of the four files a hash
+comparison flags in sky.boss's tree, three are real forks and one is rendering —
+and the three are exactly the ones with nothing to render. Everything else stays
+undetermined rather than reassuring, which is the direction the original defect
+ran the wrong way.
+
+`TRANSFORMS` is read from what `bin/skeletor-new` actually does rather than
+guessed, because a new transform must not make this quietly wrong: it would have
+to be added here to be missed, instead of merely forgotten. And the gate asserts
+**both** directions in one fixture — the truncated placeholder-free file named,
+the fourteen-placeholder file left alone — because a rule that only ever fires is
+being agreed with rather than applied. `docs/rules/commits.md` is in that fixture
+precisely because it is the counter-example that killed the general version.
 
 sky.boss named the class, and it is the one this document has been accumulating
 all round: **the record was right and the report was not.** `--force` recorded

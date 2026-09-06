@@ -4069,6 +4069,48 @@ def components_gate(workdir: Path) -> List[Result]:
         )
     )
 
+    # The one thing that CAN be said about the record baseline, and the reason it
+    # is said only sometimes. A template file the scaffolder copies byte for byte
+    # cannot differ at record time for any reason but somebody changing it, so
+    # the fork is provable there; a file with placeholders differs for rendering
+    # alone, so nothing can be said. Both directions in one fixture, because a
+    # rule that only ever fires is being agreed with rather than applied —
+    # sky.boss proposed this as a general rule, found `docs/rules/commits.md`
+    # (fourteen placeholders, never edited) in their own manifest, and retracted
+    # it. That file is the second half of this fixture.
+    started = time.time()
+    forked = workdir / "consumer-forked"
+    for part in ("scripts", "docs/rules"):
+        (forked / part).mkdir(parents=True, exist_ok=True)
+    plain = clone / "template/core/scripts/allowlist.py"
+    templated = clone / "template/core/docs/rules/commits.md"
+    # Cut before recording: this is the shape the report used to call untouched.
+    (forked / "scripts" / "allowlist.py").write_text(
+        "\n".join(plain.read_text(encoding="utf-8").splitlines()[:20]) + "\n", encoding="utf-8"
+    )
+    # Rendered, not edited — every difference is a substitution.
+    rendered = templated.read_text(encoding="utf-8")
+    for token, value in (("{{BASE_BRANCH}}", "develop"), ("{{RELEASE_BRANCH}}", "main")):
+        rendered = rendered.replace(token, value)
+    (forked / "docs" / "rules" / "commits.md").write_text(rendered, encoding="utf-8")
+    run(
+        [sys.executable, str(tool), "record", str(forked), "--component", "mixed",
+         "--file", "template/core/scripts/allowlist.py:scripts/allowlist.py",
+         "--file", "template/core/docs/rules/commits.md:docs/rules/commits.md"],
+        cwd=workdir,
+    )
+    _, mixed = run([sys.executable, str(tool), "report", str(forked)], cwd=workdir)
+    claim = "already differed from the template"
+    named = [line for line in mixed.splitlines() if claim in line]
+    results.append(
+        Result(
+            "components: a provable fork is named, and a rendered file is not",
+            len(named) == 1 and "allowlist.py" in named[0],
+            time.time() - started,
+            mixed,
+        )
+    )
+
     results.append(
         Result(
             "components: report separates upstream movement from a local edit",
