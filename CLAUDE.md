@@ -159,16 +159,16 @@ the detector's own source, which is the second entry that means the predicate is
 wrong. One entry, `SKILL.md`'s `^SKELETOR=` line, checked three ways every run:
 the file exists, a line matches, and that line still holds the literal.
 
-**Both are limited by the same confusion and it is written down rather than
-guarded.** `SKELETOR.name` is where this repository *sits*, not what it *is*, so
-in a checkout cloned to another name the path gate hunts a needle nobody would
-write and finds nothing, silently. `author_tokens()` has the live form of it:
-its docstring says the checkout's own name is excluded and implements that as
-`part != SKELETOR.name`, while a `git clone .` records origin as `<path>/.` and
-the owner regex reads the trailing `.` as the repository, shifting the capture
-one component left onto `skeletor` itself. Identity belongs to the remote rather
-than the directory, and the malformed-origin case defeats the naive version of
-that fix as well.
+**Both derive identity from the remote, never from the directory**, and
+`repository_identity()` is the one home for it. `SKELETOR.name` is where this
+repository sits, not what it is; the two coincide only in a canonically-named
+clone. `author_tokens()` carried the live bug — a `git clone .` records origin
+as `<path>/.`, and the old owner pattern read the trailing `.` as the
+repository, shifting the capture onto `skeletor` itself and banning the word
+from every rendered `.skeletor.json`. `identity_gate` puts eight origin
+spellings through the pure `parse_origin`, which is the rare place a table
+beats a discovered set: these are git's formats, and **the spelling that broke
+it cannot occur in any checkout somebody runs the grid from.**
 
 That empty-suite gate named `integration` until it had to name two things. A
 suite whose tests a scaffold cannot ship is red on arrival unless the CLI

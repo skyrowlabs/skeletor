@@ -3281,6 +3281,88 @@ GENERIC_PATH_WORDS = {
 }
 
 
+def parse_origin(raw: str) -> Tuple[Optional[str], Optional[str]]:
+    """`(owner, repository)` out of a remote URL, or `(None, None)`.
+
+    Pure, so `identity_gate` can put every spelling through it without a
+    checkout per case — which matters because the spelling that broke this is
+    one nobody produces by hand: `git clone .` records `<path>/.`, and only a
+    session isolating itself into a scratch directory ever generates it.
+
+    Normalisation is the whole function. Taking the last two components of an
+    unnormalised origin is exactly as wrong as the pattern it replaces, one
+    field over: the repository component of `<path>/.` is `.`.
+    """
+    trimmed = raw.strip()
+    # Whitespace inside means this is not a URL. Git's complaints split into
+    # components a positional reader takes for an owner and a repository —
+    # `error: No such remote 'origin'` parses as owner `error` — and declining
+    # here means the parser is safe on its own rather than safe because
+    # `repository_identity` checks a return code. Both guards stay: they fail
+    # independently, and this one was added because the gate below caught the
+    # single point of failure the moment it was written.
+    if not trimmed or any(character.isspace() for character in trimmed):
+        return None, None
+    # No trailing-slash stripping loop here, and its absence is deliberate: the
+    # component filter below already drops `.` and empty segments, so a loop
+    # doing it a second time is dead code that LOOKS load-bearing. It was
+    # written first and removed when planting its deletion left this gate green
+    # — a plant that does not land is indistinguishable from a gate that works,
+    # and here it said the mechanism was somewhere else.
+    if trimmed.endswith(".git"):
+        trimmed = trimmed[: -len(".git")]
+    parts = [part for part in re.split(r"[/:]", trimmed) if part and part != "."]
+    if len(parts) < 2:
+        return None, None
+    return parts[-2], parts[-1]
+
+
+def repository_identity() -> Tuple[Optional[str], str]:
+    r"""`(owner, repository name)` — from the remote, never from the directory.
+
+    Two callers need this and both had it wrong in the same way. `author_tokens`
+    excluded *the checkout's own name*, documented as such, and implemented it as
+    `part != SKELETOR.name`; `checkout_path_literal_gate` built its needle from
+    `SKELETOR.name`. **That is where this repository sits, not what it is**, and
+    the two coincide only in a canonically-named clone.
+
+    The bug that made it concrete: `git clone .` records origin as `<path>/.`,
+    and the old owner pattern — `[/:]([^/:]+)/[^/]+?(?:\.git)?$` — read the
+    trailing `.` as the repository and shifted the capture one component left:
+
+        https://github.com/skyrowlabs/skeletor.git   -> skyrowlabs   ✓
+        /home/jeston/skyrow.labs/skeletor            -> skyrow.labs  ✓
+        /home/jeston/skyrow.labs/skeletor/.          -> skeletor     ✗
+
+    So the word `skeletor` arrived through the input designed to name the OWNER,
+    landed on the repository's own name, and the exclusion never saw it because
+    the exclusion was watching the directory. Every rendered `.skeletor.json`
+    became an author leak. Found by the other skeletor session running the grid
+    from a scratch clone, and found by measuring `author_tokens`' inputs rather
+    than reconstructing them from the path — which is why a synthetic path could
+    not reproduce it. **The path was never the input that mattered.**
+
+    Normalising first is what makes the fix work at all: taking the *repository*
+    component of an unnormalised origin gives `.`, so the naive version of
+    "derive identity from the remote" is defeated by the same malformed input as
+    the thing it replaces. Trailing `/.`, trailing slashes and `.git` come off,
+    and fewer than two components means the remote cannot answer — which is a
+    third state, not a guess.
+
+    With no remote at all the directory name is the only thing left, and it is
+    returned as the identity with no owner. That is the honest degenerate case:
+    a checkout with nothing to be reachable from cannot say who owns it.
+    """
+    # The return code, not just the output: `run()` hands back git's complaint
+    # on failure, and "No such remote 'origin'" splits on `/` into something a
+    # permissive parser will happily read as an owner and a repository. The old
+    # pattern degraded safely here by accident — it needed two slash-separated
+    # components and error text has none — and accident is not a mechanism.
+    code, raw = run(["git", "-C", str(SKELETOR), "remote", "get-url", "origin"], cwd=SKELETOR)
+    owner, repository = parse_origin(raw if code == 0 else "")
+    return owner, repository or SKELETOR.name
+
+
 def author_tokens() -> List[str]:
     """Who this checkout belongs to, as strings a render must not contain.
 
@@ -3294,12 +3376,11 @@ def author_tokens() -> List[str]:
     `skyrow-labs` and `skyrowlabs` are one token. The checkout's own name is
     excluded — a scaffold says `skeletor` all over, correctly.
     """
+    owner, identity = repository_identity()
     raw = {Path.home().name}
-    raw.update(part for part in SKELETOR.resolve().parts if part != SKELETOR.name)
-    origin = run(["git", "-C", str(SKELETOR), "remote", "get-url", "origin"], cwd=SKELETOR)[1].strip()
-    match = re.search(r"[/:]([^/:]+)/[^/]+?(?:\.git)?$", origin)
-    if match:
-        raw.add(match.group(1))
+    raw.update(part for part in SKELETOR.resolve().parts if part not in {SKELETOR.name, identity})
+    if owner:
+        raw.add(owner)
     email = run(["git", "-C", str(SKELETOR), "config", "user.email"], cwd=SKELETOR)[1].strip()
     if "@" in email:
         raw.add(email.split("@", 1)[0])
@@ -4714,6 +4795,63 @@ PATH_LITERAL_ALLOWED = {
 }
 
 
+#: Origin spellings and what `parse_origin` must make of each. A table rather
+#: than a discovered set, because there is nothing here to discover: these are
+#: git's output formats, they change on git's schedule and not this
+#: repository's, and the one that matters is unreachable from any checkout
+#: anybody works in. `<path>/.` is what `git clone .` records, so only a session
+#: isolating itself into a scratch directory ever produces it — which is exactly
+#: why it shipped broken and why the case has to be written down to be tested.
+ORIGIN_SPELLINGS = {
+    "https://github.com/skyrowlabs/skeletor.git": ("skyrowlabs", "skeletor"),
+    "git@github.com:skyrowlabs/skeletor.git": ("skyrowlabs", "skeletor"),
+    "https://github.com/skyrowlabs/skeletor": ("skyrowlabs", "skeletor"),
+    "/home/jeston/skyrow.labs/skeletor": ("skyrow.labs", "skeletor"),
+    # The one that shipped a bug. The old pattern read the trailing `.` as the
+    # repository and returned `skeletor` as the OWNER, which then became a
+    # forbidden token and banned the word from every rendered `.skeletor.json`.
+    "/home/jeston/skyrow.labs/skeletor/.": ("skyrow.labs", "skeletor"),
+    "/home/jeston/skyrow.labs/skeletor/": ("skyrow.labs", "skeletor"),
+    # No remote, and git's complaint when there is none. Both must decline
+    # rather than parse: the error text splits into components a permissive
+    # reader will take for a URL, and `author_tokens` would then ban the word
+    # `error`. The old pattern survived this by needing two slash-separated
+    # components, which is luck rather than a decision.
+    "": (None, None),
+    "error: No such remote 'origin'": (None, None),
+}
+
+
+def identity_gate() -> Result:
+    """`parse_origin` normalises every spelling git produces.
+
+    This is the one gate here that tests a pure function against a table, and
+    the reason is the same reason the bug existed: **the failing input cannot
+    occur in the checkout anybody runs the grid from.** A canonical clone
+    answers correctly however the parser is written, so no amount of running
+    this repository normally exercises the case — which is this project's
+    founding class arriving inside its own verifier.
+
+    It also fixes the confusion both callers had. `author_tokens` documented
+    "the checkout's own name is excluded" and implemented `part !=
+    SKELETOR.name`; `checkout_path_literal_gate` built its needle the same way.
+    A name is a fact about a location and identity is a fact about the remote,
+    and they part company in any clone not named for its repository.
+    """
+    started = time.time()
+    wrong = []
+    for origin, expected in ORIGIN_SPELLINGS.items():
+        got = parse_origin(origin)
+        if got != expected:
+            wrong.append(f"{origin or '(empty)'!r} -> {got}, expected {expected}")
+    return Result(
+        f"identity: every origin spelling parses ({len(ORIGIN_SPELLINGS)} cases)",
+        not wrong,
+        time.time() - started,
+        "\n  ".join(wrong),
+    )
+
+
 def checkout_path_literal_gate() -> List[Result]:
     """No file names the author's own path to this checkout.
 
@@ -4747,14 +4885,24 @@ def checkout_path_literal_gate() -> List[Result]:
     started = time.time()
     # Assembled rather than spelled — see the docstring. The prefixes are the
     # three spellings a shell expands to the same place.
-    needle = "/" + SKELETOR.name
-    pattern = re.compile("(" + "|".join(re.escape(h) for h in ("~", "$HOME", "${HOME}")) + ")" + re.escape(needle))
+    #
+    # BOTH names, because they answer different halves and are usually the same
+    # string. `repository_identity()` is what this repository IS, which is what
+    # prose calls it and therefore what a written-down path says; `SKELETOR.name`
+    # is where this clone SITS, which is what somebody transcribing their own
+    # shell would paste. Taking only the directory name was the first version and
+    # it is silently blind in any clone named something else — green over
+    # nothing, the direction that does not announce itself.
+    names = {repository_identity()[1], SKELETOR.name}
+    needles = ["/" + name for name in sorted(names)]
+    homes = "(" + "|".join(re.escape(h) for h in ("~", "$HOME", "${HOME}")) + ")"
+    pattern = re.compile(homes + "(" + "|".join(re.escape(n) for n in needles) + ")")
 
     results = []
 
     # The plant, both directions, before anything is scanned. A detector that
     # finds nothing and one that cannot find anything are the same green.
-    if not pattern.search("cd ~" + needle + " && bin/skeletor-new"):
+    if not all(pattern.search("cd ~" + n + " && bin/skeletor-new") for n in needles):
         results.append(Result("path literals: the detector finds a planted path", False, time.time() - started, ""))
         return results
     if pattern.search("a path in prose is wrong for every checkout"):
@@ -4817,7 +4965,8 @@ def checkout_path_literal_gate() -> List[Result]:
 
     results.append(
         Result(
-            f"path literals: no file names this checkout's own path ({len(tracked)} tracked)",
+            f"path literals: no file names this checkout's own path "
+            f"({len(tracked)} tracked, {len(names)} name(s))",
             not findings,
             time.time() - started,
             (
@@ -5053,6 +5202,7 @@ def main() -> int:
         results.append(manifest_args_gate())
         results.append(tagline_required_gate(workdir))
         results += unlinted_source_gate(workdir)
+        results.append(identity_gate())
         results += checkout_path_literal_gate()
         venv_python = make_venv(workdir, args.quiet)
         results.append(shadow_gate(workdir, venv_python))

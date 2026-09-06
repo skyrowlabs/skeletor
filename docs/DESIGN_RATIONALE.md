@@ -3679,19 +3679,54 @@ was reworded instead, to *three home-relative literals naming this checkout*,
 which is both exempt-free and the more accurate sentence — the finding was never
 about those six characters. **An exemption would have bought a worse document.**
 
-**What it cannot see, written down rather than guarded.** `SKELETOR.name` is
-where the repository *sits*, not what it *is*. In a checkout cloned to another
-name the gate hunts for a needle nobody would write and finds nothing —
-silently, which is the direction that does not announce itself. The same
-confusion is a live bug one function away in `author_tokens()`, whose docstring
-says *"the checkout's own name is excluded"* and implements it as
-`part != SKELETOR.name`; a `git clone .` records origin as `<path>/.`, the owner
-regex reads the trailing `.` as the repository and shifts one component left
-onto `skeletor` itself, and the exclusion is looking somewhere else entirely.
-Both want identity from the remote rather than from the directory, and the
-malformed-origin case defeats the naive version of that fix too — the repo
-component of `<path>/.` is `.`. Filed, unfixed, and stated here so the next
-reader does not have to rediscover that the two are one bug.
+**Both gates asked the directory what only the remote knows, and it is fixed
+rather than filed.** `SKELETOR.name` is where this repository *sits*, not what
+it *is*, and the two coincide only in a canonically-named clone.
+`author_tokens()` documented *"the checkout's own name is excluded"* and
+implemented it as `part != SKELETOR.name`; the path gate built its needle the
+same way and was therefore silently blind in a clone named anything else.
+
+The bug that made it concrete cannot occur where anybody works. `git clone .`
+records origin as `<path>/.`, and the old owner pattern read the trailing `.` as
+the repository, shifting one component left:
+
+```
+https://github.com/skyrowlabs/skeletor.git   -> skyrowlabs   correct
+/home/jeston/skyrow.labs/skeletor            -> skyrow.labs  correct
+/home/jeston/skyrow.labs/skeletor/.          -> skeletor     wrong
+```
+
+So the repository's own name arrived through the input designed to name the
+**owner**, became a forbidden token, and every rendered `.skeletor.json` read as
+an author leak. The other skeletor session hit it running the grid from a
+scratch clone and found it by measuring `author_tokens()`'s inputs rather than
+reconstructing them — which is why the diagnosis from this side, aimed at the
+path, was wrong. **The path was never the input that mattered.**
+
+`parse_origin` is pure and `identity_gate` puts eight spellings through it. A
+table beats a discovered set for once, and the reason is the reason the bug
+existed: these are git's output formats, they change on git's schedule, and
+**the case that matters is unreachable from any checkout anybody runs the grid
+in.** A canonical clone answers correctly however the parser is written. That is
+this project's founding class arriving inside its own verifier.
+
+Three things the gate caught about its own fix, in the order it caught them:
+
+- **The parser's only defence was a caller.** `error: No such remote 'origin'`
+  parsed as owner `error`, and nothing but `repository_identity()` checking a
+  return code stopped it. It declines whitespace now; both guards stay, and they
+  fail independently.
+- **A normalisation loop that looked load-bearing was dead.** Deleting it left
+  the gate green, because the component filter already drops `.` and empty
+  segments. *A plant that does not land is indistinguishable from a gate that
+  works* — here it said the mechanism was somewhere else, and the loop went.
+- **The plant against the filter reproduces the original defect exactly**,
+  `('skeletor', '.')`, which is what makes the green mean anything.
+
+The needle is now both names — what the repository *is* and where this clone
+*sits* — because they answer different halves and are usually the same string:
+prose calls a repository by its identity, and somebody transcribing their own
+shell pastes the directory.
 
 ## Honest assessment: what is over-built
 
