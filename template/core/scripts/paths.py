@@ -39,7 +39,7 @@ is currently both "where the code is" and "where the content is", and only the
 second should move. Splitting them is a decision about every consumer below,
 not a config value — see `docs/DEVELOPMENT.md`. This is where it would land.
 
-Stdlib only, and imported by `cli/` and `scripts/` alike.
+Stdlib only, and imported by `{{SHELL_PACKAGE}}/` and `scripts/` alike.
 """
 
 from __future__ import annotations
@@ -110,7 +110,46 @@ NARRATIVE = (TODO_DIR, IMPL_DIR, DOCS_DIR / "reports")
 #: the conflict back looking like housekeeping.
 
 # ── Code and configuration ───────────────────────────────────────────────────
-CLI_DIR = PROJECT_ROOT / "cli"
+
+
+def _shell_package() -> Path:
+    """The shell's package, found rather than named.
+
+    It ships as `cli/` by default and `--shell-package` renames it, because
+    `cli` is the most collided-with package name in a python monorepo and a
+    shell that cannot move out of the way costs an adopter a rename mid-flight.
+    So **no file in this tree spells it**: the package discovers its own command
+    groups through `__name__` and `__path__`, `__main__.py` imports relatively,
+    and everything outside asks here.
+
+    The tell is `__main__.py` — that is what `python -m <name>` needs and what
+    makes a directory the shell rather than a package the product happens to
+    ship. Exactly one must match: zero means this file is being read from
+    somewhere that is not a scaffolded tree, and two means the tell has stopped
+    identifying anything, which is worse than a wrong answer because every
+    caller would get a plausible one.
+    """
+    found = sorted(
+        child.name
+        for child in PROJECT_ROOT.iterdir()
+        if child.is_dir() and (child / "__main__.py").exists() and not child.name.startswith(".")
+    )
+    if len(found) != 1:
+        raise SystemExit(
+            f"❌ expected exactly one shell package (a root directory with __main__.py), found "
+            f"{found}. Nothing in this tree spells the shell's name, so this is how every other "
+            "file locates it — a second candidate makes them all silently wrong."
+        )
+    return PROJECT_ROOT / found[0]
+
+
+CLI_DIR = _shell_package()
+#: The package's *name*, for the callers that import through it rather than
+#: walk it. `importlib.import_module(f"{SHELL_PACKAGE}.test_cmds")` is the
+#: shape — a static `from cli.test_cmds import ...` is the one thing a rename
+#: cannot survive, and it is also the thing that would stop this template's
+#: python files parsing if the name were substituted into the statement.
+SHELL_PACKAGE = CLI_DIR.name
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 TESTS_DIR = PROJECT_ROOT / "tests"
 GITHUB_DIR = PROJECT_ROOT / ".github"

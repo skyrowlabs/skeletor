@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import keyword
 import os
 import re
 import shutil
@@ -254,6 +255,7 @@ def substitutions(args) -> Dict[str, str]:
         # the pair, because CI is the one place where testing the ends is
         # different from declaring them.
         "PYTHON_MATRIX": python_matrix(args.python, args.python_ceiling),
+        "SHELL_PACKAGE": args.shell_package,
         "PY_NODOT": args.python.replace(".", ""),
         "LINE_LENGTH": str(args.line_length),
         "ORG": args.org,
@@ -307,6 +309,17 @@ def copy_overlay(
         # template under its final name.
         if relative.name == "CLI_WRAPPER":
             relative = Path(cli_name)
+        # The shell's package, likewise. `cli` is the most collided-with package
+        # name in a python monorepo, and this is the whole of the rename:
+        # **the package never spells its own name**, so nothing inside it has to
+        # change. `__init__.py` discovers its command groups through `__name__`
+        # and `__path__`, `__main__.py` imports relatively, and `scripts/paths.py`
+        # finds the directory rather than naming it. That was paid for already,
+        # by sky.boss, whose own rename cost 119 failing tests and a `sed` that
+        # turned `from cli import cli` into `from x import x` — the package and
+        # the click group share a name and only one of them was moving.
+        elif relative.parts and relative.parts[0] == "cli":
+            relative = Path(values["SHELL_PACKAGE"], *relative.parts[1:])
 
         destination = target / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -899,6 +912,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--shell-package",
+        default="cli",
+        help=(
+            "the python package the shell's commands live in (default: `cli`). Rename it when "
+            "your PRODUCT already owns that name — `cli` is the most collided-with package name "
+            "in a python monorepo, and a shell that cannot move out of the way costs an adopter "
+            "a rename mid-flight."
+        ),
+    )
+    parser.add_argument(
         "--line-length",
         type=int,
         default=120,
@@ -1232,6 +1255,27 @@ def resolve(args):
 
 def main() -> int:
     args = resolve(build_parser().parse_args())
+
+    # The shell's package must be importable and must not land on top of
+    # something the template already puts at the root. The taken set is
+    # DISCOVERED — every top-level entry in every overlay, minus the shell's own
+    # default, which is the one name it is allowed to keep — because a list here
+    # would be right about the directories that existed the day it was written
+    # and silent about the next one.
+    # An agent value in AGENTS names a CONTAINER of overlays, not an overlay, so
+    # its children are descended one level further. Getting that wrong would put
+    # the tier names into the set and forbid `--shell-package core`.
+    overlays = [d for d in TEMPLATE.iterdir() if d.is_dir() and d.name not in AGENTS.values()]
+    overlays += [d for parent in AGENTS.values() if parent for d in (TEMPLATE / parent).iterdir() if d.is_dir()]
+    taken = {entry.name for overlay in overlays for entry in overlay.iterdir()} - {"cli"}
+    name = args.shell_package
+    if not name.isidentifier() or keyword.iskeyword(name) or name in taken:
+        print(
+            f"❌ --shell-package {name!r} is not usable. It must be a python identifier that is not "
+            "a keyword — the tree imports it by name — and must not be a path this template already "
+            f"ships at the root: {', '.join(sorted(taken))}."
+        )
+        return 1
 
     if version_key(args.python_ceiling) < version_key(args.python):
         print(

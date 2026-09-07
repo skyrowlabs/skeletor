@@ -808,6 +808,31 @@ def join_set_arg(argv: List[str]) -> List[str]:
     return joined
 
 
+#: Arguments `--set-arg` refuses, because they rename a **path** rather than
+#: change a value inside one.
+#:
+#: Everything this tool does is "render the base, render ours, merge them file by
+#: file", and that is exactly the wrong instrument for a rename: the head render
+#: puts the file under its new name, so it arrives as a *new* file while the old
+#: one is reported as no longer shipped and — correctly, since this tool never
+#: deletes — left exactly where it is. The result is both, which for
+#: `--shell-package` is a tree whose own `scripts/paths.py` refuses to say which
+#: directory is the shell.
+#:
+#: The predicate is not "flags somebody thought of", and sky.boss put it better
+#: than the mechanical version did: **`--set-arg` is safe for an argument whose
+#: effect is WITHIN files, and unsafe for one whose effect is the SET OF PATHS.**
+#: That is a property of the argument rather than a list of two, and it is what a
+#: future flag will trip over by looking harmless — the operational test is
+#: whether `copy_overlay` in `bin/skeletor-new` consumes the value as a
+#: destination name.
+#:
+#: `bin/skeletor-verify`'s `shell_package_gate` asserts each entry is still
+#: refused and still recorded by a scaffold, so one that stopped renaming
+#: anything fails rather than sitting here as a decision nobody re-made.
+RENAMES_A_PATH = {"--shell-package", "--cli"}
+
+
 def set_args(recorded: List[str], args) -> Tuple[List[str], Dict[str, Tuple[str, str]]]:
     """The arguments the HEAD render uses, with `--set-arg` applied.
 
@@ -867,6 +892,18 @@ def set_args(recorded: List[str], args) -> Tuple[List[str], Dict[str, Tuple[str,
             die(f"--set-arg takes flag=value, got {raw!r}")
         flag, value = raw.split("=", 1)
         flag = "--" + flag.lstrip("-")
+        if flag in RENAMES_A_PATH:
+            die(
+                f"{flag} cannot be set on an upgrade.\n"
+                "   This tool is safe for an argument whose effect is WITHIN files and unsafe for one\n"
+                "   whose effect is the SET OF PATHS. It renders two trees and merges them file by\n"
+                "   file, so a rename arrives as new files under the new name while the old ones are\n"
+                "   reported as no longer shipped and left where they are — this tool never deletes.\n"
+                "   You get both, and for --shell-package that is a tree whose own scripts/paths.py\n"
+                "   then refuses to say which directory is the shell.\n"
+                "   Rename it with `git mv` and leave the record alone, or re-scaffold with the new\n"
+                "   value. A three-way merge is for a value inside a file; a name is what git is for."
+            )
         if flag not in updated:
             die(
                 f"{flag} is not among this tree's recorded arguments, so there is nothing to change.\n"

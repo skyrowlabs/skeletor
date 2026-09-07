@@ -416,6 +416,66 @@ Three things it reads rather than repeats: the tier and language lists come from
 template against a config the template does not have — and would stay green
 while doing it.
 
+The **shell package** gate is the newest, and what it found was in this
+repository rather than in the template. `--shell-package` renames `cli/`, which
+is the most collided-with directory name a python monorepo has: sky.boss moved
+their own product out of the way so this template's shell could have it, and
+paid 119 failing tests mid-flight plus a `sed` whose worst artefact was
+`from cli import cli` becoming `from x import x`. The flag is a directory rename
+and nothing else, which is only possible because the package already never named
+itself — `_discover()` reads `__name__` and `__path__`, `__main__.py` imports
+relatively, and `scripts/paths.py` finds the directory by its `__main__.py`.
+
+**`bin/skeletor-verify` could not survive the rename.** Five sites reached for a
+literal `cli/`, and one of them was `_TOLERANT_SUITES` — a `from cli.test_cmds
+import SUITES` executed inside the tree, which is *precisely* the construct the
+template ships `tests/shell.py` to forbid. The instrument written to check that
+a rename works was the thing that could not be renamed, and nothing could have
+said so before the flag existed: with one possible name, a hardcoded name and a
+discovered one are the same string. That is the *undistinguished, not confirmed*
+rule at the level of a value rather than a flag — and its cost is not symmetric,
+since a hardcoded name in a *gate* fails as "the tree is broken."
+
+The gate is two halves and only one of them is new. The substantive assertion is
+`gates()` unmodified — every check every other configuration answers, asked of a
+tree whose shell is called something else — because a static import of the old
+name fails at **collection**, loudly. The half those cannot ask is an `ast` walk
+requiring no `Import`/`ImportFrom` in the tree to name `cli`: **15 of a fresh
+agentic tree's 70 python files are never imported by its own suite**, measured,
+and `test_output_contract.py` runs only `scripts/check_*.py` as subprocesses, so
+the docs and release scripts are reached by nothing at all.
+
+**Three plants, and the first two are the lesson.** *A plant that did not land is
+indistinguishable from a gate that works* has a sibling one step further along:
+**a plant that landed and was caught by something else does not establish the
+claim either** — both are green, and both feel like a pass. The import in
+`check_doc_links.py` took pytest down with five other gates, because three tests
+import that file. The same import *unused* in an unreached file was caught by
+flake8's `F401`, which is real coverage and not this gate's. Only the third —
+`import cli`, **used**, in `scripts/docs/freeze_release.py`, positioned where
+isort wants it, since a renamed tree's `known_first_party` no longer holds `cli`
+— left 196 tests, `check docs`, `check output`, pyright and all three linters
+green with one line of output in the entire grid.
+
+Three files in a renamed tree still spell `cli`, all in docstrings, and all of
+them are the files documenting the rename: `tests/shell.py` and
+`scripts/paths.py` name the bad pattern in order to forbid it, and the shell's
+`__init__.py` records sky.boss's history. That is sky.boss's own vocabulary
+line — no predicate over a notation can see out of prose about the notation —
+and it is why the predicate is `ast` and not `grep`: an import statement is
+syntax, so the exemption is structural and the list is empty.
+
+**`--set-arg` refuses it, and `--cli` with it.** An upgrade renders two trees and
+merges them file by file, which is the wrong instrument for a rename: the head
+render writes every file under the new name, so they arrive as new files while
+the old ones are reported as no longer shipped and — correctly, since this tool
+never deletes — left where they are. For `--shell-package` that is a tree whose
+own `scripts/paths.py` then refuses to say which directory is the shell.
+`RENAMES_A_PATH` is the set, its predicate is *what `copy_overlay` consumes as a
+destination name*, and the gate asserts each entry is still recorded by a
+scaffold and still refused — so an entry that stopped renaming anything fails
+rather than sitting there as a decision nobody re-made.
+
 The lint gates exist because their absence shipped: a scaffold once carried 19
 files `black` would rewrite, 20 imports `flake8` rejects, and markdown
 `prettier` re-pads. `pre-commit run --all-files` — the first command the README
@@ -945,7 +1005,18 @@ interlock, and which you cannot understand from one file:
   index generators and two README builders are thin wrappers over it.
   `queue_order.py` is imported by every consumer of the ready queue so the
   published order is the real one. `frontmatter.py` is a deliberately
-  non-general parser for a schema we also generate.
+  non-general parser for a schema we also generate — **and its tolerance is
+  split by what it can see, not by severity.** A block it cannot *find* returns
+  `({}, text)`, because one unreadable doc must not crash the index build for
+  every other one. A construct inside a found block that it cannot *represent*
+  raises, because that path was returning a plausible wrong value: sky.boss
+  found `agent_value: 3  # why` parsing to the string, `int()` failing inside a
+  tolerant `except`, and the archive labelling its four densest documents
+  *historical only*. The tolerance had a written reason, the reason was about
+  **absence**, and it was quietly covering **misrepresentation** as well. The
+  general form is one this repository keeps arriving at from new directions:
+  *"I could not read this" and "this key is empty" are different answers, and
+  only one of them can be noticed.*
 
   **Filing a plan strips the tank-only fields in both forms**, and the two halves
   live apart on purpose: `add_frontmatter.py` clears the frontmatter (it runs on
@@ -1101,6 +1172,36 @@ interlock, and which you cannot understand from one file:
    rule made cheap to express — a filter tested against one item is unobservable,
    because "everything" and "the one match" are the same set — and it was already
    here as a hand-written `len(COMMANDS) >= 5` in exactly one place.
+
+   **A fixture produced by the mechanism under test cannot test that
+   mechanism's defaults.** The gate for `--shell-package`'s upgrade-time default
+   scaffolded a tree that *took* the default — the honest representative of the
+   population — stripped the recorded entry and upgraded. One binary wrote the
+   fixture and rendered the upgrade, so both sides took the moved default and
+   `cross_check`'s bijection held: with the default planted at `shell` it
+   reported `already current` while the gate beside it went red. Right label,
+   real fixture, no power. It asks for `cli` by name now, which pins the disk
+   independently of the default. This is sharper than *the example you reach for
+   first cannot discriminate*, which is about convenience — nothing about this
+   fixture was convenient, and the tell is mechanical: **the expectation and the
+   artifact came out of the same call on the same inputs**, with no
+   transformation between them that could differ.
+
+   **sky.boss supplied the clause that stops it condemning every wiring test:**
+   a fixture produced by the mechanism under test is acceptable exactly when
+   that mechanism has *its own* gate that is not. The tautology is often the
+   right assertion — a route should return what its serialiser returns, and
+   re-deriving the format in the test is a second opinion about it. The rule is
+   **the chain has to terminate somewhere independent**, and what I built
+   terminated in itself. Their terminus was a gate deriving the expectation from
+   `dataclasses.fields()`; mine is asking the fixture for `cli` by name.
+
+   The boundary matters because `manifest_args_gate` looks like the defect and
+   is not: it compares the scaffolder against itself with no independent source
+   anywhere, and it is sound because a **fixed point is a law rather than a
+   value** — *applied twice equals applied once* is two calls that can disagree,
+   which is what `--reproducing False` failed. One call compared with itself is
+   a mirror; two calls that could diverge is a law.
 
    **A plant that did not land is indistinguishable from a gate that works.**
    Both print green. proto.pilot lost an hour to a `sed` whose pattern silently

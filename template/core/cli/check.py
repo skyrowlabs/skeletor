@@ -54,7 +54,7 @@ def lint() -> None:
 #: CONFIGURATION the generator can produce ships the linter for the source it
 #: ships. A tree only ever knows its own.
 LANGUAGE_CONFIGS = (
-    ("python", ("cli/**/*.py", "scripts/**/*.py", "tests/**/*.py"), (".flake8", "pyrightconfig.json")),
+    ("python", ("{{SHELL_PACKAGE}}/**/*.py", "scripts/**/*.py", "tests/**/*.py"), (".flake8", "pyrightconfig.json")),
     ("node", ("package.json",), ("eslint.config.js",)),
 )
 

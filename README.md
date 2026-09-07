@@ -231,7 +231,7 @@ python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
 See [`docs/TIERS.md`](docs/TIERS.md) for what each costs. Pick the one you will
 maintain, not the one that looks most thorough.
 
-### The four flags that change what you get
+### The five flags that change what you get
 
 Everything else renders a name into a file. These decide what is in the tree:
 
@@ -241,11 +241,25 @@ Everything else renders a name into a file. These decide what is in the tree:
 | `--versioning` | **Does anything deploy this?** `release-please` for a published artifact, whose users have no `.git` and so need a tracked `VERSION`; `tag` for a repository run from a checkout, where `git describe` already knows. `tag` is a *subtraction* — the same files, minus four |
 | `--agent` | `claude` ships `.claude/` tooling; `none` omits it. The conventions in `docs/rules/` are plain markdown and ship either way, because nothing auto-loads them for any vendor |
 | `--language` | Your **product's** language. Not the shell's — `cli/`, `tests/` and `scripts/` are python at every tier, so this only ever adds a second toolchain |
+| `--shell-package` | What the shell's python package is **called** (default `cli`). It renames a directory and nothing else — no file in a generated tree spells the name, so this is the one flag with no second effect |
 
 `--python` is a floor, not the interpreter you happen to run: it renders into
 pyright's `pythonVersion` and black's `target-version`, which both mean *at
 least this*. `--python-ceiling` adds the other end, and CI runs a matrix over
 the pair — the two failure modes a matrix catches both live at the ends.
+
+**Rename the shell if your product already owns `cli/`.** That is the most
+collided-with directory name in a python monorepo, and the cost of finding out
+late is measured rather than guessed: sky.boss moved their product out of `cli/`
+so this template's shell could have it, and paid 119 failing tests mid-flight
+plus a `sed` whose worst artefact was `from cli import cli` becoming
+`from x import x`. It is cheap here only because the package never names itself —
+command groups are found through `__name__` and `__path__`, `__main__.py` imports
+relatively, `scripts/paths.py` finds the directory by its `__main__.py`, and the
+tests go through `tests/shell.py`. It is the one argument `--set-arg` cannot
+usefully change after the fact: an upgrade would render the package under the new
+name as a set of *new* files and report the old ones as gone from the template,
+which is a rename you would be doing by hand anyway.
 
 ---
 

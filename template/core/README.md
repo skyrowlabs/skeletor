@@ -28,7 +28,7 @@ not something to work around.
 
 Every gate, generator, and maintenance job in this repo is a subcommand of
 `./{{CLI}}`, and CI calls the same subcommands you do. There is no command list
-in this README on purpose: command groups are discovered by scanning `cli/`, so
+in this README on purpose: command groups are discovered by scanning `{{SHELL_PACKAGE}}/`, so
 a list here would be a second copy that goes stale the first time someone adds
 one.
 

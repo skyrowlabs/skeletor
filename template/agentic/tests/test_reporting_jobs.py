@@ -26,7 +26,9 @@ from scripts.reporting.jobs import FIX_POLICIES, JOBS, JOBS_BY_KEY, _allowlisted
 
 
 def _cli_commands():
-    from cli.report import report
+    from tests.shell import module
+
+    report = module("report").report
 
     return set(report.commands) - {"cron", "watch"}
 

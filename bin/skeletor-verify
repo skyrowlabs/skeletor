@@ -81,17 +81,27 @@ class Result:
         return "✅" if self.ok else "❌"
 
 
-def load_scaffolder():
-    """Import ``bin/skeletor-new`` for its TIERS and LANGUAGE_OVERLAYS maps.
+def load_tool(path: Path, name: str):
+    """Import one of the `bin/skeletor-*` tools for the data it declares.
 
-    It has no ``.py`` suffix, so the import is by path. Everything at its module
-    level is a definition; ``main()`` is guarded.
+    They have no ``.py`` suffix, so the import is by path. Everything at their
+    module level is a definition; ``main()`` is guarded.
+
+    Reading a tool's own table is the habit this whole file is built on — a copy
+    of `TIERS`, of `LANGUAGE_CONFIGS`, or of which arguments an upgrade refuses
+    would verify the template against a table the template does not have, and
+    would stay green while doing it.
     """
-    loader = importlib.machinery.SourceFileLoader("skeletor_new", str(SCAFFOLDER))
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
+
+
+def load_scaffolder():
+    """Import ``bin/skeletor-new`` for its TIERS and LANGUAGE_OVERLAYS maps."""
+    return load_tool(SCAFFOLDER, "skeletor_new")
 
 
 #: A git identity for every subprocess — see `run()`. Held here rather than
@@ -237,20 +247,40 @@ def scaffold(tier: str, language: str, workdir: Path, name: Optional[str] = None
     return Result(f"scaffold {tier}/{language}", code == 0, time.time() - started, output), target
 
 
+def shell_package(tree: Path) -> Path:
+    """The tree's shell package, found the way the tree finds it.
+
+    `--shell-package` renames `cli/`, so every gate here that reached for a
+    literal `cli/` was asking about a directory that need not exist. It is found
+    the same way `scripts/paths.py` finds it — the one root directory holding a
+    `__main__.py` — rather than read out of `.skeletor.json`, because the
+    manifest is a record of what was asked for and this is a question about what
+    is on disk. A gate that read the record would agree with a scaffolder that
+    ignored the flag.
+    """
+    found = [d for d in sorted(tree.iterdir()) if d.is_dir() and (d / "__main__.py").exists()]
+    if len(found) != 1:
+        raise AssertionError(f"expected exactly one shell package in {tree}, found {[d.name for d in found]}")
+    return found[0]
+
+
 def expected_command_names(tree: Path) -> List[str]:
     """The command names ``./probe --help`` must list, derived the way the tree
-    derives them: one per ``cli/*.py`` that is neither private nor ``helpers``.
+    derives them: one per module in the shell package that is neither private
+    nor ``helpers``.
 
-    The alias map is read out of the generated ``cli/__init__.py`` rather than
+    The alias map is read out of the generated ``__init__.py`` rather than
     copied here — a second copy of it would be the registry this whole shell
-    exists to avoid.
+    exists to avoid. The package is *found* rather than named, for the same
+    reason the tree finds it: `--shell-package` moves it.
     """
-    init = (tree / "cli" / "__init__.py").read_text(encoding="utf-8")
+    package = shell_package(tree)
+    init = (package / "__init__.py").read_text(encoding="utf-8")
     match = re.search(r"^_ALIASES = (\{[^}]*\})", init, re.MULTILINE)
     aliases = ast.literal_eval(match.group(1)) if match else {}
 
     names = []
-    for module in sorted((tree / "cli").glob("*.py")):
+    for module in sorted(package.glob("*.py")):
         stem = module.stem
         if stem.startswith("_") or stem == "helpers":
             continue
@@ -267,7 +297,7 @@ def check_groups_register(tree: Path) -> Result:
     expected = expected_command_names(tree)
     missing = [name for name in expected if not re.search(rf"^\s+{re.escape(name)}\b", output, re.MULTILINE)]
     ok = not missing
-    detail = output if ok else f"{output}\n\nmodules present in cli/ but absent from --help: {missing}"
+    detail = output if ok else f"{output}\n\nmodules present in {shell_package(tree).name}/ but absent from --help: {missing}"
     return Result(f"cli --help registers {len(expected)} groups", ok, time.time() - started, detail)
 
 
@@ -1814,9 +1844,14 @@ def check_docs_gate_sees_the_tree(tree: Path) -> Result:
 #: from the tree rather than named here for the reason the lint arguments are:
 #: a copy would verify the template against a registry the template does not
 #: have, and would stay green while doing it.
+#: Read through the tree's own `tests/shell.py`, never `from cli.test_cmds`.
+#: A static import of the default name is exactly the thing `--shell-package`
+#: cannot survive, and it would have failed here as a tree that could not
+#: report its suites rather than as a gate spelling a name it should not know.
 _TOLERANT_SUITES = (
     "import sys; sys.path.insert(0, '.'); "
-    "from cli.test_cmds import SUITES; "
+    "from tests.shell import module; "
+    "SUITES = module('test_cmds').SUITES; "
     "print(' '.join(m for m, s in SUITES.items() if not s.ships_tests))"
 )
 
@@ -1848,7 +1883,7 @@ def check_empty_suite_is_not_red(tree: Path, venv_python: Path) -> List[Result]:
                 "test on an empty suite: which suites tolerate one",
                 False,
                 time.time() - started,
-                f"could not read SUITES out of the tree's cli/test_cmds.py\n{listed}",
+                f"could not read SUITES out of the tree's {shell_package(tree).name}/test_cmds.py\n{listed}",
             )
         ]
 
@@ -2150,7 +2185,7 @@ def check_script_targets(tree: Path) -> Result:
     """
     started = time.time()
     problems = []
-    for source in sorted((tree / "cli").glob("*.py")):
+    for source in sorted(shell_package(tree).glob("*.py")):
         tree_ast = ast.parse(source.read_text(encoding="utf-8"))
         for node in ast.walk(tree_ast):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
@@ -6616,7 +6651,7 @@ def unlinted_source_gate(workdir: Path) -> List[Result]:
 
     def table(tree: Path):
         """`LANGUAGE_CONFIGS` out of the generated tree, as data."""
-        source = (tree / "cli" / "check.py").read_text(encoding="utf-8")
+        source = (shell_package(tree) / "check.py").read_text(encoding="utf-8")
         for node in ast.walk(ast.parse(source)):
             if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == "LANGUAGE_CONFIGS":
                 return ast.literal_eval(node.value)
@@ -6644,7 +6679,8 @@ def unlinted_source_gate(workdir: Path) -> List[Result]:
                     f"unlinted source: {language}",
                     False,
                     time.time() - started,
-                    "cli/check.py declares no LANGUAGE_CONFIGS — the table this gate reads is gone",
+                    f"{shell_package(tree).name}/check.py declares no LANGUAGE_CONFIGS"
+                    " — the table this gate reads is gone",
                 )
             )
             continue
@@ -6750,6 +6786,286 @@ def tagline_required_gate(workdir: Path) -> Result:
     )
 
 
+def shell_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
+    """`--shell-package` renames the shell's package, and the tree must not
+    notice.
+
+    `cli` is the most collided-with directory name a python monorepo has, and
+    sky.boss paid for it: they moved their own product out of `cli/` so this
+    template's shell could have it, and their rename cost 119 failing tests
+    mid-flight plus a `sed` whose worst artefact was `from cli import cli`
+    becoming `from x import x`. A flag is the cheap answer, and it is cheap
+    only because the package already never named itself — `_discover()` reads
+    `__name__` and `__path__`, `__main__.py` imports relatively.
+
+    ## Why the tree's own gates are the substantive assertion
+
+    A static `from cli.test_cmds import SUITES` is the one thing a rename cannot
+    survive, and it fails at **collection** with `ModuleNotFoundError` — so a
+    half-done rename is loud rather than subtle, and running the renamed tree's
+    full gate set is what proves it. That is `gates()`, unmodified: the same
+    checks every configuration in this grid already answers, asked of a tree
+    whose shell is called something else.
+
+    ## And the one question those gates cannot ask
+
+    A python file nothing imports is never collected, so its stale `import cli`
+    stays green through all of it. Measured rather than assumed: **15 of a
+    fresh agentic tree's 70 python files are never imported by its own suite**,
+    and `test_output_contract.py` runs only `scripts/check_*.py` as subprocesses,
+    so the docs and release scripts are reached by nothing. So this walks the
+    **`ast`** of every `.py` in the tree and requires no `Import`/`ImportFrom`
+    to name the old package — an exact, exemption-free predicate, because an
+    import statement is syntax and cannot be a docstring, a comment, or prose
+    about the notation.
+
+    ## The plant took three tries, and the first two are the lesson
+
+    *A plant that did not land is indistinguishable from a gate that works* is
+    this repository's rule, and its sibling is one step further along: **a plant
+    that landed and was caught by something else does not establish the claim
+    either.** Both looked like a success.
+
+    - `import cli` in `scripts/check_doc_links.py` — three tests import that
+      file, so pytest went red and so did five other gates. Nothing about a
+      file nothing imports was shown.
+    - the same import, *unused*, in a file nothing imports — flake8's `F401`
+      caught it, which is real coverage and not this gate's.
+    - `import cli` **used**, in `scripts/docs/freeze_release.py`, placed where
+      isort wants it (a renamed tree's `known_first_party` no longer contains
+      `cli`, so it sorts as third-party). 196 tests pass, `check docs`,
+      `check output`, pyright, black, isort and flake8 are all green, and this
+      is the only thing in the grid that says a word.
+
+    The three files that DO spell `cli` in the renamed tree spell it in
+    docstrings, deliberately, and are exactly the files documenting the rename:
+    `tests/shell.py` and `scripts/paths.py` name the bad pattern in order to
+    forbid it, and `<shell>/__init__.py` records sky.boss's history.
+    That is the vocabulary exemption sky.boss drew the line for, and no
+    predicate over the notation can see out of prose about the notation — which
+    is why the predicate here is `ast` and not `grep`.
+
+    ## Both directions
+
+    The default has to still be `cli`, and it is asserted from a tree rather
+    than from the parser: a flag whose default silently moved would rename every
+    scaffold anybody has ever made, and the manifest would record the new value
+    as though it had been chosen. And the validation refusals are asserted by
+    **naming the flag** in the message, since a scaffold can fail for many
+    reasons and a gate satisfied by any non-zero exit stays green when the
+    failure moves.
+    """
+    results = []
+    name = "shell"
+    target = workdir / "renamed"
+    started = time.time()
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Renamed",
+         "--slug", "renamed", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
+         "--language", "python", "--shell-package", name],
+        cwd=workdir,
+    )
+    if code != 0:
+        return [Result(f"--shell-package: scaffold {tier}", False, time.time() - started, output)]
+    results.append(Result(f"--shell-package: scaffold {tier}", True, time.time() - started, output))
+
+    started = time.time()
+    renamed = (target / name).is_dir()
+    old = (target / "cli").exists()
+    results.append(
+        Result(
+            f"--shell-package: ships {name}/ and no cli/",
+            renamed and not old,
+            time.time() - started,
+            f"{name}/ present: {renamed}\ncli/ present: {old}",
+        )
+    )
+
+    # The `ast` half: an import naming the old package, anywhere, including the
+    # files no test ever imports.
+    started = time.time()
+    offenders = []
+    scanned_files = 0
+    for path in sorted(target.rglob("*.py")):
+        if "__pycache__" in path.parts or ".venv" in path.parts:
+            continue
+        scanned_files += 1
+        try:
+            tree_ast = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError as exc:  # a template that stopped parsing is its own failure
+            offenders.append(f"{path.relative_to(target)}: does not parse — {exc}")
+            continue
+        for node in ast.walk(tree_ast):
+            roots = []
+            if isinstance(node, ast.Import):
+                roots = [a.name.split(".")[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                roots = [node.module.split(".")[0]]
+            if "cli" in roots:
+                offenders.append(f"{path.relative_to(target)}:{node.lineno}")
+    results.append(
+        Result(
+            f"--shell-package: no import names cli ({scanned_files} file(s) parsed)",
+            not offenders and scanned_files >= 30,
+            time.time() - started,
+            ("\n".join(offenders) if offenders else "")
+            + (f"\nonly {scanned_files} file(s) scanned — too few to prove anything" if scanned_files < 30 else ""),
+        )
+    )
+
+    # The substantive half: the renamed tree answers every question every other
+    # configuration in this grid answers.
+    (target / ".venv").symlink_to(venv_python.parents[1])
+    for gate in gates(target, venv_python, pyright_ok):
+        gate.label = f"--shell-package: {gate.label}"
+        results.append(gate)
+
+    # The default did not move, read off a tree rather than off the parser.
+    #
+    # And then the case that actually matters, which this gate did not have
+    # until sky.boss asked for it while holding a `v0.20.0` manifest. Asserting
+    # the default off a FRESH SCAFFOLD is asserting it in the one place it
+    # cannot bite: a scaffold RECORDS the flag, so the recorded value is what
+    # every later render reads and the default is consumed once, at scaffold
+    # time. The path where the default is load-bearing is the upgrade of a
+    # manifest that has no value for it — which is every tree scaffolded before
+    # the flag existed, so on the day it ships that is all of them.
+    #
+    # Their general form, and it will recur for every scaffold argument anybody
+    # adds later: **`--set-arg` refuses to change a path-set argument, and a new
+    # flag's default changes one for free.** The refusal covers the loud path.
+    # A default is the quiet one, and the trees it reaches are exactly the ones
+    # that predate the thinking.
+    started = time.time()
+    plain = workdir / "default-package"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(plain), "--allow-dirty", "--name", "Plain",
+         "--slug", "plain", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
+        cwd=workdir,
+    )
+    results.append(
+        Result(
+            "--shell-package: defaults to cli",
+            code == 0 and (plain / "cli").is_dir(),
+            time.time() - started,
+            f"exit: {code}\ncli/ present: {(plain / 'cli').is_dir()}\n{output[-400:]}",
+        )
+    )
+
+    # Stripping the entry from a real manifest is byte-identical to a manifest
+    # written before the flag existed, and "already current" is the whole
+    # assertion — it needs no knowledge of what the default IS. Any value other
+    # than `cli` renders the shell under a different name, and both comparisons
+    # are loud about it from opposite sides: the rendered path refuses in
+    # `cross_check`, whose bijection with the recorded hashes breaks, and the
+    # offline path reports every `cli/*` file as no longer shipped. Two doors,
+    # and a wrong default cannot get through either quietly.
+    #
+    # ## The fixture asks for `cli` EXPLICITLY, and the first draft did not
+    #
+    # That draft reused the tree above — scaffolded with no `--shell-package` at
+    # all, then stripped — and it was a tautology, which its own plant is what
+    # proved. The same binary writes the fixture and renders the upgrade, so
+    # both sides take the same default and agree with each other **whatever it
+    # is**: with the default moved to `shell`, the tree got `shell/` on disk,
+    # the render produced `shell/`, `cross_check`'s bijection held, and this
+    # reported `already current` while the gate beside it went red.
+    #
+    # A gate with the right label, a real fixture, and no power — which is the
+    # defect this gate exists to fix, one layer along. Asking for `cli` by name
+    # pins the disk independently of the default, so the two agree only when the
+    # default really is `cli`.
+    started = time.time()
+    preflag = workdir / "pre-flag-manifest"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(preflag), "--allow-dirty", "--name", "Preflag",
+         "--slug", "preflag", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
+         "--language", "python", "--shell-package", "cli"],
+        cwd=workdir,
+    )
+    troubles = [] if code == 0 else [f"scaffold failed: exit {code}\n{output[-400:]}"]
+    manifest_path = preflag / load_scaffolder().MANIFEST_NAME
+    stripped = json.loads(manifest_path.read_text(encoding="utf-8")) if code == 0 else {"args": []}
+    if "--shell-package" not in stripped["args"]:
+        troubles.append("nothing to strip — a scaffold no longer records --shell-package, so this is not a plant")
+    else:
+        index = stripped["args"].index("--shell-package")
+        del stripped["args"][index : index + 2]
+        manifest_path.write_text(json.dumps(stripped, indent=2) + "\n", encoding="utf-8")
+    for extra in (["--from-dir", str(SKELETOR)], ["--no-base"]):
+        if troubles:
+            break
+        code, output = run(
+            [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(preflag), "--dry-run", *extra],
+            cwd=workdir,
+        )
+        if code != 0 or "already current" not in output:
+            troubles.append(f"{' '.join(extra)}: exit {code}\n{output[-600:]}")
+    results.append(
+        Result(
+            "--shell-package: a manifest that predates the flag still renders the shell at cli",
+            not troubles,
+            time.time() - started,
+            "\n".join(troubles),
+        )
+    )
+
+    # `--set-arg` must refuse every argument that renames a path, and the entries
+    # are checked against what they claim rather than trusted: each must still be
+    # IN the tree's record (an entry naming an argument no scaffold takes is a
+    # refusal nobody can trigger) and must still be REFUSED. That is this file's
+    # standing rule about exemptions, pointed at a decline list — the failure it
+    # prevents is an entry outliving the flag, where the path can come back for
+    # something else and arrive pre-refused.
+    started = time.time()
+    upgrade = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade")
+    manifest = target / load_scaffolder().MANIFEST_NAME
+    recorded = json.loads(manifest.read_text(encoding="utf-8"))["args"]
+    troubles = []
+    for flag in sorted(upgrade.RENAMES_A_PATH):
+        if flag not in recorded:
+            troubles.append(f"{flag}: not among a scaffold's recorded arguments — the entry is stale")
+            continue
+        code, output = run(
+            [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(target),
+             "--set-arg", f"{flag.lstrip('-')}=whatever", "--dry-run"],
+            cwd=workdir,
+        )
+        if code == 0 or flag not in output:
+            troubles.append(f"{flag}: exit {code}, refusal names the flag: {flag in output}")
+    results.append(
+        Result(
+            f"--set-arg: {len(upgrade.RENAMES_A_PATH)} path-renaming argument(s) refused",
+            not troubles and len(upgrade.RENAMES_A_PATH) >= 1,
+            time.time() - started,
+            "\n".join(troubles),
+        )
+    )
+
+    # A name that would collide with a directory the template already ships, and
+    # a name python cannot import. Both refusals must say which flag.
+    for bad, why in (("tests", "collides with a shipped directory"), ("3bad", "is not an identifier")):
+        started = time.time()
+        reject = workdir / f"bad-{bad}"
+        code, output = run(
+            [sys.executable, str(SCAFFOLDER), str(reject), "--allow-dirty", "--name", "Bad",
+             "--slug", "bad", "--tagline", "t", "--cli", CLI_NAME, "--tier", "core",
+             "--shell-package", bad],
+            cwd=workdir,
+        )
+        named = "--shell-package" in output
+        results.append(
+            Result(
+                f"--shell-package {bad}: refused ({why})",
+                code != 0 and named and not reject.exists(),
+                time.time() - started,
+                f"exit: {code} (want non-zero)\nrefusal names the flag: {named}\n"
+                f"left no tree behind: {not reject.exists()}\n{output[:400]}",
+            )
+        )
+    return results
+
+
 def main() -> int:
     scaffolder = load_scaffolder()
     all_tiers = sorted(scaffolder.TIERS)
@@ -6833,6 +7149,12 @@ def main() -> int:
             results.append(gate)
 
         for gate in agentless_gate(fullest, workdir, venv_python):
+            results.append(gate)
+
+        # After `agentless_gate`, because both ask what happens when a scaffold
+        # is asked for something other than the default shape, and this one
+        # costs a full `gates()` run on a tree of its own.
+        for gate in shell_package_gate(fullest, workdir, venv_python, pyright_ok):
             results.append(gate)
 
         for gate in badge_gate(fullest, workdir, venv_python):

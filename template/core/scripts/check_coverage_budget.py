@@ -158,7 +158,7 @@ def main() -> int:
     # Nothing measured is this project's own. The ratchet itself is unharmed —
     # it ships at 0.00% and cannot fail there — so this suppresses the two
     # places that would WRITE that number down, and nothing else. A drop below
-    # an existing baseline is still a drop: `cli/` and `scripts/` are this
+    # an existing baseline is still a drop: `{{SHELL_PACKAGE}}/` and `scripts/` are this
     # tree's code from its first commit, and a regression in them is real
     # whatever the rest of the population looks like.
     nothing_of_yours = (

@@ -3771,6 +3771,265 @@ The needle is now both names — what the repository *is* and where this clone
 prose calls a repository by its identity, and somebody transcribing their own
 shell pastes the directory.
 
+### A parser tolerant of what it cannot find was also tolerating what it could not represent
+
+`scripts/docs/frontmatter.py` is a hand-rolled reader for a flat schema this
+project also writes, and its docstring scopes it correctly: *"emitted by `dumps`
+in this same module."* `add_frontmatter.py` runs it over **hand-written**
+documents, so the scoping sentence was doing no work at the one call site that
+mattered.
+
+sky.boss found it folding 24 real documents into a scaffolded tree. Three
+shapes, all legal YAML, **none of which failed**:
+
+| Written | Returned | Consequence |
+| --- | --- | --- |
+| `agent_value: 3  # four rounds` | `'3  # four rounds'` | `gen_impl_index.py` runs `int()` inside `except (TypeError, ValueError)` that defaults to `1` — *historical only* |
+| `key_files: [a, b,` ⏎ `  c]` | `'[a, b,'` | the rest of the list read as body text |
+| `key_files:` ⏎ `  - a` ⏎ `  - b` | `''` | the whole list, gone |
+
+The first is the one to rank, and not because it loses data: it **manufactures a
+judgment about how much a document is worth reading.** 4 of their 24 docs
+carried that comment and they were the four densest — so the archive would have
+sorted the best material to the bottom of every category, labelled ⭐ historical
+only, with no error anywhere.
+
+**Where the line goes, which is narrower than "raise on malformed".** `parse()`'s
+tolerance had a written reason — *a doc that fails to parse must still be listed
+as unclassified rather than crashing the index build for every other doc* — and
+Invariant 1 says a rule whose reason is written down can be evaluated when it
+becomes inconvenient. Evaluated: that reason is about **absence**. A block
+sequence does not fail to parse; it parses to a wrong value. The tolerance was
+written for one thing and was silently covering another, and only the second is
+unnoticeable.
+
+So the split is by *what the parser can see*, not by severity:
+
+- a block it cannot **find** — no frontmatter, unterminated — still returns
+  `({}, text)`. Unchanged.
+- a construct inside a found block that it cannot **represent** raises
+  `FrontmatterError`, naming file, line and key.
+
+A trailing comment is neither: it is stripped, because that is what YAML means
+and this schema is flat enough for the rule to be unambiguous. `_emit` now quotes
+any value containing `#` so the round trip holds — otherwise the fix would have
+traded one silent corruption for another.
+
+**The habit came from this template.** `docs/TODO/_TEMPLATE.md` shows
+`> **Queue-Order**: 40   # only on a ready plan` on a header line, where it is
+fine. Four lines above, inside the frontmatter block, it was not — and nothing
+in the document says the two halves have different rules.
+
+**And the same report carried a second finding worth more than it was offered
+as.** `check_doc_tables.py` printed `N subfolder(s) routed` where `N` was every
+directory under `docs/` counted off the disk, minus the stranded ones. sky.boss
+raised it as phrasing and thought the number coincided with the truth whenever
+the gate passed. It does not: `unrouted()` deliberately does not descend into a
+routed folder, so the count included folders the check never examined. A fresh
+agentic tree printed **7**; the set a table row actually reached is **4**.
+
+It was arithmetic wearing a verdict's clothes, and the failure mode is this
+document's most repeated one — it would have gone on printing "everything
+routed" if the matching predicate narrowed to nothing, because the disk does not
+care what the tables say. `unrouted()` returns `(stranded, routed)` now. The
+half that is *not* fixed — `_DOC_DIR` regexes a whole table file, so a paragraph
+of prose naming a path is the same characters as a row naming it — needs the
+tables to parse as tables, and is written down at the site instead. The count
+change is what makes it observable: the printed number moves when the matching
+does.
+
+### The name a template takes is a cost it charges its adopters
+
+`cli/` is the most collided-with directory name a python monorepo has, and this
+template claimed it. sky.boss adopted, found the collision, and resolved it the
+only way then available: they moved **their own product** out of `cli/`. It cost
+them 119 failing tests mid-flight and a `sed` whose worst artefact was
+`from cli import cli` becoming `from x import x` — the rename reaching the click
+group as well as the package, because the two shared a name.
+
+`--shell-package` is the flag. It is a directory rename and nothing else, which
+is the only reason it is cheap: **the package already never named itself.**
+`_discover()` walks `__name__` and `__path__`, `__main__.py` imports relatively,
+`scripts/paths.py` finds the directory by its `__main__.py`, and `tests/shell.py`
+is where the tests reach it. Nothing in a generated tree spells the value, so
+the flag renames a directory and no file changes meaning.
+
+The name could not be **substituted** — `from {{SHELL_PACKAGE}}.x import y` is a
+syntax error, so the template's own python would stop parsing, and an `ast` walk
+over `template/` is how several gates here read it at all. Discovery keeps that
+property; substitution would have cost the instrument.
+
+**What the change actually found was in the generator, not the template.**
+`bin/skeletor-verify` had five sites reaching for a literal `cli/`, one of them
+a `from cli.test_cmds import SUITES` executed inside the scaffolded tree — the
+exact construct `tests/shell.py` exists to forbid. The tool written to check
+that a rename works was the thing that could not be renamed. Nothing could have
+reported it earlier: with one possible name, a hardcoded name and a discovered
+one are the same string, and *a value that has never been observed to disagree
+with another value is undistinguished, not confirmed.* The asymmetry is what
+makes it worth writing down — a hardcoded name in a **gate** does not fail as
+"this gate is wrong", it fails as "the tree is broken."
+
+**The flag is refused by `--set-arg`, and `--cli` with it.** An upgrade renders
+two trees and merges them file by file, which is the wrong instrument for a
+rename: the head render writes every file under the new name, so they arrive as
+*new* files while the old ones are reported as no longer shipped and left where
+they are, since this tool never deletes. Both directories then exist, and for
+`--shell-package` the tree's own `scripts/paths.py` refuses to say which is the
+shell. A rename is git's job; a three-way merge is for values **inside** a file.
+
+sky.boss supplied the predicate that makes that a property rather than a list of
+two names: **`--set-arg` is safe for an argument whose effect is *within* files
+and unsafe for one whose effect is the *set of paths*.** The mechanical test —
+whether `copy_overlay` consumes the value as a destination name — is how you
+check it, not what it means, and a future flag will trip over the second while
+passing the first by looking harmless.
+
+### And the door a refusal does not cover: a new flag's default
+
+Asked by sky.boss the same evening, holding a `v0.20.0` manifest, and it is the
+better half of the finding:
+
+> `--set-arg` refuses to change a path-set argument, and a new flag's default
+> changes one for free. The refusal is about the loud path. A default is the
+> quiet one, and the trees it reaches are exactly the ones that predate the
+> thinking.
+
+An upgrade renders the head from the *recorded* arguments, and a manifest
+written before a flag existed has no value for it — so the parser fills in the
+default. If `--shell-package` had defaulted to anything but `cli`, every tree
+scaffolded before it would have had its entire shell package renamed on the next
+upgrade, silently, with both directories left behind: precisely the outcome the
+refusal exists to prevent, reached by an adopter who did nothing.
+
+It defaults to `cli`, so nothing happened. **What had happened is that the gate
+asserting so was looking at the wrong tree.** `shell_package_gate` checked the
+default off a *fresh scaffold* — and a fresh scaffold **records** the flag, so
+the recorded value is what every later render reads and the default is consumed
+once, at scaffold time. The one path where the default decides anything is the
+upgrade of a manifest that lacks it, and nothing exercised it. That is this
+document's `--tagline` lesson at one remove: *a default no gate ever produces is
+not a tested default* — and here the gate that named the default was green while
+reading it from the recorded args rather than from its absence.
+
+The fixture is a strip rather than an invention: delete the entry from a real
+manifest, which is byte-identical to one written before the flag. The assertion
+is `already current`, and it deliberately needs no knowledge of what the default
+*is* — any other value is loud from both sides, because `cross_check`'s bijection
+with the recorded hashes breaks on the rendered path and the offline path reports
+every `cli/*` file as no longer shipped.
+
+The operational rule, which generalises past this flag: **when adding a scaffold
+argument that decides a path, its default is not a preference — it is a statement
+about every manifest that predates it.**
+
+**The first gate written for it was a tautology, and its own plant is what said
+so.** The fixture scaffolded a tree with no `--shell-package` at all — a tree
+that took the default, which is exactly what the population under test looks
+like — then stripped the recorded entry and upgraded. With the default moved to
+`shell` it reported `already current` while the gate beside it went red: the
+same binary wrote the fixture and rendered the upgrade, so both sides took the
+moved default, the disk got `shell/`, the render produced `shell/`, and
+`cross_check`'s bijection held perfectly. A gate with the right label, a real
+fixture, and no power.
+
+The fix is that the fixture asks for `--shell-package cli` **by name** and only
+then has the entry stripped, which pins the disk independently of the default.
+
+That is a rule this document did not have, and it is sharper than the one it sits
+next to. *The example you reach for first cannot discriminate* is about
+convenience — the simplest fixture has the fewest ways to be wrong. This one was
+not chosen for convenience; it was chosen because it looked like the honest
+representative of the population. The tell is different and it is mechanical:
+
+> **A fixture produced by the mechanism under test cannot test that mechanism's
+> defaults.** The fixture and the subject came out of the same call, so they
+> agree by construction, and the agreement is what the gate reads as a pass.
+
+It is the *undistinguished, not confirmed* rule again — with one call producing
+both sides, a correct default and a wrong one are the same green.
+
+**sky.boss then ran that rule over their own suite and sent back the clause it
+needs**, which is what stops it condemning every wiring test:
+
+> **A fixture produced by the mechanism under test is acceptable exactly when
+> that mechanism has its own gate that is not.** The failure is not the
+> tautology; it is nobody having checked whether the second gate exists.
+
+Their case: a route test asserting `body["block"] == tools_.block(...)`, the
+expectation computed by the subject. It can only fail if the route stops calling
+`block()` at all — and it is *correct*, because `block()` has an independent gate
+one file over that walks `dataclasses.fields(Tool)`, so the expectation there
+comes from the **type** rather than from the serialiser. The chain terminates in
+something that cannot agree by construction. What I had built was a chain that
+terminated in itself.
+
+The clause matters because the tautology is often the *right* assertion. A route
+really should return what its serialiser returns, and re-deriving the format in
+the test would be a second opinion about it — the very duplication this shell
+exists to prevent. The rule cannot be *never let the subject compute the
+expectation*; it is **the chain has to terminate somewhere independent**.
+
+**And the boundary needs one more line, because this repository has a gate that
+looks like the defect and is not.** `manifest_args_gate` compares
+`manifest_args(resolve(parse(argv)))` against itself replayed — both sides out of
+the scaffolder, no independent source anywhere. It is sound, and the reason is
+that a **fixed point is a law rather than a value**: it asserts *subject applied
+twice equals subject applied once*, which is two different calls with different
+inputs and can fail. `--reproducing False` is exactly what it failed on.
+
+So the tell is narrower than "the subject computed the expectation":
+
+> The tautology is **the expectation and the artifact coming out of the same call
+> on the same inputs**, with no transformation between them that could differ.
+> Two calls that could disagree is a law; one call compared with itself is a
+> mirror.
+
+My fix has the shape the clause describes, which is why sky.boss recognised it:
+asking the fixture for `--shell-package cli` **by name** is the independent
+terminus. The disk is pinned by something that is not the default, so the default
+can move and the gate can see it move.
+
+**Audited here rather than accepted, because this is the tree that has a
+generator** — sky.boss reported a structural null on the grounds that theirs has
+none, so the mechanism has no seat there. Three gates checked by hand, not a
+sweep: `versioning_gate` takes its omission set from `VERSIONING["tag"]` and
+would pass over a wrong set, but terminates in the tag tree's own `check docs`
+and unit suite, which hold no opinion about that map; `check_setup_blocks_agree`
+compares a **rendered** floor against a depth this file measures independently
+from the documents; `manifest_args_gate` is the law above. No instance found in
+those three. The remaining gates are not claimed.
+
+**And sky.boss then drew the line that keeps this out of the wrong drawer**,
+which is the part worth carrying furthest. This repository keeps a family of
+*facts no instrument at any distance the tree can reach can answer* — the
+account's required contexts, the enterprise Actions permission, the operator's
+tool version. This looked like a member and is not:
+
+> An upgrade-time default is perfectly reachable. The instrument existed, it was
+> green, and its label said the right words. It was **pointed at the wrong
+> tree**.
+
+The two want opposite remedies and filing them together loses both. A fact with
+no reachable instrument is answered by **writing the limit down inside the
+instrument**, so somebody reading a green row sees what it does not cover. An
+instrument pointed at the wrong tree is answered by **moving it** — and writing
+the limit down there would be a false comfort, documenting a hole that was
+closeable all along.
+
+**The tell is whether the case can be manufactured.** This one can, by stripping
+the argument from a real manifest, and that is why the answer is a fix rather
+than a caveat. It is the positive-control practice arriving from the other end:
+when the live population cannot produce the case, a green render is not evidence,
+and the move is to manufacture the case rather than look harder at the green.
+
+The shape underneath is one this template already states one file away from where
+it bit. `scripts/paths.py:171`, about `SCAFFOLD_MANIFEST`: *a measurement over a
+population that contains none of the subject is not a measurement of the
+subject.* A fresh scaffold records the flag, so the population of fresh scaffolds
+contains no tree whose default is ever consulted — and the gate was confident
+about exactly that population.
+
 ## Honest assessment: what is over-built
 
 Not everything here is worth copying, and the shell reflects that.

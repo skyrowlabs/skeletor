@@ -28,7 +28,7 @@ virtual display, and that setup belongs in that job.
 nothing.
 
 **If nothing here is marked `ui`, delete the job** — set `scheduled=False,
-unscheduled="empty"` on the row in `cli/test_cmds.py` and remove the job from
+unscheduled="empty"` on the row in `{{SHELL_PACKAGE}}/test_cmds.py` and remove the job from
 `ci.yml`. Nothing else references it, and `tests/test_workflow_job_graph.py`
 holds that: a `needs:` naming a deleted job is a `startup_failure`, which is
 zero jobs and no logs rather than a red check.

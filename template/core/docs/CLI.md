@@ -1,10 +1,10 @@
 # CLI Reference
 
 `./{{CLI}}` is the single entry point for everything you do in this repo. It is a
-thin shell wrapper around the `cli/` package.
+thin shell wrapper around the `{{SHELL_PACKAGE}}/` package.
 
 **The rule that keeps it useful**: adding or changing a script means updating
-`cli/` in the same commit. A script nobody can discover is a script nobody runs,
+`{{SHELL_PACKAGE}}/` in the same commit. A script nobody can discover is a script nobody runs,
 and the second person to need it writes it again.
 
 ## Command Groups
@@ -19,7 +19,7 @@ and the second person to need it writes it again.
 Run `./{{CLI}} <group> --help` for the current commands — the help is generated
 from the code, so it cannot go stale the way this table can.
 
-## Why the Wrapper Is Not Just `python -m cli`
+## Why the Wrapper Is Not Just `python -m {{SHELL_PACKAGE}}`
 
 Three environment problems, each documented at the point it is handled in the
 wrapper script:

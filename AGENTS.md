@@ -99,6 +99,15 @@ work against, and no `regen-docs` merge driver, whose definition lives in
 Add `--org <github-org>` if you know it, and `--timezone <tz>` for the agentic
 tier. Full flags: `skeletor-new --help`.
 
+**Check whether the repository already has a `cli/` before you run it.** The
+shell's package ships under that name, which is the most collided-with directory
+name a python project has, and this is the step where it is free to move:
+`--shell-package <name>` renames it and does nothing else. `--dry-run` will list
+`cli/` among the files it would write, so the collision is visible in the list
+you were already told to read — decide it there rather than after the merge.
+sky.boss moved their own product out of the way instead and paid 119 failing
+tests mid-flight for it.
+
 ---
 
 ## Step 3 — Verify before doing anything else

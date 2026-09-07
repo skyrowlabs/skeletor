@@ -569,7 +569,7 @@ jobs:
   # shipped, and proto.pilot found it holding 36 tests that match the marker's
   # own description word for word.
   #
-  # `cli/test_cmds.py` is where the obligation is written down and
+  # `{{SHELL_PACKAGE}}/test_cmds.py` is where the obligation is written down and
   # `tests/test_ci_runs_every_suite.py` enforces it: every suite the CLI offers
   # with `scheduled=True` must be selected by some workflow here.
   #
@@ -579,7 +579,7 @@ jobs:
   # intended way to find out, and is the whole point of it not being silent.
   #
   # Or DELETE this job, if nothing here is marked `ui`: set `scheduled=False`
-  # with `unscheduled="empty"` on the row in cli/test_cmds.py and no other file
+  # with `unscheduled="empty"` on the row in {{SHELL_PACKAGE}}/test_cmds.py and no other file
   # references this one. `tests/test_workflow_job_graph.py` is what makes that
   # claim checkable rather than remembered.
   # FULL-SUITE-BECAUSE: it drives a user interface, so it needs the stack the

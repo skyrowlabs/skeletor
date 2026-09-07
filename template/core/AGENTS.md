@@ -93,7 +93,7 @@ Full rules in `docs/rules/testing.md`.
 
 ### 5. Keep the CLI in Sync
 
-Adding or changing a script means updating the `cli/` package in the same commit. A script
+Adding or changing a script means updating the `{{SHELL_PACKAGE}}/` package in the same commit. A script
 nobody can discover is a script nobody runs.
 
 ### 6. Commit Strategy — Frequent, Logical, Bundled
@@ -179,7 +179,7 @@ through `scripts/output.py`: `ok` / `fail` / `warn` / `skip` / `step` to **stder
 The split is what makes `--json` free — the payload has the stream to itself, so
 a machine-readable flag is one extra emit rather than a second code path. Every
 `scripts/check_*.py` supports `--json` and answers on every path, including the
-ones that pass. `{{CLI}} check output` enrols every file under `cli/` and
+ones that pass. `{{CLI}} check output` enrols every file under `{{SHELL_PACKAGE}}/` and
 `scripts/` by pattern; exceptions go in `scripts/output_allowlist.yaml` with a
 reason, and are dropped when they stop exempting anything (see Rule 11). Full
 rules in `docs/rules/output.md`.

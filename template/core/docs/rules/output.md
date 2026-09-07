@@ -1,6 +1,6 @@
 # Output Rules
 
-Applies to everything that prints — `cli/`, `scripts/`, and anything a job runs.
+Applies to everything that prints — `{{SHELL_PACKAGE}}/`, `scripts/`, and anything a job runs.
 
 ## Two Channels, One Question
 
@@ -49,7 +49,7 @@ from scripts.output import detail, emit, fail, item, line, ok, skip, step, warn
 | `emit(payload)`        | stdout | the `--json` payload, and nothing else                |
 | `summarize(results)`   | stderr | the pass/fail gate table; returns the exit code       |
 
-`cli/helpers.py` re-exports all of it, so a command module has one import.
+`{{SHELL_PACKAGE}}/helpers.py` re-exports all of it, so a command module has one import.
 
 **`skip` is not a warning.** A job that executed and correctly chose not to act
 is working. Reporting it as a warning means every legitimate decline reads as a
@@ -59,7 +59,7 @@ distinction the run ledger draws — in the tiers that ship one — between
 
 ## Why a Module and Not a Convention
 
-`cli/helpers.py` already shipped `ok()` / `fail()` / `warn()`. Roughly twenty
+`{{SHELL_PACKAGE}}/helpers.py` already shipped `ok()` / `fail()` / `warn()`. Roughly twenty
 call sites retyped `print(f"✅ ...")` anyway, because `scripts/` could not reach
 them — and a vocabulary only half the tree can import is one the other half
 reinvents. `⏸️` meant "executed and declined" in three files and was defined in
@@ -73,7 +73,7 @@ internally consistent. So it is checked:
 {{CLI}} check output      # python scripts/check_output_discipline.py
 ```
 
-**Enrolment is not a registry.** Every `.py` under `cli/` and `scripts/` is
+**Enrolment is not a registry.** Every `.py` under `{{SHELL_PACKAGE}}/` and `scripts/` is
 checked — a new file is enrolled by existing. It flags three things: a state
 symbol typed into a `print`, a stream picked by hand (`file=sys.stderr`), and a
 `scripts/check_*.py` with no `--json`. Exemptions go in

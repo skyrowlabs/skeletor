@@ -224,7 +224,7 @@ def test_every_setup_block_installs_the_host_toolchain():
     """The other direction, which catches a missing step rather than a wrong one.
 
     This tree's CLI, docs pipeline, lint gates and test suite are python at
-    every language — `cli/`, `tests/` and `scripts/` ship at the base tier — so
+    every language — `{{SHELL_PACKAGE}}/`, `tests/` and `scripts/` ship at the base tier — so
     a setup block that does not install `scripts/requirements.txt` documents a
     quick start whose next line cannot run. It is checked against the one file
     `scripts/paths.py` names and `ci.yml` calls the source of truth, rather than

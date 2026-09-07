@@ -26,7 +26,7 @@ three files and was defined in none of them; `helpers.ok()` existed and roughly
 twenty call sites retyped `print(f"✅ ...")` instead. A vocabulary that lives in
 one dict can be read and changed. One that is retyped per call site cannot.
 
-Stdlib only, and importable from both `cli/` and `scripts/` — a status line that
+Stdlib only, and importable from both `{{SHELL_PACKAGE}}/` and `scripts/` — a status line that
 needs a dependency is a status line somebody will reinvent with `print`.
 """
 

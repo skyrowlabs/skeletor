@@ -2,7 +2,7 @@
 """Nobody spells a status symbol, or picks a stream, outside `scripts/output.py`.
 
 The rule this enforces is in `docs/rules/output.md`, and it exists because it
-was already broken here. `cli/helpers.py` shipped `ok()` / `fail()` / `warn()`
+was already broken here. `{{SHELL_PACKAGE}}/helpers.py` shipped `ok()` / `fail()` / `warn()`
 and roughly twenty call sites retyped `print(f"✅ ...")` anyway; `⏸️` meant
 "executed and declined" in three files and was defined in none of them; the gate
 table had a second implementation inside the commit command; and four scripts grew a
@@ -13,7 +13,7 @@ Every one of those is invisible to a linter and to review, because each file is
 internally consistent. That is the same shape as the workflow-drift bug, and it
 gets the same treatment: enrol by pattern, exempt with a written reason.
 
-**Enrolment is not a registry.** Every `.py` under `cli/` and `scripts/` is
+**Enrolment is not a registry.** Every `.py` under `{{SHELL_PACKAGE}}/` and `scripts/` is
 checked. Exemptions live in `scripts/output_allowlist.yaml` WITH A REASON — an
 intended divergence is a decision record; an unintended one is a failure.
 
@@ -42,13 +42,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import allowlist  # noqa: E402
 from scripts.output import STATE_SYMBOLS, detail, emit, fail, item, ok  # noqa: E402
-from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
+from scripts.paths import CLI_DIR, PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 
 ALLOWLIST = SCRIPTS_DIR / "output_allowlist.yaml"
 
 #: Where emissions are allowed to originate. `scripts/output.py` owns the
 #: streams; it is the one file that must write to them directly.
-SCAN_DIRS = ["cli", "scripts"]
+#: Read from `paths` rather than spelled: the shell package is renameable
+#: (`--shell-package`) and a literal here would scan a directory that is not
+#: there, which is a gate passing over zero files.
+SCAN_DIRS = [CLI_DIR.name, "scripts"]
 OWNER = "scripts/output.py"
 
 #: Anything that puts characters in front of a person or a pipe.

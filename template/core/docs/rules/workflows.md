@@ -21,7 +21,7 @@ positional and renumbers the moment a phase gains a step; a Critical Rule number
 ## Phase 2 — Implementation
 
 1. Make focused changes that follow the Critical Rules in `AGENTS.md`.
-2. If you added a command: update the `cli/` package in the same commit.
+2. If you added a command: update the `{{SHELL_PACKAGE}}/` package in the same commit.
 3. If you added a config value: add it to `.env.example` in the same commit.
 
 ## Phase 3 — Quality Checks
