@@ -4075,6 +4075,195 @@ def tier_composition_gate(workdir: Path) -> List[Result]:
     ]
 
 
+def lane_views_gate(workdir: Path) -> List[Result]:
+    """The editor's issue views are correct **for the tier that got them**.
+
+    `.vscode/settings.json` holds a generated region rendered by
+    `scripts/gen_vscode_queries.py` from `scripts/lanes.py` and, where the tree
+    has one, `scripts/reporting/jobs.py`. The tree's own
+    `tests/test_lanes.py` asks whether that region matches its registry today.
+    It cannot ask the question this gate asks, and the split is the usual one:
+
+    * **the tree**: have my views drifted from my lanes since I was scaffolded?
+    * **the generator**: is the region I handed over right for THIS tier, and
+      did the post-copy step that writes it run at all?
+
+    The second matters because the step is fired by `post_copy_steps` with
+    `capture_output=True` and no return check — the same shape as `regen.py`
+    beside it. A generator that failed there leaves the markers with nothing
+    between them, and a tree whose views are empty is one whose capture queues
+    are invisible while `{{CLI}} bug` keeps filing into them happily.
+
+    ## Which axes are scaffolded, and why it is not all eighteen
+
+    Derived rather than chosen. The generator reads exactly two inputs, so the
+    only axis that can change its answer is the one that decides whether those
+    inputs ship — and `_generator_inputs` locates them in the overlay tree
+    rather than taking anybody's word for it. If somebody moves `lanes.py` into
+    a language overlay, the assertion below fails and names the overlay, instead
+    of this gate quietly testing the wrong three trees.
+
+    `--agent` and `--versioning` are covered at the fullest tier only. Both are
+    subtractions of files the generator does not read, and `--agent none` is
+    included because it is the axis with the history: it once shipped a
+    `.github/DOCS_INDEX.md` routing readers into a `.claude/` it had just
+    omitted.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    results: List[Result] = []
+
+    overlays = _generator_inputs()
+    unexpected = overlays - {"core", "agentic"}
+    if unexpected:
+        return [
+            Result(
+                "lane views: the generator's inputs are where this gate expects them",
+                False,
+                time.time() - started,
+                f"scripts/lanes.py and scripts/reporting/jobs.py were found under {sorted(overlays)}. "
+                f"{sorted(unexpected)} is not a tier this gate scaffolds, so the axis that varies the "
+                f"rendered views is no longer the tier axis alone. Widen the loop below.",
+            )
+        ]
+
+    fullest = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
+    plan = [(tier, "python", "claude") for tier in sorted(scaffolder.TIERS)]
+    plan.append((fullest, "node", "claude"))
+    plan.append((fullest, "python", "none"))
+
+    for tier, language, agent in plan:
+        label = f"{tier}-{language}-{agent}"
+        target = workdir / f"lanes-{label}"
+        code, output = run(
+            [
+                sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty",
+                "--name", "Lanes", "--cli", CLI_NAME, "--tagline", "views",
+                "--tier", tier, "--language", language, "--agent", agent,
+            ],
+            cwd=workdir,
+        )
+        if code != 0:
+            results.append(Result(f"lane views: scaffold {label}", False, time.time() - started, output))
+            continue
+
+        settings = target / ".vscode" / "settings.json"
+        if not settings.exists():
+            results.append(
+                Result(f"lane views: {label}", False, time.time() - started,
+                       ".vscode/settings.json was not shipped")
+            )
+            continue
+
+        text = settings.read_text(encoding="utf-8")
+        problems = _lane_view_problems(target, text)
+        results.append(
+            Result(
+                f"lane views: {label} renders one view per lane, tier-correct",
+                not problems,
+                time.time() - started,
+                "\n".join(problems),
+            )
+        )
+    return results
+
+
+def _generator_inputs() -> set:
+    """Which template overlays hold the two files the query generator reads.
+
+    A set of overlay directory names, so the gate above can assert its own
+    scaffolding plan still covers the axis that varies. This is the alternative
+    to a comment saying "only the tier matters", which is true today and is the
+    kind of sentence that stays put while the thing it describes moves.
+    """
+    wanted = ("scripts/lanes.py", "scripts/reporting/jobs.py")
+    found = set()
+    template = SKELETOR / "template"
+    for overlay in (template.iterdir() if template.exists() else []):
+        if overlay.is_dir() and any((overlay / name).exists() for name in wanted):
+            found.add(overlay.name)
+    return found
+
+
+def _lane_view_problems(tree: Path, text: str) -> List[str]:
+    """Everything wrong with one tree's rendered views, as sentences.
+
+    Read out of the tree rather than recomputed here. Re-deriving the expected
+    queries in this file would be a second implementation of the generator, and
+    two copies of one rule agree with each other — which is the failure the
+    registry exists to remove, reappearing in the gate that checks it.
+    """
+    problems: List[str] = []
+    begin = "// \u2500\u2500 BEGIN generated"
+    if begin not in text:
+        return ["no generated region — the marker is missing from the shipped file"]
+
+    region = text.split(begin, 1)[1]
+    if "githubIssues.queries" not in region or "githubPullRequests.queries" not in region:
+        return ["the region between the markers is empty — the post-copy generator did not run"]
+
+    stripped = "\n".join("" if line.lstrip().startswith("//") else line for line in text.splitlines())
+    try:
+        parsed = json.loads(stripped)
+    except ValueError as exc:
+        return [f"the shipped settings do not parse once comments are stripped: {exc}"]
+
+    lanes = _lane_labels(tree)
+    if not lanes:
+        return ["could not read scripts/lanes.py out of the tree"]
+
+    issue_views = parsed.get("githubIssues.queries", [])
+    for label in lanes:
+        selecting = [
+            view for view in issue_views
+            if re.search(rf"(?<!-)\blabel:{re.escape(label)}\b", str(view.get("query", "")))
+        ]
+        if len(selecting) != 1:
+            problems.append(f"lane {label} has {len(selecting)} view(s), expected exactly 1")
+
+    complement = [v for v in issue_views if v.get("label") == "Everything Else"]
+    if len(complement) != 1:
+        problems.append("no single complement view — an unlabelled issue would sit in no pane")
+    else:
+        negated = set(re.findall(r"-label:([a-z0-9-]+)", str(complement[0].get("query", ""))))
+        if negated != set(lanes):
+            problems.append(f"the complement negates {sorted(negated)}, the registry holds {sorted(lanes)}")
+
+    # The tier-dependent half, and the only assertion here that a single tree
+    # could not make about itself: the drafts pane is named for whether this
+    # configuration ships a job that commits unattended. `agentic` does;
+    # `core` ships no job registry at all.
+    scheduler = (tree / "scripts" / "reporting" / "jobs.py").exists()
+    drafts = str(parsed.get("githubPullRequests.queries", [{}])[0].get("label", ""))
+    expected = "Overnight Drafts" if scheduler else "Drafts (iterating)"
+    if drafts != expected:
+        problems.append(
+            f"the drafts pane is named {drafts!r}; a tree that "
+            f"{'ships' if scheduler else 'ships no'} job registry should read {expected!r}"
+        )
+    return problems
+
+
+def _lane_labels(tree: Path) -> List[str]:
+    """The lane labels, read from the scaffolded tree's own registry with `ast`.
+
+    Parsed rather than imported: importing would need the tree on `sys.path`
+    with its dependencies present, and parsed rather than grepped because a
+    label is a value in a call and a grep would equally match the word in the
+    prose around it.
+    """
+    source = tree / "scripts" / "lanes.py"
+    if not source.exists():
+        return []
+    labels: List[str] = []
+    for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "Lane":
+            for keyword in node.keywords:
+                if keyword.arg == "label" and isinstance(keyword.value, ast.Constant):
+                    labels.append(str(keyword.value.value))
+    return labels
+
+
 def clean_skeletor(workdir: Path) -> Path:
     """A committed clone of this checkout, cloned once and reused.
 
@@ -7406,6 +7595,13 @@ def main() -> int:
         # Not per-tier: it is a question ABOUT the tiers, so it scaffolds its own
         # grid and runs once.
         results += tier_composition_gate(workdir)
+
+        # The same shape of question at a different artifact: the composition
+        # gate asks whether a shipped file NAMES something absent here; this
+        # asks whether a shipped *generated* file was rendered for the tier it
+        # landed in. Both are the generator's to ask, because both compare
+        # configurations and a tree only ever holds one.
+        results += lane_views_gate(workdir)
 
         for gate in long_path_gate(fullest, workdir, venv_python):
             gate.label = f"{fullest}: {gate.label}"

@@ -695,6 +695,14 @@ def post_copy_steps(tree: Path, values: Dict[str, str]) -> None:
     register_shipped_docs(tree, values)
     drop_absent_prose(tree)
     subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(tree), capture_output=True)
+    # The editor's issue and pull-request views, rendered from `scripts/lanes.py`
+    # and — where the tier ships one — the job registry. It belongs here rather
+    # than in the overlay because its output is a function of BOTH, and only the
+    # assembled tree knows which of them it got: the same two lanes render
+    # "nothing drains this yet" at `core` and a clock time at a tier that has
+    # claimed their keys. A static file in `template/core/` would be right for
+    # one tier and quietly wrong for the rest.
+    subprocess.run([sys.executable, "scripts/gen_vscode_queries.py"], cwd=str(tree), capture_output=True)
 
 
 def pristine_post_copy(target: Path, written: List[str], values: Dict[str, str]) -> Dict[str, str]:

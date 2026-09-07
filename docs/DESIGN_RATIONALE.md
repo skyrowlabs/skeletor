@@ -3031,6 +3031,99 @@ a year of iteration on a repo with a real user-facing product. Start with one.
 
 ---
 
+## Capture lanes: a queue you can file into is a queue you can see
+
+The template shipped `{{CLI}} bug` from early on. It filed a GitHub issue under
+`agent-bug` and **nothing in any generated tree ever read that label back.**
+Filing worked, every time, and the queue was invisible.
+
+That is a specific and recurring shape rather than an oversight: *the write side
+of a mechanism is the half somebody notices is missing.* A capture that fails is
+loud. A capture that succeeds into a queue nobody looks at is indistinguishable,
+from the caller's side, from one that was acted on.
+
+Three things came out of closing it, and only the first is the feature.
+
+**A registry, because two intakes written separately are two invisible queues.**
+`scripts/lanes.py` owns the label, its colour, its required body sections and
+the job key that would drain it. `{{SHELL_PACKAGE}}/_capture.py` is one engine
+wearing whichever lane it is handed, and `bug.py` and `task.py` are prose and a
+binding. The design is jam.sense's, arrived at after they wrote their second
+intake, and their reason is the one that generalises: *this module's whole job
+is to stop a finding being lost, and a second, subtly-different copy of it is
+how the next intake loses one.*
+
+**The `--label` override was removed, and its removal is the point.** It
+defaulted to the lane label and accepted anything, which made it a way to file
+into a queue that does not exist — nothing lists it, nothing drains it, no view
+shows it. The queue *is* the label.
+
+**The drain note is derived, never stored.** A lane names the job key that would
+empty it; `drain_note()` asks the job registry and reports what it finds. jam.sense
+measured the alternative: their stored copy of a drain time read 07:00 for two
+weeks after that fire was retired, sitting one import away from the registry
+field that said 07:45 — and it was printed on a path nobody re-reads, a capture
+that succeeded, so the drift stayed invisible until somebody planned around it.
+
+### The view is generated, and the generator is the part that could be wrong
+
+`.vscode/settings.json`'s `githubIssues.queries` and
+`githubPullRequests.queries` are rendered from the registry into a marked
+region. Three details each cost something:
+
+- **The complement query is a negation over the registry.** Without one, an
+  issue opened in the browser under no lane label sits in no pane at all. Written
+  by hand it is wrong the moment a lane is added; derived, it is a true
+  complement for free.
+- **Text splicing, not a JSON round-trip.** A round-trip preserves every key and
+  silently drops every comment in a JSONC file. The file still parses and still
+  works afterwards, and the reasons somebody wrote down are gone.
+- **The generator creates the file; the overlay does not ship one.** It shipped
+  as a plain template file for about an hour, which meant a `--force` scaffold —
+  the case `AGENTS.md` calls *the usual case* — replaced whatever editor settings
+  the repository already had. Measured on a tree carrying `editor.formatOnSave`
+  and a strict type-checking mode: both gone, nothing said. Nearly every other
+  file here is machinery, where a collision is the adoption working; this one is
+  the reader's own configuration and skeletor has a claim on two keys of it.
+- **The drafts pane's *name* is derived from the job registry.** "Overnight
+  Drafts" is only true in a tree with something committing unattended. jam.sense
+  can hardcode it; a template cannot, because the same string is a small lie at
+  `core`. Planting the hardcoded form turns two of five configurations red and
+  leaves the rest green — which is the whole argument for deriving it, executed.
+
+### Same artifact, two questions, two homes
+
+The split this repository keeps arriving at, at one more artifact:
+
+* **the tree** asks whether its views have drifted from its registry since it
+  was scaffolded — `tests/test_lanes.py`, which the generator cannot ask because
+  the generator is gone by then;
+* **the generator** asks whether the region it handed over is right for *that
+  tier*, and whether the post-copy step that writes it ran at all —
+  `lane_views_gate`, which no tree can ask because a tree only ever holds one
+  configuration.
+
+The second half is not hypothetical. `post_copy_steps` fires the generator with
+`capture_output=True` and no return check, the same shape as `regen.py` beside
+it, so a failure there ships markers with nothing between them. Planting exactly
+that turns all five gated configurations red with the sentence *"the region
+between the markers is empty — the post-copy generator did not run."*
+
+### What did not ship, and why the boundary is there
+
+The lanes are the **capture** side. jam.sense's drainers are 2500 lines of
+monitors, escalation policy and run-ledger machinery, and they did not come
+across — `jobs.py` ships exactly one fully-worked entry on purpose, because a
+registry seeded with keys whose modules do not exist is a registry whose own
+tests are red on arrival. A tree with no drainer says so, in those words, in
+every pane and after every successful capture. Add a job with the lane's
+`drainer_job` key and every consumer picks up its schedule with no second edit;
+that path is exercised by planting the job and reading the rendered label back.
+
+The same reasoning excluded a test-gap lane: it has no producer here, and **a
+view whose label nothing can create is empty forever, which is exactly what a
+drained queue looks like.**
+
 ## The shared-tree problem — the newest and least obvious lesson
 
 Multi-agent work introduced a failure class that single-developer repos do not

@@ -510,6 +510,64 @@ destination name*, and the gate asserts each entry is still recorded by a
 scaffold and still refused — so an entry that stopped renaming anything fails
 rather than sitting there as a decision nobody re-made.
 
+The **lane views** gate is the newest, and what it closes is a hole the
+template had for its whole life rather than a regression. `{{CLI}} bug` filed
+GitHub issues under `agent-bug` from early on and **nothing in any generated
+tree ever read that label back** — filing worked every time, into a queue that
+was invisible. That is the recurring shape: a capture that fails is loud, and
+one that succeeds into a queue nobody looks at is indistinguishable, from the
+caller's side, from one that was acted on.
+
+`scripts/lanes.py` is now the registry — label, colour, required body sections,
+and the job key that *would* drain the queue — and `{{SHELL_PACKAGE}}/_capture.py`
+is one engine wearing whichever lane it is handed, so `bug.py` and `task.py` are
+prose and a binding. `scripts/gen_vscode_queries.py` renders the editor's issue
+and pull-request views from it into a marked region of `.vscode/settings.json`
+— a file it **creates or splices into**, which the overlay deliberately does not
+ship. It shipped as a plain template file for about an hour, and a `--force`
+scaffold into a repository that already had editor settings replaced them:
+measured, `editor.formatOnSave` and a strict type-checking mode both gone with
+nothing said. Nearly every other file here is machinery, where a collision is
+the adoption working; this one is the reader's own configuration and skeletor
+has a claim on exactly two keys of it.
+The design is jam.sense's, and their reason for one engine is the one that
+generalises: *this module's whole job is to stop a finding being lost, and a
+second, subtly-different copy of it is how the next intake loses one.*
+
+The gate asks the half no tree can. The tree's own `tests/test_lanes.py` asks
+whether its views have drifted from its registry since it was scaffolded; this
+asks whether the region handed over is right **for that tier**, and whether the
+post-copy step that writes it ran at all. The second is not hypothetical —
+`post_copy_steps` fires the generator with `capture_output=True` and no return
+check, the same shape as `regen.py` beside it, so a failure there ships markers
+with nothing between them. Planting exactly that turns all five gated
+configurations red.
+
+Its scaffolding plan is **derived**, not chosen. `_generator_inputs()` locates
+`scripts/lanes.py` and `scripts/reporting/jobs.py` in the overlay tree and the
+gate fails, naming the overlay, if either moves somewhere the tier axis no
+longer covers — which is the alternative to a comment saying "only the tier
+matters", true today and exactly the sentence that stays put while the thing it
+describes moves.
+
+The tier-dependent assertion is the one worth having, and jam.sense is where the
+bug would have come from: their drafts pane is called `Overnight Drafts`, which
+is true in a tree with something committing unattended and a small lie at
+`core`. Rendering that name from the job registry rather than copying the string
+is the difference, and planting the hardcoded form turns `core` and `governed`
+red while `agentic` stays green — the tier signature you would expect, and the
+whole argument for deriving it, executed rather than asserted.
+
+**Only the capture side ported.** jam.sense's drainers are 2500 lines of
+monitors, escalation policy and run-ledger machinery, and `jobs.py` ships exactly
+one fully-worked entry on purpose. So a fresh tree's panes say `nothing drains
+these`, in those words, and a job registered under a lane's `drainer_job` key
+makes every consumer pick up its schedule with no second edit — verified by
+planting the job and reading the rendered label back. A test-gap lane was
+declined for the same reason it would have been wrong: it has no producer here,
+and **a view whose label nothing can create is empty forever, which is exactly
+what a drained queue looks like.**
+
 The lint gates exist because their absence shipped: a scaffold once carried 19
 files `black` would rewrite, 20 imports `flake8` rejects, and markdown
 `prettier` re-pads. `pre-commit run --all-files` — the first command the README

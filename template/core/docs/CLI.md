@@ -14,7 +14,8 @@ and the second person to need it writes it again.
 | `{{CLI}} check`  | Every validation gate CI blocks on, runnable locally |
 | `{{CLI}} test`   | Marker-driven suite selection                        |
 | `{{CLI}} docs`   | Index regeneration, plan filing, report windows      |
-| `{{CLI}} bug`    | Capture an out-of-scope bug without widening scope    |
+| `{{CLI}} bug`    | Capture an out-of-scope defect without widening scope |
+| `{{CLI}} task`   | Capture small work that is not a defect              |
 
 Run `./{{CLI}} <group> --help` for the current commands — the help is generated
 from the code, so it cannot go stale the way this table can.

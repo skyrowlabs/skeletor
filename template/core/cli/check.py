@@ -108,6 +108,12 @@ def _docs() -> int:
     return summarize(
         [
             ("generated indexes", script("scripts/docs/regen.py", "--check")),
+            # The other generated artifact, and it sits here for the same
+            # reason: `.vscode/settings.json`'s query region is rendered from
+            # `scripts/lanes.py`, so adding a lane without regenerating leaves
+            # a queue that `{{CLI}} bug`/`{{CLI}} task` file into and no view
+            # shows. A write-only queue looks exactly like an empty one.
+            ("editor queries", script("scripts/gen_vscode_queries.py", "--check")),
             ("doc index tables", script("scripts/check_doc_tables.py")),
             ("doc links", script("scripts/check_doc_links.py")),
             ("source → doc refs", script("scripts/check_source_doc_refs.py")),
