@@ -8,3 +8,17 @@ tmp/
 # settings.local.json is a personal permission set; worktrees are large.
 .claude/settings.local.json
 .claude/worktrees/
+
+# `.github/workflows/released.yml` writes the GitHub release body here, from the
+# annotated tag plus a comparison footer, and feeds it to `gh release create`.
+# That is a build artifact of one run and never content — the tag is the only
+# home for a release's prose, and this file is a rendering of it.
+#
+# Ignored because a stray copy is not free. One left at this root on 2026-09-05
+# was a draft `v0.1.0` annotation touching nothing, and it refused every adopter
+# in a five-repository round, back when `skeletor-upgrade` asked whether the
+# CHECKOUT was clean rather than whether the RENDER was reproducible. That guard
+# is fixed and this entry does not depend on it: an untracked file no ref can
+# name still reads as dirt to `skyrow-workspace/scripts/skeletor-currency.py`,
+# which counts it separately and correctly.
+notes.md
