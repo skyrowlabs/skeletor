@@ -655,6 +655,124 @@ def repair_manifest(target: Path, manifest: dict, base_files: Dict[str, Path], a
     return 0
 
 
+def report_reach(
+    checkout: Path,
+    recorded: List[str],
+    workdir: Path,
+    target: Path,
+    hashes: Dict[str, str],
+    head_files: Dict[str, Path],
+    applied: Dict[str, Tuple[str, str]],
+) -> None:
+    """What a `--set-arg` actually reaches, and the two things it cannot promise.
+
+    ## Why this is said BEFORE the run and not after
+
+    The values ride the manifest, and the manifest is held back by any pending
+    file. So the whole question — *will this stick?* — is decided by whether the
+    files this argument renders into are files that will conflict, and that is
+    knowable now.
+
+    **A mechanism keyed to a file cannot serve the tree that has opted out of
+    that file, and the tree that opted out is the likeliest to need it.**
+    sky.boss reached that from two directions a round apart: the consequence
+    check that justified an earlier design could never fire in their tree
+    because the only file `PYTHON_MATRIX` reaches is one they declined, and then
+    `--set-arg` run bare was a no-op there for the same reason one layer out. A
+    declined file is not an exotic state — it is what the `standing state` line
+    exists to keep visible — and two mechanisms in a row assumed it away.
+
+    So when every reached file is one the adopter has diverged from, this says
+    so up front and names `--ported` as the only route, rather than letting the
+    run print a plan and quietly record nothing.
+
+    ## The diff, and why a well-formed result is the dangerous one
+
+    A rendered value that *reduces* what CI does produces a perfectly
+    well-formed artefact and a manifest that agrees with it. sky.boss again:
+
+    > A halved matrix looks correct in both of the artefacts a person would
+    > naturally check.
+
+    `python: ['3.12']` is a valid one-element list and `.skeletor.json` would
+    record the argument that produced it, so nothing on either side of the
+    reconciliation shows the loss. **No in-tree check can catch that**, which
+    makes it the tool's obligation at the moment it writes the value rather than
+    a documentation one. The changed lines are printed for exactly that: the
+    operator is the only instrument, and they need the before and after rather
+    than a reassurance.
+
+    The second render is the cost — one subprocess, only when `--set-arg` is
+    passed — and it buys both halves, since the reached set and the diff are the
+    same computation.
+    """
+    unamended = workdir / "head-unamended"
+    render_with(checkout, recorded, unamended)
+    was = files_under(unamended)
+
+    reached = sorted(
+        rel
+        for rel in set(was) | set(head_files)
+        if (sha256(was[rel]) if rel in was else None) != (sha256(head_files[rel]) if rel in head_files else None)
+    )
+    if not reached:
+        say("⚠️ ", "this argument renders into nothing — no file differs under the new value")
+        detail("A legitimate outcome for a flag whose value only reaches a file this tier does not")
+        detail("ship, and indistinguishable from a typo in the value. Reported rather than passed")
+        detail("over, because the run below will otherwise look like it did what you asked.")
+        return
+
+    declined = [rel for rel in reached if rel in hashes and not (target / rel).exists()]
+    edited = [
+        rel
+        for rel in reached
+        if rel in hashes and (target / rel).exists() and sha256(target / rel) != hashes[rel]
+    ]
+
+    say("→", f"{len(reached)} file(s) render differently under the new value(s)")
+    for rel in reached[:8]:
+        state = "you deleted this" if rel in declined else "you have edited this" if rel in edited else "pristine"
+        item(f"{rel}  ({state})")
+    if len(reached) > 8:
+        detail(f"… and {len(reached) - 8} more")
+
+    for rel in reached[:3]:
+        before = (was[rel].read_text(encoding="utf-8", errors="replace").splitlines()) if rel in was else []
+        after = (head_files[rel].read_text(encoding="utf-8", errors="replace").splitlines()) if rel in head_files else []
+        changed = [(old, new) for old, new in zip(before, after) if old != new]
+        # Line-for-line, so this only speaks when the render substituted in
+        # place. A value that changes the SHAPE of a file shifts every line
+        # after it and there is no honest pair to print, so nothing is printed
+        # rather than a hundred spurious ones.
+        if changed and len(before) == len(after):
+            detail()
+            detail(f"{rel} — what the value does, since you are the only check on whether it is right:")
+            for old, new in changed[:4]:
+                item(f"- {old.strip()}")
+                item(f"+ {new.strip()}")
+            if len(changed) > 4:
+                detail(f"… and {len(changed) - 4} more changed line(s)")
+
+    detail()
+    detail("A value that REDUCES what this does is the dangerous one and it is invisible from")
+    detail("here: the rendered file stays well-formed and the manifest agrees with it, so both")
+    detail("artefacts anybody would check look correct. Read the lines above rather than the")
+    detail("exit code.")
+
+    if declined and len(declined) == len(reached):
+        detail()
+        say("⚠️ ", "every file this argument reaches is one you deleted — nothing will change on disk")
+        detail("A declined file is never restored, so this run touches no file at all. The RECORD")
+        detail("still moves: the new value is what future renders of that file would use, which")
+        detail("matters if you ever take it back. Nothing else in this tree is affected.")
+    elif edited:
+        detail()
+        say("⚠️ ", f"{len(edited)} reached file(s) are ones you have edited — they may conflict")
+        detail("The values are recorded only if this run applies EVERYTHING. One conflict here")
+        detail("holds the manifest back and the argument stays at its old value, with the rest of")
+        detail("this report reading like an ordinary success.")
+
+
 def set_args(recorded: List[str], args) -> Tuple[List[str], Dict[str, Tuple[str, str]]]:
     """The arguments the HEAD render uses, with `--set-arg` applied.
 
@@ -1029,6 +1147,8 @@ def main() -> int:
             detail("this run applies everything — the same rule as the ref.")
         render_with(SKELETOR, ours_args, head_tree)
         head_files = files_under(head_tree)
+        if set_args_applied:
+            report_reach(SKELETOR, recorded, workdir, target, hashes, head_files, set_args_applied)
         # The version this run is comparing the tree against, read out of the
         # render rather than asked of git a second time — it is the value that
         # would be recorded if this run applied anything, so there is one source
@@ -1434,7 +1554,28 @@ def main() -> int:
         # to let the acting path produce the message. The advance knows whether
         # it advanced; nothing outside it does.
         advanced = False
-        if not args.dry_run and (added or updated or merged or pending):
+        # `set_args_applied` is the fourth reason to advance and it took a
+        # measurement to find. The other three are all *something happened to a
+        # file*, and `--set-arg` in a tree that has DECLINED every file the
+        # argument reaches makes nothing happen to any file by construction —
+        # nothing to add, update, merge, or leave pending. So the record could
+        # not move, `--ported` could not move it either (it only chooses which
+        # branch of an advance that never ran), and the verb was a silent no-op
+        # in exactly the tree it was built for.
+        #
+        # sky.boss's rule, and this is sharper than the version they sent:
+        # **a mechanism keyed to a file cannot serve the tree that opted out of
+        # that file.** They diagnosed it as needing `--ported`; measured, it
+        # needed nothing at all, because there was no advance for `--ported` to
+        # qualify. Their two trees closed their own cases with `--ported` and
+        # were right to — theirs CONFLICT on that file, which is pending, which
+        # is an advance. A decline is the case with no occupant to notice it.
+        #
+        # Safe because "nothing pending" means the tree is reconciled with the
+        # head render for every file it holds, and the manifest copied is that
+        # render's — including the declined entries, which is how a decline
+        # stays detectable.
+        if not args.dry_run and (added or updated or merged or pending or set_args_applied):
             # The head render's manifest, verbatim — the hashes recorded are of
             # what skeletor PRODUCES, never of what is on disk. The difference
             # decides whether the next upgrade destroys work: a merged file is

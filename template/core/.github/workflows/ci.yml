@@ -379,24 +379,26 @@ jobs:
     # visible from a job that runs one version, and which one it runs decides
     # which half you are blind to.
     #
-    # `--python-ceiling` defaults to `--python`, so a scaffold that says nothing
-    # gets a ONE-leg matrix: same coverage as before, same minutes, and the only
-    # change is the context name.
+    # **`.skeletor.json`'s `--python-ceiling` is what this list is rendered
+    # from.** So change the versions by changing the recorded argument, never by
+    # editing the list:
     #
-    # **Opting in without editing this file:**
+    #     skeletor-upgrade . --set-arg python-ceiling=<version> --dry-run
     #
-    #     skeletor-upgrade . --set-arg python-ceiling=3.14 --dry-run
+    # Editing the list directly leaves the record saying the old value, which is
+    # what the base still renders — so this hunk conflicts on every upgrade, for
+    # ever, and the tree is green and current the whole time. Two adopters were
+    # in that state and neither was found by an instrument: one by resolving the
+    # same conflict a third time, one because the tree said so in prose.
     #
-    # This line used to say only *"a scaffold argument rather than a workflow
-    # edit"*, which was true and unreachable. **A tree scaffolds once**, so
-    # every argument it records is fixed at that moment and this one was fixed
-    # before the flag existed — the sentence described a door that had closed
-    # for every reader it was written for, leaving the two routes it offers as
-    # the alternative: hand-editing `.skeletor.json`, whose own header says not
-    # to, or editing this file, which becomes a standing merge conflict on
-    # every future upgrade. Found by node-zero and by sky.boss, from opposite
-    # ends — a closed door and a tree that had been running two legs since
-    # before the flag was written.
+    # The instruction is the durable half and the reason is why to obey it. The
+    # sentence here before them said only *"opting in is a scaffold argument
+    # rather than a workflow edit"* — true, and describing a door that had
+    # already closed, because **a tree scaffolds once** and every argument it
+    # records was fixed before this flag existed. `--set-arg` is what reopened
+    # it, in v0.20.0, after node-zero measured the closed door and sky.boss
+    # arrived from a tree that had been running two legs since before the flag
+    # was written.
     strategy:
       fail-fast: false
       matrix:

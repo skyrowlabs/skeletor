@@ -1222,6 +1222,10 @@ def set_arg_gate(workdir: Path) -> List[Result]:
         return next(line.strip() for line in workflow.read_text(encoding="utf-8").splitlines() if "python: [" in line)
 
     before_legs, before_ceiling = legs(), ceiling()
+    #: The tree's own floor, read rather than spelled — `--python-ceiling` set
+    #: to it collapses the matrix to one leg, which is the reduction case.
+    recorded_args = json.loads((tree / manifest_name).read_text(encoding="utf-8"))["args"]
+    FLOOR = recorded_args[recorded_args.index("--python") + 1]
 
     # The control: an ordinary upgrade must change neither.
     run([sys.executable, str(upgrade_bin), str(tree)], cwd=tree)
@@ -1279,6 +1283,31 @@ def set_arg_gate(workdir: Path) -> List[Result]:
         )
     )
 
+    # ## The reach report, and the two things it is the only instrument for
+    #
+    # A `--set-arg` that REDUCES what CI does produces a well-formed artefact
+    # and a manifest that agrees with it — `python: ['3.12']` is a valid
+    # one-element list — so **both artefacts a person would naturally check look
+    # correct** and nothing in the tree can catch the loss. sky.boss's finding,
+    # and it makes the before/after lines a tool obligation rather than a
+    # documentation one. The gate asserts the halving direction specifically,
+    # because that is the one where a silent pass is a real loss.
+    started = time.time()
+    code, halving = run(
+        [sys.executable, str(upgrade_bin), str(tree), "--set-arg", f"python-ceiling={FLOOR}", "--dry-run"], cwd=tree
+    )
+    shows = f"+ python: ['{FLOOR}']" in halving and "REDUCES" in halving
+    results.append(
+        Result(
+            "set-arg: a value that halves the matrix shows the line it halves",
+            code == 0 and shows,
+            time.time() - started,
+            f"exit {code}, printed the before/after and the warning: {shows}\n"
+            "A one-element matrix is well-formed and the manifest would agree with it, so the "
+            "operator reading these two lines is the only check there is.\n" + halving,
+        )
+    )
+
     # ## The silent case, and it is the one an operator cannot see
     #
     # The new values ride the manifest, and a run that leaves anything pending
@@ -1319,6 +1348,44 @@ def set_arg_gate(workdir: Path) -> List[Result]:
             f"(was {held!r}), the tool said so: {said}\n"
             "Without the sentence this is a run that writes files, reports progress and silently "
             "does not record the argument it was asked for.\n" + partial,
+        )
+    )
+
+    # ## sky.boss's tree: every reached file declined
+    #
+    # **A mechanism keyed to a file cannot serve the tree that opted out of that
+    # file, and that tree is the likeliest to need it.** Measured rather than
+    # reasoned, and the measurement moved the fix: the record could not advance
+    # at all, because the advance is gated on something having happened to a
+    # file and a decline makes nothing happen to any file. `--ported` could not
+    # help either — it chooses a branch of an advance that never ran. The first
+    # version of this gate's own warning named `--ported` as the route and was
+    # wrong, which one run showed.
+    started = time.time()
+    declined_tree = workdir / "set-arg-declined"
+    if declined_tree.exists():
+        shutil.rmtree(declined_tree)
+    shutil.copytree(tree, declined_tree)
+    (declined_tree / ".github" / "workflows" / "ci.yml").unlink()
+    git_in(declined_tree, "add", "-A")
+    git_in(declined_tree, "commit", "-m", "decline ci.yml")
+
+    def declined_ceiling() -> str:
+        recorded = json.loads((declined_tree / manifest_name).read_text(encoding="utf-8"))["args"]
+        return recorded[recorded.index("--python-ceiling") + 1]
+
+    was = declined_ceiling()
+    code, out = run([sys.executable, str(upgrade_bin), str(declined_tree), "--set-arg", "python-ceiling=3.15"], cwd=declined_tree)
+    still_declined = not (declined_tree / ".github" / "workflows" / "ci.yml").exists()
+    results.append(
+        Result(
+            "set-arg: a tree that declined every reached file still records the value",
+            code == 0 and declined_ceiling() == "3.15" and still_declined and "nothing will change on disk" in out,
+            time.time() - started,
+            f"exit {code}, recorded {was!r} → {declined_ceiling()!r}, the file stayed declined: "
+            f"{still_declined}, the tool said so: {'nothing will change on disk' in out}\n"
+            "The advance used to be gated on a file having changed, so this was a silent no-op in "
+            "exactly the tree the flag exists for.\n" + out,
         )
     )
 
