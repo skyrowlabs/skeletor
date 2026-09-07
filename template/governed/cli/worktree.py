@@ -24,6 +24,29 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from scripts import tree_lock  # noqa: E402
 
 
+def _requirements_agree(target: Path) -> bool:
+    """Does `target` declare the same Python dependencies as the primary?
+
+    Compared by digest rather than by mtime or by branch name: the question is
+    whether the primary's installed packages are the right ones for this
+    checkout, and only the requirements text answers it. Every requirements file
+    the tree tracks is compared, not a named one, so a second file added later is
+    covered without anybody remembering this function exists.
+
+    A file present on one side and absent on the other counts as a difference,
+    which is the safe direction: a new requirements file is exactly the change
+    that makes a borrowed environment wrong.
+    """
+    names = {entry.strip() for entry in git("ls-files", "*requirements*.txt").splitlines() if entry.strip()}
+    for name in sorted(names):
+        here, there = PROJECT_ROOT / name, target / name
+        if here.is_file() != there.is_file():
+            return False
+        if here.is_file() and here.read_bytes() != there.read_bytes():
+            return False
+    return True
+
+
 @click.group()
 def worktree() -> None:
     """Linked worktrees — one checkout per branch."""
@@ -53,6 +76,42 @@ def new(path: str, branch: str, base: str) -> None:
     if env.exists():
         shutil.copy2(env, target / ".env")
         item("copied .env")
+
+    # The .venv is the same class of untracked-but-required, and its absence is
+    # louder than a skip: `pyrightconfig.json` pins the interpreter with
+    # `venvPath: "."`, which pyright resolves **relative to the config file** —
+    # so in a worktree it points at a directory that does not exist, pyright
+    # prints one line about it and falls back to whatever python is on PATH.
+    # Measured on a scaffold of this template: 0 errors in the primary and 27 in
+    # a fresh worktree, same commit, same pyright, every one of them `click`
+    # resolving to Unknown. It reads as a broken branch rather than a missing
+    # directory. Reported by jam.sense, who found it in four checkouts of five.
+    #
+    # Linked rather than built, and guarded rather than warned about. The first
+    # version of this said "rebuild it here if this branch changes requirements",
+    # which puts the one case that is silently wrong on the user to notice — and
+    # the branch most likely to change requirements is the branch somebody cut a
+    # worktree for. jam.sense already did this for `node_modules`, digesting
+    # `package-lock.json` on both sides; this is that step for Python, and the
+    # asymmetry is the finding: they had the pattern and had never applied it to
+    # Python, and this template had the command that creates the exposure and not
+    # the pattern.
+    #
+    # Declining by name beats linking quietly, and the asymmetry is what makes it
+    # safe: a missing .venv makes pyright print `venv .venv subdirectory not
+    # found in venv path <this tree>` on the line above its errors, which is the
+    # thread back to this decision. A silently borrowed environment for the wrong
+    # requirements prints nothing at all, and under `reportMissingImports: none`
+    # a package it should have had simply stops constraining anything.
+    venv = PROJECT_ROOT / ".venv"
+    if venv.is_dir() and not (target / ".venv").exists():
+        if _requirements_agree(target):
+            (target / ".venv").symlink_to(venv.resolve())
+            item("linked .venv (the primary's)")
+        else:
+            item("did NOT link .venv — this branch's requirements differ from the primary's")
+            detail("  python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt")
+
     (target / "tmp").mkdir(exist_ok=True)
 
     ok(f"worktree at {target} on branch '{branch}'")
