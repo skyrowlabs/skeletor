@@ -666,6 +666,142 @@ def informational_step_gate(tree: Path, venv_bin: Path) -> List[Result]:
     return results
 
 
+#: The four decisions `docs-only.cjs` can reach, as `(label, payload, expected)`.
+#:
+#: `full_suite` and `docs_only` are two conditions and `ci.yml` gates different
+#: jobs on each — `lint`, `integration` and `ui` on the first, `node` and
+#: `unit-tests` on the second. **They differ on exactly one event**: a ready
+#: pull request carrying code into a base that is not the release branch. Every
+#: other event sets them together, so every other event is consistent with the
+#: two conditions being one condition.
+#:
+#: That event is the reason the node steps were split out of `lint` in v0.17.0,
+#: and no adopter had produced one. Two trees reported `Node` ran and both were
+#: pushes, where `!pr` returns `fullSuite: true` before anything interesting is
+#: decided; a third could not produce it at all, because it pushes straight to
+#: `main` and never opens a pull request. **Confirmed to run, unconfirmed to
+#: gate**, for a release and a half.
+#:
+#: The fleet spent two rounds scoping which repository could stage it. That was
+#: the wrong party: an observation costing an adopter a policy exception costs
+#: a generator a fixture. **An event no adopter can conveniently produce is
+#: exactly what a generator's harness is for.**
+DECISIONS = (
+    ("push", None, {"docsOnly": False, "fullSuite": True}),
+    ("draft PR", {"draft": True, "base": "{base}", "files": ["cli/check.py"]}, {"docsOnly": False, "fullSuite": False}),
+    ("PR -> release branch", {"base": "{release}", "files": ["README.md"]}, {"docsOnly": False, "fullSuite": True}),
+    ("docs-only PR -> base", {"base": "{base}", "files": ["README.md"]}, {"docsOnly": True, "fullSuite": False}),
+    ("code PR -> base", {"base": "{base}", "files": ["cli/check.py"]}, {"docsOnly": False, "fullSuite": False}),
+)
+
+_HARNESS = """
+const decide = require(process.argv[2]);
+const cases = JSON.parse(process.argv[3]);
+(async () => {
+  const out = {};
+  for (const [label, pr, files] of cases) {
+    const github = { paginate: async () => files.map((f) => ({ filename: f })), rest: { pulls: { listFiles: null } } };
+    const payload = pr ? { pull_request: { number: 1, head: { ref: 'f' }, user: { login: 'me' }, ...pr } } : {};
+    const r = await decide({ github, context: { payload, repo: { owner: 'o', repo: 'r' } }, core: { warning() {} } });
+    out[label] = { docsOnly: r.docsOnly, fullSuite: r.fullSuite, reason: r.reason };
+  }
+  console.log(JSON.stringify(out));
+})();
+"""
+
+
+def gating_gate(tier: str, workdir: Path) -> List[Result]:
+    """Execute the rendered gate script, rather than reading its source.
+
+    Every other check on this file asserts its structure. mind.head found the
+    v0.17.0 defect by running it with real payload shapes, and the defect was a
+    branch that was true for every pull request — invisible to any reading,
+    because an unreachable branch is not an error, it is a branch that never
+    wins.
+
+    The claim being settled is the one the node/lint split was made for: that
+    `full_suite` and `docs_only` are two conditions rather than one. They are
+    equal on four of the five events this script can reach, so the split is only
+    observable on the fifth.
+    """
+    results: List[Result] = []
+    if not shutil.which("node"):
+        return [Result("gating: node is not on PATH — SKIPPED", True, 0.0, "install node to run this gate")]
+
+    started = time.time()
+    target = workdir / "gating"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Gating", "--slug", "gating",
+         "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--language", "python",
+         "--base-branch", "develop", "--release-branch", "main"],
+        cwd=workdir,
+    )
+    results.append(Result("gating: scaffold", code == 0, time.time() - started, output))
+    if code != 0:
+        return results
+
+    script = target / ".github" / "scripts" / "docs-only.cjs"
+    harness = target / "harness.cjs"
+    harness.write_text(_HARNESS, encoding="utf-8")
+    def payload(pr: Optional[dict]) -> Optional[dict]:
+        """`DECISIONS` names a branch; the script reads `pr.base.ref`.
+
+        Spelled out here rather than in the table because the shape is the
+        script's business and the table's business is which decisions exist.
+        The first draft passed `base` as a bare string: `"main".ref` is
+        `undefined` in JavaScript rather than an error, so the release-branch
+        case fell through to the classifier and came back `docsOnly` — a fixture
+        bug that reads exactly like a finding, and the gate reported it as one.
+        """
+        if pr is None:
+            return None
+        built = {k: v for k, v in pr.items() if k not in ("files", "base")}
+        built["base"] = {"ref": pr["base"].format(base="develop", release="main")}
+        return built
+
+    cases = [[label, payload(pr), (pr or {}).get("files", [])] for label, pr, _ in DECISIONS]
+    started = time.time()
+    code, output = run(["node", str(harness), str(script), json.dumps(cases)], cwd=target)
+    harness.unlink(missing_ok=True)
+    if code != 0:
+        return results + [Result("gating: the script runs", False, time.time() - started, output)]
+
+    actual = json.loads(output.strip().splitlines()[-1])
+    wrong = [
+        f"{label}: expected {expected}, got "
+        f"{{'docsOnly': {actual[label]['docsOnly']}, 'fullSuite': {actual[label]['fullSuite']}}}"
+        f"  ({actual[label]['reason']})"
+        for label, _, expected in DECISIONS
+        if {k: actual[label][k] for k in expected} != expected
+    ]
+    results.append(
+        Result(
+            f"gating: all {len(DECISIONS)} decisions are what ci.yml assumes",
+            not wrong,
+            time.time() - started,
+            "\n".join(wrong) or "\n".join(f"{label}: {actual[label]['reason']}" for label, _, _ in DECISIONS),
+        )
+    )
+
+    # The assertion the whole node/lint split rests on, stated separately
+    # because it is the only event that carries it. If these two ever agree
+    # here, the split has stopped meaning anything and one job could gate both.
+    started = time.time()
+    code_pr = actual["code PR -> base"]
+    results.append(
+        Result(
+            "gating: full_suite and docs_only DIFFER on a code PR into a non-release base",
+            code_pr["fullSuite"] is False and code_pr["docsOnly"] is False,
+            time.time() - started,
+            f"fullSuite={code_pr['fullSuite']} docs_only={code_pr['docsOnly']} — `node` and `unit-tests` "
+            f"gate on `docs_only != true` and run; `lint`, `integration` and `ui` gate on "
+            f"`full_suite == true` and do not. This is the ONLY event where the two disagree, so it is "
+            "the only one that distinguishes the split from a single condition.",
+        )
+    )
+    return results
+
+
 def line_length_gate(tier: str, workdir: Path) -> List[Result]:
     """`--line-length` cannot be set below what the vendored files need.
 
@@ -5703,6 +5839,9 @@ def main() -> int:
             results.append(gate)
 
         for gate in line_length_gate(fullest, workdir):
+            results.append(gate)
+
+        for gate in gating_gate(fullest, workdir):
             results.append(gate)
 
         for gate in host_exemption_gate(fullest, workdir, venv_python):
