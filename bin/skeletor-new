@@ -248,6 +248,12 @@ def substitutions(args) -> Dict[str, str]:
         "CI_BRANCHES": "[" + ", ".join(branches) + "]",
         "PROTECTED_BRANCHES": " or ".join(f"`{name}`" for name in branches),
         "PY": args.python,
+        # The floor and the ceiling as a YAML list, for `ci.yml`'s unit-test
+        # matrix. `PY` remains the floor everywhere it means "at least this" —
+        # pyright's pythonVersion, black's target-version — and only CI takes
+        # the pair, because CI is the one place where testing the ends is
+        # different from declaring them.
+        "PYTHON_MATRIX": python_matrix(args.python, args.python_ceiling),
         "PY_NODOT": args.python.replace(".", ""),
         "LINE_LENGTH": str(args.line_length),
         "ORG": args.org,
@@ -874,10 +880,21 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--python-ceiling",
+        default=None,
+        help=(
+            "the NEWEST interpreter CI runs the unit suite on. `--python` is the floor and this is "
+            "the ceiling; CI runs a matrix over the pair. Defaults to `--python`, which is a "
+            "one-leg matrix — the same coverage a single-version job gave, so a scaffold that says "
+            "nothing changes nothing but the status context's name. The two failure modes a matrix "
+            "catches both live at the ends: a deprecation at the ceiling, a syntax feature below the floor."
+        ),
+    )
+    parser.add_argument(
         "--line-length",
         type=int,
         default=120,
-        help="the column limit black, isort and flake8 all enforce",
+        help="the column limit black, isort and flake8 all enforce (floor: what this template's own files need)",
     )
     parser.add_argument(
         "--org",
@@ -1103,8 +1120,83 @@ def report_a_dry_run(
     return 0
 
 
+def version_key(version: str) -> Tuple[int, ...]:
+    """`"3.9"` sorts below `"3.12"`, which string comparison gets backwards."""
+    return tuple(int(part) for part in version.split(".") if part.isdigit())
+
+
+def python_matrix(floor: str, ceiling: str) -> str:
+    """The `strategy.matrix.python` list, as YAML flow sequence.
+
+    One entry when the two agree, which is the default. A scaffold that says
+    nothing about a ceiling gets exactly the coverage a single-version job gave
+    it — this is not a mode, it is a range whose ends happen to coincide, and
+    that is what keeps the matrix from being red on arrival for anybody.
+    """
+    versions = [floor] if floor == ceiling else [floor, ceiling]
+    return "[" + ", ".join(f"'{version}'" for version in versions) + "]"
+
+
+def line_length_floor() -> Tuple[int, str]:
+    """The strictest column limit the files this generator copies can satisfy.
+
+    `--line-length` renders into black, isort and flake8, and it used to accept
+    any integer while this template's own python sat **exactly on the default**
+    — 120 against a default of 120, zero margin. So `--line-length 88`, which is
+    both black's default and ruff's and therefore the most likely non-default
+    value anybody types, produced a tree whose vendored files failed its own
+    lint on the first `pre-commit run`. A scaffold that is red on arrival is the
+    one outcome this repository treats as unacceptable, and the flag walked
+    straight to it.
+
+    **Measured, never written down.** A floor as a constant would be a number
+    with a second home, going stale the day somebody adds a longer line — and
+    stale in the silent direction, since the constant would keep accepting a
+    value the template can no longer meet. Reading the files is the same act as
+    checking the number, which is this project's rule about a cache validated on
+    every run.
+
+    This measures the TEMPLATE, and the linted artefact is the RENDER. The two
+    differ because a placeholder substitutes to a different width, so this is a
+    close approximation and not the guarantee; `bin/skeletor-verify` scaffolds
+    at this floor and runs the tree's own formatters, which is where the claim
+    is actually settled. Found by mind.head, at `--line-length 100`, on files
+    they had not written.
+    """
+    widest, where = 0, ""
+    for path in sorted(TEMPLATE.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if len(line) > widest:
+                widest, where = len(line), path.relative_to(TEMPLATE).as_posix()
+    return widest, where
+
+
 def main() -> int:
     args = build_parser().parse_args()
+
+    ceiling = args.python_ceiling or args.python
+    if version_key(ceiling) < version_key(args.python):
+        print(
+            f"❌ --python-ceiling {ceiling} is below --python {args.python}. `--python` is the FLOOR "
+            "(pyrightconfig's pythonVersion, black's target-version) and this is the ceiling; a "
+            "ceiling under the floor is an empty range, and CI would test a version your own config "
+            "says you do not support."
+        )
+        return 1
+    args.python_ceiling = ceiling
+
+    floor, widest_file = line_length_floor()
+    if args.line_length < floor:
+        print(
+            f"❌ --line-length {args.line_length} is below {floor}, which is what this template's own "
+            f"files need ({widest_file} has a {floor}-column line).\n"
+            f"   Every scaffold vendors those files, so the tree would fail its own black and flake8 "
+            f"on the first `pre-commit run` — red on arrival, before you have written anything.\n"
+            f"   Pass {floor} or more, or fork the template and reformat it at the width you want."
+        )
+        return 1
 
     # Before anything is written, and before `skeletor_ref()` is read: the
     # render is worthless the moment the ref is stamped, so this has to precede

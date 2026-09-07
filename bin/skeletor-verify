@@ -666,6 +666,103 @@ def informational_step_gate(tree: Path, venv_bin: Path) -> List[Result]:
     return results
 
 
+def line_length_gate(tier: str, workdir: Path) -> List[Result]:
+    """`--line-length` cannot be set below what the vendored files need.
+
+    The flag took any integer and this template's own python sat **exactly on
+    its own default** — 120 against a default of 120, zero margin. So
+    `--line-length 88`, black's default and ruff's and therefore the likeliest
+    non-default value anybody types, rendered a tree whose vendored files failed
+    its own lint on the first `pre-commit run`. mind.head at 100 was the first
+    adopter to stand in it, on files they had not written.
+
+    Three assertions, and they fail in different directions on purpose.
+
+    **The floor refuses.** A value below it exits non-zero rather than writing a
+    tree that is red on arrival.
+
+    **The floor does not exceed the default**, which is the one an author trips
+    rather than a user. `line_length_floor()` is measured, so a template line of
+    130 raises it silently — and every adopter who recorded `--line-length 120`
+    is then on a value this generator would now refuse, discovering it at their
+    next upgrade. Shorten the line or raise the default deliberately; both are
+    visible, and a floor drifting past the default is neither.
+
+    **The rendered tree satisfies it.** The floor measures `template/` and the
+    linted artefact is the render — a placeholder substitutes to a different
+    width, so the two are not the same number and only one of them is the claim.
+    That is the same rule that makes `black` on `template/` wrong and that put
+    `.helpers` in isort's LOCALFOLDER section: **the linted artefact is the
+    render, and a formatter run against the template is reasoning about a file
+    nobody ships.**
+    """
+    results: List[Result] = []
+    started = time.time()
+    # Both read from the scaffolder rather than repeated. A copy of either
+    # would verify the template against a parser the template does not have,
+    # and would stay green while doing it.
+    scaffolder = load_scaffolder()
+    floor, widest_file = scaffolder.line_length_floor()
+    default = next(a.default for a in scaffolder.build_parser()._actions if a.dest == "line_length")
+
+    target = workdir / "line-length-floor"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Narrow", "--slug", "narrow",
+         "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--language", "python",
+         "--line-length", str(floor - 1)],
+        cwd=workdir,
+    )
+    results.append(
+        Result(
+            f"line length: --line-length {floor - 1} is refused (floor {floor}, from {widest_file})",
+            code != 0 and not target.exists(),
+            time.time() - started,
+            f"exit {code}, target written: {target.exists()}\n{output[-1500:]}",
+        )
+    )
+
+    started = time.time()
+    results.append(
+        Result(
+            f"line length: the floor has not drifted past the default ({floor} vs {default})",
+            floor <= default,
+            time.time() - started,
+            f"`{widest_file}` needs {floor} columns and `--line-length` defaults to {default}, so every\n"
+            "tree scaffolded at the default is red on arrival and every adopter who recorded the old\n"
+            "default is on a value this generator now refuses. Shorten the line or raise the default.",
+        )
+    )
+
+    started = time.time()
+    at_floor = workdir / "line-length-at-floor"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(at_floor), "--allow-dirty", "--name", "Exact", "--slug", "exact",
+         "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--language", "python",
+         "--line-length", str(floor)],
+        cwd=workdir,
+    )
+    if code != 0:
+        results.append(Result(f"line length: scaffold at {floor}", False, time.time() - started, output))
+        return results
+    over = []
+    for path in sorted(at_floor.rglob("*.py")):
+        if UNTRACKED_DIRS & set(path.relative_to(at_floor).parts):
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if len(line) > floor:
+                over.append(f"{path.relative_to(at_floor)}:{number}: {len(line)} columns")
+    results.append(
+        Result(
+            f"line length: no RENDERED line exceeds the floor ({floor})",
+            not over,
+            time.time() - started,
+            "\n".join(over[:20])
+            or f"every rendered python line fits in {floor} columns — the template measures {floor} too",
+        )
+    )
+    return results
+
+
 def workflow_files(tree: Path) -> List[str]:
     """Every workflow a scaffold ships, as paths relative to the tree."""
     workflows = tree / ".github" / "workflows"
@@ -5603,6 +5700,9 @@ def main() -> int:
             results.append(gate)
 
         for gate in one_branch_gate(fullest, workdir, venv_python):
+            results.append(gate)
+
+        for gate in line_length_gate(fullest, workdir):
             results.append(gate)
 
         for gate in host_exemption_gate(fullest, workdir, venv_python):
