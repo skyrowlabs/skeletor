@@ -1100,6 +1100,25 @@ def main() -> int:
         stale = sidecars(patches) if args.dry_run else []
         cleared = 0 if args.dry_run else clear_sidecars(patches)
 
+        # Computed BEFORE anything is written, from the manifest and the disk.
+        # After the loop it would be wrong in the reassuring direction: a file
+        # this run just updated matches the head render and would drop out,
+        # so a report built afterwards would under-count exactly on the runs
+        # that changed the most.
+        #
+        # `sha256` of what is on disk against the hash of what skeletor
+        # produced. An entry means skeletor wrote the file here, so a different
+        # hash means somebody has edited it — the same comparison the fallback
+        # path already makes, asked about the whole tree instead of one file.
+        diverged = sorted(
+            rel
+            for rel, recorded in (hashes or {}).items()
+            if rel not in GENERATED
+            and rel != MANIFEST_NAME
+            and (target / rel).exists()
+            and sha256(target / rel) != recorded
+        )
+
         for rel in sorted(set(base_files) | set(head_files)):
             if rel in GENERATED or rel == MANIFEST_NAME:
                 continue
@@ -1546,6 +1565,34 @@ def main() -> int:
                 detail("current version is in tmp/upgrade/<path>.new:")
                 for rel in fresh:
                     item(rel)
+
+        if diverged:
+            # The symmetric half of the block above, and it took an adopter to
+            # notice the asymmetry. A deletion was standing state — reported
+            # every run, permanently, because it is a decision the tool does not
+            # re-make and does not let you forget. An edit was not, once
+            # `--ported` advanced the base: the tree went from naming two
+            # conflicted files to "already current — nothing to carry over",
+            # with both files still differing from what skeletor ships and both
+            # differing ON PURPOSE.
+            #
+            # `disk hash != recorded hash` is exactly as computable after
+            # `--ported` as before and means the same thing both times: this
+            # tree has edited a file skeletor wrote. sky.boss's argument is that
+            # the reason for reporting the deletion applies to the edit
+            # unchanged, and it does. Without this, a feature doc is the only
+            # record that those files are theirs by decision — which is the
+            # thing that goes stale, and the failure this whole tool exists to
+            # avoid, one turn over.
+            #
+            # A count and a list rather than a count alone, because unlike a
+            # decline there is nothing further to say about each one: no sidecar,
+            # no second look, no action. The names ARE the report.
+            say("📝", f"{len(diverged)} file(s) skeletor wrote and you have edited — standing state")
+            detail("Yours by decision, reported every run. An upgrade merges into these rather")
+            detail("than replacing them, and `--ported` advances the base without erasing that.")
+            for rel in diverged:
+                item(rel)
 
         # After the two blocks that name files needing a decision, because this
         # is about those files — and before `dropped`, which is unrelated.
