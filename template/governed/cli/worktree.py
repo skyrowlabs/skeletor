@@ -22,29 +22,56 @@ from .helpers import PROJECT_ROOT, detail, fail, git, item, line, ok, run
 # Bootstrap only: `scripts/` is not a package on the path for a CLI module.
 sys.path.insert(0, str(PROJECT_ROOT))
 from scripts import tree_lock  # noqa: E402
+from scripts.paths import REQUIREMENTS  # noqa: E402
+
+
+def _venv_inputs(root: Path) -> dict:
+    """`{repo-relative path: bytes}` for everything the host venv is built from.
+
+    Anchored on `scripts.paths.REQUIREMENTS` — the file that module declares as
+    *the host toolchain this tree installs* — and then follows `-r` includes, so
+    an adopter who splits their requirements is covered without a registry and
+    without this function being edited.
+
+    **It is deliberately not a glob**, and jam.sense is why. `git ls-files
+    "*requirements*.txt"` was the first version: correct in a scaffold, where the
+    tree has one Python environment, and wrong in a multi-service repository,
+    where six of their ten tracked requirements files describe *container images*
+    and resolve nowhere near the host venv. Digesting those means a dependency
+    bump to a service — most weeks — declines the link forever, for a reason with
+    nothing to do with the environment being borrowed. A scaffold cannot exhibit
+    that shape, so nothing here could have found it.
+    """
+    seen: dict = {}
+    pending = [root / REQUIREMENTS.relative_to(PROJECT_ROOT)]
+    while pending:
+        path = pending.pop()
+        try:
+            key = path.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            continue  # a `-r` reaching outside the tree is not this tree's input
+        if key in seen or not path.is_file():
+            continue
+        seen[key] = path.read_bytes()
+        for entry in seen[key].decode("utf-8", "replace").splitlines():
+            stripped = entry.strip()
+            if stripped.startswith("-r "):
+                pending.append(path.parent / stripped[3:].strip())
+    return seen
 
 
 def _requirements_agree(target: Path) -> bool:
-    """Does `target` declare the same Python dependencies as the primary?
+    """Does `target` install the same host toolchain as the primary?
 
-    Compared by digest rather than by mtime or by branch name: the question is
+    Compared by content rather than by mtime or by branch name: the question is
     whether the primary's installed packages are the right ones for this
-    checkout, and only the requirements text answers it. Every requirements file
-    the tree tracks is compared, not a named one, so a second file added later is
-    covered without anybody remembering this function exists.
+    checkout, and only the requirements text answers it.
 
     A file present on one side and absent on the other counts as a difference,
-    which is the safe direction: a new requirements file is exactly the change
+    which is the safe direction — a new requirements file is exactly the change
     that makes a borrowed environment wrong.
     """
-    names = {entry.strip() for entry in git("ls-files", "*requirements*.txt").splitlines() if entry.strip()}
-    for name in sorted(names):
-        here, there = PROJECT_ROOT / name, target / name
-        if here.is_file() != there.is_file():
-            return False
-        if here.is_file() and here.read_bytes() != there.read_bytes():
-            return False
-    return True
+    return _venv_inputs(PROJECT_ROOT) == _venv_inputs(target)
 
 
 @click.group()
