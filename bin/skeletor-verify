@@ -1389,6 +1389,47 @@ def set_arg_gate(workdir: Path) -> List[Result]:
         )
     )
 
+    # ## The spelling everybody reaches for
+    #
+    # `--set-arg --base-branch=develop` — argparse reads the value as a new
+    # option and dies on *expected one argument*, naming the flag rather than
+    # the problem. Every branch-shaped argument has the shape, because the thing
+    # being named is itself a flag, and those are exactly what an adopter
+    # reaches for. mind.head hit it moving to a `develop`/`main` split, which is
+    # the change most likely to need the verb at all.
+    #
+    # All three spellings are required to converge, and the missing-value case
+    # is required to STILL fail — joining a bare `--set-arg --dry-run` would
+    # swallow the next flag, which is worse than the error it replaced.
+    started = time.time()
+    # Read out of the tree, never spelled: earlier assertions here have already
+    # moved this value, and the first draft compared against the scaffold-time
+    # one. All three spellings came back False for a reason that had nothing to
+    # do with spelling — a fixture expectation stale by four assertions, wearing
+    # a total product failure.
+    now, target = ceiling(), "3.15"
+    expected = f"--python-ceiling  {now!r} → {target!r}"
+    spellings = {}
+    for label, argv in (
+        ("natural", ["--set-arg", f"--python-ceiling={target}"]),
+        ("equals", [f"--set-arg=--python-ceiling={target}"]),
+        ("bare", ["--set-arg", f"python-ceiling={target}"]),
+    ):
+        _, out = run([sys.executable, str(upgrade_bin), str(tree), *argv, "--dry-run"], cwd=tree)
+        spellings[label] = expected in out
+    swallow, swallowed = run([sys.executable, str(upgrade_bin), str(tree), "--set-arg", "--dry-run"], cwd=tree)
+    results.append(
+        Result(
+            "set-arg: all three spellings converge, and a missing value still fails",
+            all(spellings.values()) and swallow != 0,
+            time.time() - started,
+            f"{spellings} (looking for {expected!r}), a bare --set-arg before another flag still "
+            f"errors: {swallow != 0}\n"
+            "The natural spelling is the one an adopter types and the one argparse refuses; the "
+            "other two are escapes nothing in the error message names.\n" + swallowed,
+        )
+    )
+
     started = time.time()
     code, refusal = run(
         [sys.executable, str(upgrade_bin), str(tree), "--set-arg", "not-a-flag=1", "--dry-run"], cwd=tree

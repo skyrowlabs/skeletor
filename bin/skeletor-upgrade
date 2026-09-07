@@ -773,6 +773,41 @@ def report_reach(
         detail("this report reading like an ordinary success.")
 
 
+def join_set_arg(argv: List[str]) -> List[str]:
+    """`--set-arg --base-branch=develop` — the spelling everybody reaches for.
+
+    argparse reads the next token as a new option because it starts with `--`,
+    and dies on *expected one argument* naming the flag rather than the problem.
+    The escapes are `--set-arg=--base-branch=develop` or dropping the dashes,
+    and neither is discoverable from the error.
+
+    **Every branch-shaped argument has this problem**, because the thing being
+    named is itself a flag: `--base-branch`, `--release-branch`, `--python-ceiling`
+    and `--line-length` are exactly what an adopter reaches for. mind.head hit
+    it moving to a `develop`/`main` split, which is the change most likely to
+    need this verb at all.
+
+    Joining it here rather than documenting the escape, because a workaround in
+    a help string is a rule somebody has to have read. `set_args` already strips
+    leading dashes off the name, so all three spellings converge on one path.
+
+    Only ever joins a token that contains `=`. `--set-arg --dry-run` stays two
+    arguments and still fails, which is right — that is a missing value, not
+    this shape, and silently swallowing the next flag would be worse than the
+    error it replaced.
+    """
+    joined: List[str] = []
+    pending = False
+    for token in argv:
+        if pending and token.startswith("--") and "=" in token:
+            joined[-1] = f"{joined[-1]}={token}"
+            pending = False
+            continue
+        pending = token == "--set-arg"
+        joined.append(token)
+    return joined
+
+
 def set_args(recorded: List[str], args) -> Tuple[List[str], Dict[str, Tuple[str, str]]]:
     """The arguments the HEAD render uses, with `--set-arg` applied.
 
@@ -1046,7 +1081,7 @@ def main() -> int:
         "and not refused on one: a conflicted file is never written, so this moves the "
         "record and not your bytes.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(join_set_arg(sys.argv[1:]))
 
     target = Path(args.target).expanduser().resolve()
     if not target.is_dir():

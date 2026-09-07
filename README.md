@@ -12,7 +12,9 @@ loads every session, a docs lifecycle, marker-based tests, cost-aware CI,
 versioning, and optionally a scheduled self-maintenance layer.
 
 It is an **executable that copies real files** — not a guide an agent reads and
-then hand-writes files from.
+then hand-writes files from. And it keeps moving after it has run: a scaffolded
+tree records how it was made, so a later template change reaches it as a
+three-way merge rather than as a diff you apply by hand.
 
 ---
 
@@ -53,8 +55,8 @@ overlay can add one without patching an import list.
 
 | Group | Subcommands | Tier |
 | ----- | ----------- | ---- |
-| `check` | `lint` · `docs` · `doc-links` · `doc-refs` · `reports` · `merge-drivers` · `pre-push` · `health` | C |
-| `test` | `unit` · `integration` · `manual` · `all` · `coverage` | C |
+| `check` | `lint` · `docs` · `doc-links` · `doc-refs` · `reports` · `output` · `merge-drivers` · `pre-push` · `health` | C |
+| `test` | `unit` · `integration` · `ui` · `manual` · `all` · `coverage` | C |
 | `docs` | `index` · `status` · `file` · `queue-order` · `release-window` · `freeze-release` | C |
 | `bug` | Capture an out-of-scope bug; refuses one missing any of its four sections | C |
 | `commit` | Scoped commit that skips pre-commit's repo-wide stash | G |
@@ -65,7 +67,7 @@ overlay can add one without patching an import list.
 
 | Capability | Detail | Tier |
 | ---------- | ------ | ---- |
-| Rules | `commits` · `docs` · `testing` · `workflows` (+ `python`/`javascript` by overlay) | C |
+| Rules | `commits` · `docs` · `output` · `testing` · `workflows` (+ `python`/`javascript` by overlay) | C |
 | Permission allowlist | `settings.json` — pre-approved git/gh/lint/CLI calls | C |
 | Session bootstrap | `hooks/session-start.sh` installs the host toolchain in remote sessions | C |
 | Shared-tree rule | The rule that stops one agent deleting another's uncommitted work | G |
@@ -113,7 +115,7 @@ Every one is runnable locally with the same invocation CI uses.
 | Docs lifecycle end-to-end | A plan **moves** to the archive and every index follows — run on a disposable copy of the tree | C |
 | `require_or_skip` | Skips locally, **fails** in CI, so "green" means "ran" | C |
 | Ratchets | Skip count and coverage, each moved deliberately in the same commit | C |
-| Shipped tests | `marker_coverage` · `docs_pipeline` · `ci_draft_gate` · `lint_tool_parity` | C |
+| Shipped tests | `tests/` arrives populated — the shell tests itself, and those tests are the worked example for yours | C |
 | Suite hardening | `--strict-markers`, return-not-none as an error, per-test timeout sized for CI | C |
 | Registry tests | `reporting_jobs` — registry ↔ CLI ↔ prompts ↔ heartbeats ↔ cron collisions | A |
 
@@ -122,8 +124,9 @@ Every one is runnable locally with the same invocation CI uses.
 | Capability | Detail | Tier |
 | ---------- | ------ | ---- |
 | Gate job | Computes `full_suite`/`docs_only` once; every expensive job is gated on it | C |
-| Draft discipline | A draft PR runs the gate alone; `ready_for_review` runs the full set | C |
-| Shared docs-only definition | `docs-only.cjs`, required by both workflows, **fail-open** | C |
+| Shared gating definition | `docs-only.cjs` — one decision order, read by both workflows, **fail-open** | C |
+| Draft discipline | A draft carrying code runs the cheap jobs; `ready_for_review` can only ever add | C |
+| Monotonic transitions | Marking a PR ready never *reduces* what runs — asserted, not assumed | C |
 | Job-level skipping | Never `paths-ignore` — a required check that never reports blocks forever | C |
 | Docs validation workflow | PR-only, by design; the nightly covers direct pushes | C |
 | Draft-discipline bot | Comments on a PR opened ready, with the cheaper loop | C |
@@ -147,7 +150,7 @@ Every one is runnable locally with the same invocation CI uses.
 | Capability | Detail | Tier |
 | ---------- | ------ | ---- |
 | Conventional commits | One subject line, enforced by hook; type decides the bump | C |
-| Release Please | Generates `CHANGELOG.md` and `VERSION` — never hand-edited | C |
+| Release Please | Generates `CHANGELOG.md` and `VERSION` — never hand-edited. `--versioning tag` omits it | C |
 | `.gitmessage` | The template, with the bump each type causes | C |
 | Report freeze | A release closes the window; editions become an immutable record | C |
 | `/release` skill | Five phases across turns; **stops** for a human to merge | A |
@@ -228,6 +231,59 @@ python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
 See [`docs/TIERS.md`](docs/TIERS.md) for what each costs. Pick the one you will
 maintain, not the one that looks most thorough.
 
+### The four flags that change what you get
+
+Everything else renders a name into a file. These decide what is in the tree:
+
+| Flag | Question it answers |
+| ---- | ------------------- |
+| `--tier` | How much governance will you maintain? |
+| `--versioning` | **Does anything deploy this?** `release-please` for a published artifact, whose users have no `.git` and so need a tracked `VERSION`; `tag` for a repository run from a checkout, where `git describe` already knows. `tag` is a *subtraction* — the same files, minus four |
+| `--agent` | `claude` ships `.claude/` tooling; `none` omits it. The conventions in `docs/rules/` are plain markdown and ship either way, because nothing auto-loads them for any vendor |
+| `--language` | Your **product's** language. Not the shell's — `cli/`, `tests/` and `scripts/` are python at every tier, so this only ever adds a second toolchain |
+
+`--python` is a floor, not the interpreter you happen to run: it renders into
+pyright's `pythonVersion` and black's `target-version`, which both mean *at
+least this*. `--python-ceiling` adds the other end, and CI runs a matrix over
+the pair — the two failure modes a matrix catches both live at the ends.
+
+---
+
+## Adopting it, and staying adopted
+
+A scaffold is a starting point that keeps moving. There are **two** adoption
+modes and they behave differently:
+
+| You have | Manifest | How template changes reach you |
+| -------- | -------- | ------------------------------ |
+| A scaffolded tree | `.skeletor.json` | `bin/skeletor-upgrade` — renders your base, renders ours, three-way merges |
+| Files you copied by hand | `.skeletor-components.json` | `bin/skeletor-components report` — provenance only, no automatic upgrade |
+
+A tree can be both. `bin/skeletor-upgrade --dry-run` writes nothing and is never
+refused, so it is always safe to ask.
+
+**What an upgrade will not do.** It never writes a conflict marker into your
+tree, never commits, and never deletes. A file you edited is merged only if the
+merge is clean; a conflict leaves your file exactly as it was and puts the
+template's version in `tmp/upgrade/`. **A file skeletor wrote and you deleted is
+not put back** — partial adoption is a set of deletions, and a decision that has
+to be re-made on a schedule is not a decision.
+
+**A tree scaffolds once**, which is the awkward part: every argument it records
+is fixed at that moment, so a flag the template gains later is unreachable to
+it. `--set-arg` is the door:
+
+```bash
+bin/skeletor-upgrade ../my-project --set-arg python-ceiling=3.14 --dry-run
+```
+
+It changes the argument for *this render only* — your base still renders from
+the recorded values, so nothing about how the tree was made is rewritten and the
+difference arrives as an ordinary template change. Change a rendered value that
+way rather than by editing the file, because editing the file leaves the record
+saying the old value, which is what the base still renders: that hunk then
+conflicts on every upgrade, for ever, while the tree stays green and current.
+
 ---
 
 ## Repository layout
@@ -267,15 +323,29 @@ inconvenient. A rule without one gets deleted by whoever trips over it first.
 
 ## Verifying a change to the template
 
+**The scaffold is the test.** There is no test suite for skeletor itself: a
+template change is verified by generating a tree and running *that tree's* own
+gates against it.
+
 ```bash
-bin/skeletor-new /tmp/probe --name Probe --cli probe --tier agentic --tagline x --force
-cd /tmp/probe && python -m venv .venv && .venv/bin/pip install -q pytest click
-.venv/bin/python -m pytest tests/ -m unit -q     # must be green
-./probe check docs                                # must be 5/5
+bin/skeletor-verify                     # every tier x every language
+bin/skeletor-verify --tier core --keep  # one tier, trees left behind to inspect
 ```
 
-A scaffold whose first check is red teaches that red is normal — so the shell's
-own definition of done is that a fresh tree passes its own gates.
+Run it after any edit under `template/`, and run all tiers when the edit touches
+`template/core/` — `governed` and `agentic` compose on top of it. `--tier` is
+for narrowing a debug loop, not for a final check.
+
+A scaffold whose first check is red teaches that red is normal, so the
+definition of done here is that a fresh tree passes its own gates. That is why
+the grid generates every configuration rather than one: **tier composition is
+the question no single tree can ask.** A reference that resolves in the tree you
+tested and dangles in the tree somebody scaffolds is a defect only the generator
+can see.
+
+**Never run `black` directly on `template/`.** It sees `{{PLACEHOLDER}}` rather
+than the value it renders to, so its line-length decisions are made against the
+wrong widths. Scaffold a tree, format there, port the change back.
 
 ---
 
