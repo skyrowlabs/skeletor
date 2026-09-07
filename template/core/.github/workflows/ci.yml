@@ -217,20 +217,27 @@ jobs:
   # Its OWN job, and the `if:` is the reason rather than the tidiness. These
   # steps used to sit at the end of `lint`, which is gated on
   # `full_suite == 'true'` — and `.github/scripts/docs-only.cjs` returns
-  # `fullSuite: false` for the ordinary case, *a code change into a
-  # non-release base*. So in any repository working on a branch other than the
-  # release branch, eslint and prettier ran on the eventual push to
+  # `fullSuite: false` for the ordinary case, *a ready pull request carrying
+  # code*. So eslint and prettier ran on the eventual push to
   # `{{RELEASE_BRANCH}}` and on no pull request at all: after review, after
   # merge, where the answer is too late to be a gate. Found by dream-doll.
   #
-  # **How many trees that reached is a conjunction, and counting one half of it
-  # is how the first version of this comment got it wrong.** The condition
-  # needs `--base-branch` different from `--release-branch`; the consequence
-  # needs a `package.json`. Six adopters, three with different branches, one of
-  # those with a manifest. So the live blast radius was a single repository —
-  # and not dream-doll, who reported the class and whose own tree is
-  # `main`/`main` and could never reach the condition at all. Surveying either
-  # axis alone comes back reassuring, which is why it read as four.
+  # **How many trees that reached was a conjunction, and counting one half of
+  # it is how the first version of this comment got it wrong.** At the time the
+  # condition needed `--base-branch` different from `--release-branch`, because
+  # the classifier short-circuited on the release branch; the consequence needs
+  # a `package.json`. Six adopters, three with different branches, one of those
+  # with a manifest — so the live blast radius was a single repository, and not
+  # dream-doll, who reported the class and whose own tree could not reach the
+  # condition at all. Surveying either axis alone comes back reassuring, which
+  # is why it read as four.
+  #
+  # **That first clause is history now and is kept as history.** The
+  # short-circuit is qualified — it fires only where the two branches differ —
+  # so the classifier is live in a one-branch tree too, and this job's
+  # condition no longer depends on the branch pair at all. A count measured
+  # under a condition that has since changed is not wrong, but it stops being
+  # about today the moment nobody says which world it was measured in.
   #
   # `docs_only != 'true'` is `unit-tests`' condition and it is the right one
   # here for `unit-tests`' reason: **the node job is the product's own suite.**

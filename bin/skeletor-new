@@ -880,6 +880,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--reproducing",
+        action="store_true",
+        help=(
+            "re-render a tree that already exists, for comparison — suppresses the checks that are "
+            "about CREATING one. `bin/skeletor-upgrade` passes it; nothing else should."
+        ),
+    )
+    parser.add_argument(
         "--python-ceiling",
         default=None,
         help=(
@@ -917,12 +925,23 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-#: Declared, and deliberately not recorded, because neither reaches a render.
-#: `--force` gates the refusal on a populated target and `--no-git` gates
-#: `git init`; re-rendering a base wants neither. Every other flag is recorded
-#: by existing, which is the point — this set is the only thing anybody has to
-#: keep, and `bin/skeletor-verify` fails if an entry stops being a real flag.
-NOT_RENDERED = {"force", "no_git", "dry_run", "allow_dirty"}
+#: Declared, and deliberately not recorded, because not one of them reaches a
+#: render. They govern the *act* of scaffolding: `--force` gates the refusal on
+#: a populated target, `--no-git` gates `git init`, `--allow-dirty` and
+#: `--reproducing` suppress checks about creating a tree. A base render wants
+#: none of them, and `render_with` supplies the two it does want itself.
+#:
+#: Every other flag is recorded by existing, which is the point — this set is
+#: the only thing anybody has to keep, and `bin/skeletor-verify` fails if an
+#: entry stops being a real flag.
+#:
+#: `--reproducing` is the entry that cost something. It arrived as a store_true
+#: and was not exempted, so every manifest recorded `--reproducing False` and
+#: every re-render died on `unrecognized arguments: False` — a fresh scaffold,
+#: permanently unupgradable, which is the exact failure `--versioning` caused
+#: from the other direction. `manifest_args_gate` asked which flags reach the
+#: record and never whether the record parses back; it does both now.
+NOT_RENDERED = {"force", "no_git", "dry_run", "allow_dirty", "reproducing"}
 
 #: Flags whose recorded value is the **derived** one rather than the raw
 #: argument. All four default from the target directory name, and an upgrade
@@ -952,13 +971,35 @@ def manifest_args(args, values: Dict[str, str]) -> List[str]:
     A flag is recorded by existing now. `--repair-manifest` was a trap for the
     affected trees for the same reason and is fixed by the same change: it
     re-derives from a base render, and the base render was the wrong tree.
+
+    **The record has to parse back**, and the first version of this could emit
+    something that does not. It wrote `flag value` for every action, which is
+    wrong for a `store_true`: `--reproducing` arrived, every manifest recorded
+    `--reproducing False`, and every re-render of every tree scaffolded that
+    hour died on `unrecognized arguments: False`. That flag is exempt now —
+    it is about the act, not the render — but the shape is handled here as
+    well, because the exemption is a judgement about one flag and the next
+    render-affecting `store_true` is entitled to be recorded correctly rather
+    than to be remembered about.
+
+    A `None` is dropped rather than stringified for the same reason one level
+    over: `str(None)` is `"None"`, which parses back as a value and renders as
+    one. Nothing render-affecting reaches here as `None` today — the four that
+    default from the target directory come through `DERIVED_FROM_TARGET`
+    resolved, and `--python-ceiling` through `resolve()` — so this is the
+    guard, not the mechanism, and the flag simply falls back to its own default.
     """
     recorded: List[str] = []
     for action in build_parser()._actions:
         if not action.option_strings or action.dest in NOT_RENDERED or action.dest == "help":
             continue
         key = DERIVED_FROM_TARGET.get(action.dest)
-        recorded += [action.option_strings[0], str(values[key] if key else getattr(args, action.dest))]
+        value = values[key] if key else getattr(args, action.dest)
+        if action.nargs == 0:
+            # A flag that takes no value records as presence or absence.
+            recorded += [action.option_strings[0]] if value != action.default else []
+        elif value is not None:
+            recorded += [action.option_strings[0], str(value)]
     return recorded
 
 
@@ -1173,22 +1214,58 @@ def line_length_floor() -> Tuple[int, str]:
     return widest, where
 
 
-def main() -> int:
-    args = build_parser().parse_args()
+def resolve(args):
+    """Defaults that depend on another flag, applied in one place.
 
-    ceiling = args.python_ceiling or args.python
-    if version_key(ceiling) < version_key(args.python):
+    `main()` and anything asking what a manifest *would* record have to agree
+    about these, or the two describe a tree neither has built. Doing it inline
+    in `main()` meant `manifest_args_gate` parsed arguments and got
+    `python_ceiling=None`, so it modelled a record no scaffold ever writes —
+    a gate reasoning about a shape the product does not produce.
+
+    Validation stays in `main()`: this only fills a blank, and refusing is the
+    caller's business.
+    """
+    args.python_ceiling = args.python_ceiling or args.python
+    return args
+
+
+def main() -> int:
+    args = resolve(build_parser().parse_args())
+
+    if version_key(args.python_ceiling) < version_key(args.python):
         print(
-            f"❌ --python-ceiling {ceiling} is below --python {args.python}. `--python` is the FLOOR "
-            "(pyrightconfig's pythonVersion, black's target-version) and this is the ceiling; a "
-            "ceiling under the floor is an empty range, and CI would test a version your own config "
-            "says you do not support."
+            f"❌ --python-ceiling {args.python_ceiling} is below --python {args.python}. `--python` is "
+            "the FLOOR (pyrightconfig's pythonVersion, black's target-version) and this is the "
+            "ceiling; a ceiling under the floor is an empty range, and CI would test a version your "
+            "own config says you do not support."
         )
         return 1
-    args.python_ceiling = ceiling
 
+    # **A generator may constrain what it creates. It may not retroactively
+    # constrain what it has already created**, because by then the thing being
+    # validated is no longer only its own work. That is mind.head's rule and it
+    # cost them an upgrade to find.
+    #
+    # The floor's whole premise is *red on arrival* — a tree nobody has touched
+    # yet, failing its own first `pre-commit run`. An existing adopter has
+    # already met that problem and may have solved it differently and correctly:
+    # theirs deleted `.flake8`, runs ruff at 100, and carries an `E501`
+    # per-file-ignore for the vendored files, which is the remedy this project
+    # endorsed when they reported the nine findings. And `bin/skeletor-upgrade`
+    # renders the base by running this scaffolder, so the refusal and the
+    # evidence against it were produced by the same tool in the same
+    # invocation: it printed `.flake8 — skeletor wrote and you deleted, NOT
+    # restored` and then declined to render because the tree "would fail its
+    # own flake8".
+    #
+    # A comparison render is thrown away — nobody runs `pre-commit` in it — so
+    # the question is not merely relaxed here, it was never being asked.
+    #
+    # The flag rather than a special case, because the next scaffold-time
+    # invariant belongs behind the same door instead of growing its own escape.
     floor, widest_file = line_length_floor()
-    if args.line_length < floor:
+    if args.line_length < floor and not args.reproducing:
         print(
             f"❌ --line-length {args.line_length} is below {floor}, which is what this template's own "
             f"files need ({widest_file} has a {floor}-column line).\n"

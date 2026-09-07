@@ -431,10 +431,20 @@ def render_with(checkout: Path, args: List[str], into: Path) -> None:
     # scaffolder that has no such flag never sees it: it is appended only when
     # that checkout's parser knows it.
     flags = ["--no-git", "--force"]
-    if "--allow-dirty" in subprocess.run(
+    # Both appended only when that checkout's parser knows them, which is the
+    # same idiom for the same reason: a base render runs an OLD scaffolder.
+    #
+    # `--reproducing` suppresses the checks that are about creating a tree. The
+    # line-length floor shipped in v0.18.0 and immediately blocked the only
+    # adopter recording a value below it — from an upgrade carrying a fix for a
+    # gap they were already carrying unguarded, on the strength of a premise
+    # ("red on arrival") that cannot apply to a tree three releases old.
+    help_text = subprocess.run(
         [sys.executable, str(scaffolder), "--help"], capture_output=True, text=True
-    ).stdout:
-        flags.append("--allow-dirty")
+    ).stdout
+    for flag in ("--allow-dirty", "--reproducing"):
+        if flag in help_text:
+            flags.append(flag)
     result = subprocess.run(
         [sys.executable, str(scaffolder), str(into), *args, *flags],
         capture_output=True,

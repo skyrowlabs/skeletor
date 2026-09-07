@@ -671,9 +671,16 @@ def informational_step_gate(tree: Path, venv_bin: Path) -> List[Result]:
 #: `full_suite` and `docs_only` are two conditions and `ci.yml` gates different
 #: jobs on each — `lint`, `integration` and `ui` on the first, `node` and
 #: `unit-tests` on the second. **They differ on exactly one event**: a ready
-#: pull request carrying code into a base that is not the release branch. Every
-#: other event sets them together, so every other event is consistent with the
-#: two conditions being one condition.
+#: pull request carrying code. Every other event sets them together, so every
+#: other event is consistent with the two conditions being one condition.
+#:
+#: The first version of this said *into a base that is not the release branch*,
+#: quoting node-zero, and that qualifier died with `ecf1029` in the same
+#: release: the release-branch short-circuit is conditional now, so a one-branch
+#: tree reaches the classifier too and its divergence needs a pull request into
+#: the release branch — that branch also being the integration branch. **A
+#: repository property smuggled back into a sentence whose entire purpose was to
+#: name the event instead.** node-zero found it in their own words.
 #:
 #: That event is the reason the node steps were split out of `lint` in v0.17.0,
 #: and no adopter had produced one. Two trees reported `Node` ran and both were
@@ -686,12 +693,42 @@ def informational_step_gate(tree: Path, venv_bin: Path) -> List[Result]:
 #: the wrong party: an observation costing an adopter a policy exception costs
 #: a generator a fixture. **An event no adopter can conveniently produce is
 #: exactly what a generator's harness is for.**
+#: `(label, payload, two-branch expectation, one-branch expectation)`.
+#:
+#: **Both shapes, because `ecf1029` changed one of them and nothing noticed.**
+#: The release-branch short-circuit is now conditional on the two names
+#: differing, so a docs-only pull request into the release branch of a
+#: ONE-branch tree reaches the classifier and comes back cheap, where before it
+#: took the short-circuit and ran everything. That is the whole point of the
+#: change and it had no fixture: a stale docstring three files away kept
+#: asserting the old behaviour and stayed green, because its assertions were
+#: about something else.
 DECISIONS = (
-    ("push", None, {"docsOnly": False, "fullSuite": True}),
-    ("draft PR", {"draft": True, "base": "{base}", "files": ["cli/check.py"]}, {"docsOnly": False, "fullSuite": False}),
-    ("PR -> release branch", {"base": "{release}", "files": ["README.md"]}, {"docsOnly": False, "fullSuite": True}),
-    ("docs-only PR -> base", {"base": "{base}", "files": ["README.md"]}, {"docsOnly": True, "fullSuite": False}),
-    ("code PR -> base", {"base": "{base}", "files": ["cli/check.py"]}, {"docsOnly": False, "fullSuite": False}),
+    ("push", None, {"docsOnly": False, "fullSuite": True}, {"docsOnly": False, "fullSuite": True}),
+    (
+        "draft PR",
+        {"draft": True, "base": "{base}", "files": ["cli/check.py"]},
+        {"docsOnly": False, "fullSuite": False},
+        {"docsOnly": False, "fullSuite": False},
+    ),
+    (
+        "docs-only PR -> release branch",
+        {"base": "{release}", "files": ["README.md"]},
+        {"docsOnly": False, "fullSuite": True},
+        {"docsOnly": True, "fullSuite": False},
+    ),
+    (
+        "docs-only PR -> base",
+        {"base": "{base}", "files": ["README.md"]},
+        {"docsOnly": True, "fullSuite": False},
+        {"docsOnly": True, "fullSuite": False},
+    ),
+    (
+        "code PR -> base",
+        {"base": "{base}", "files": ["cli/check.py"]},
+        {"docsOnly": False, "fullSuite": False},
+        {"docsOnly": False, "fullSuite": False},
+    ),
 )
 
 _HARNESS = """
@@ -727,16 +764,23 @@ def gating_gate(tier: str, workdir: Path) -> List[Result]:
     results: List[Result] = []
     if not shutil.which("node"):
         return [Result("gating: node is not on PATH — SKIPPED", True, 0.0, "install node to run this gate")]
+    for shape, base, release in (("two-branch", "develop", "main"), ("one-branch", "main", "main")):
+        results += _gating_shape(tier, workdir, shape, base, release)
+    return results
 
+
+def _gating_shape(tier: str, workdir: Path, shape: str, base: str, release: str) -> List[Result]:
+    """One branch pair, all five decisions."""
+    results: List[Result] = []
     started = time.time()
-    target = workdir / "gating"
+    target = workdir / f"gating-{shape}"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Gating", "--slug", "gating",
-         "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--language", "python",
-         "--base-branch", "develop", "--release-branch", "main"],
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Gating",
+         "--slug", f"gating-{shape}", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
+         "--language", "python", "--base-branch", base, "--release-branch", release],
         cwd=workdir,
     )
-    results.append(Result("gating: scaffold", code == 0, time.time() - started, output))
+    results.append(Result(f"gating/{shape}: scaffold", code == 0, time.time() - started, output))
     if code != 0:
         return results
 
@@ -756,30 +800,31 @@ def gating_gate(tier: str, workdir: Path) -> List[Result]:
         if pr is None:
             return None
         built = {k: v for k, v in pr.items() if k not in ("files", "base")}
-        built["base"] = {"ref": pr["base"].format(base="develop", release="main")}
+        built["base"] = {"ref": pr["base"].format(base=base, release=release)}
         return built
 
-    cases = [[label, payload(pr), (pr or {}).get("files", [])] for label, pr, _ in DECISIONS]
+    cases = [[label, payload(pr), (pr or {}).get("files", [])] for label, pr, _, _ in DECISIONS]
     started = time.time()
     code, output = run(["node", str(harness), str(script), json.dumps(cases)], cwd=target)
     harness.unlink(missing_ok=True)
     if code != 0:
-        return results + [Result("gating: the script runs", False, time.time() - started, output)]
+        return results + [Result(f"gating/{shape}: the script runs", False, time.time() - started, output)]
 
     actual = json.loads(output.strip().splitlines()[-1])
+    expectations = {label: (two if base != release else one) for label, _, two, one in DECISIONS}
     wrong = [
         f"{label}: expected {expected}, got "
         f"{{'docsOnly': {actual[label]['docsOnly']}, 'fullSuite': {actual[label]['fullSuite']}}}"
         f"  ({actual[label]['reason']})"
-        for label, _, expected in DECISIONS
+        for label, expected in expectations.items()
         if {k: actual[label][k] for k in expected} != expected
     ]
     results.append(
         Result(
-            f"gating: all {len(DECISIONS)} decisions are what ci.yml assumes",
+            f"gating/{shape}: all {len(DECISIONS)} decisions are what ci.yml assumes",
             not wrong,
             time.time() - started,
-            "\n".join(wrong) or "\n".join(f"{label}: {actual[label]['reason']}" for label, _, _ in DECISIONS),
+            "\n".join(wrong) or "\n".join(f"{label}: {actual[label]['reason']}" for label in expectations),
         )
     )
 
@@ -790,7 +835,7 @@ def gating_gate(tier: str, workdir: Path) -> List[Result]:
     code_pr = actual["code PR -> base"]
     results.append(
         Result(
-            "gating: full_suite and docs_only DIFFER on a code PR into a non-release base",
+            f"gating/{shape}: full_suite and docs_only DIFFER on a ready code PR",
             code_pr["fullSuite"] is False and code_pr["docsOnly"] is False,
             time.time() - started,
             f"fullSuite={code_pr['fullSuite']} docs_only={code_pr['docsOnly']} — `node` and `unit-tests` "
@@ -887,6 +932,49 @@ def line_length_gate(tier: str, workdir: Path) -> List[Result]:
         for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
             if len(line) > floor:
                 over.append(f"{path.relative_to(at_floor)}:{number}: {len(line)} columns")
+    # The floor is a CREATION-time invariant, and the fourth assertion is what
+    # keeps it one. It shipped without this and immediately blocked the only
+    # adopter recording a value below it — from an upgrade carrying a fix for a
+    # gap they were already carrying unguarded, on the strength of *red on
+    # arrival*, which cannot be true of a tree three releases old.
+    #
+    # `bin/skeletor-upgrade` renders the base by running this scaffolder, so
+    # the refusal and the evidence against it came out of the same tool in the
+    # same invocation: it printed `.flake8 — skeletor wrote and you deleted,
+    # NOT restored` and then declined to render because the tree "would fail
+    # its own flake8". mind.head's rule, which cost them an upgrade:
+    #
+    #   A generator may constrain what it creates. It may not retroactively
+    #   constrain what it has already created, because by then the thing being
+    #   validated is no longer only its own work.
+    #
+    # Both directions, because either alone is half a claim: `--reproducing`
+    # must render, and its absence must still refuse.
+    started = time.time()
+    reproduced = workdir / "line-length-reproducing"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(reproduced), "--allow-dirty", "--reproducing",
+         "--name", "Older", "--slug", "older", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
+         "--language", "python", "--line-length", str(floor - 1)],
+        cwd=workdir,
+    )
+    rendered_at = ""
+    config = reproduced / "pyproject.toml"
+    if config.exists():
+        rendered_at = next(
+            (line for line in config.read_text(encoding="utf-8").splitlines() if "line-length" in line), ""
+        )
+    results.append(
+        Result(
+            f"line length: --reproducing renders below the floor ({floor - 1})",
+            code == 0 and str(floor - 1) in rendered_at,
+            time.time() - started,
+            f"exit {code}, pyproject says `{rendered_at.strip()}`\n"
+            "an upgrade re-renders an EXISTING tree, so a creation-time refusal there blocks an "
+            f"adopter from every later fix.\n{output[-800:]}",
+        )
+    )
+
     results.append(
         Result(
             f"line length: no RENDERED line exceeds the floor ({floor})",
@@ -3476,6 +3564,32 @@ def manifest_args_gate() -> Result:
     16 missing flags, and its `assert recorded` non-vacuity check passed,
     because one is not zero. Two independent readings disagreeing is a fact
     about the reading; one reading clearing a bar is a fact about the bar.
+
+    ## Membership is half the contract, and it was the only half asked
+
+    Every check above is about *which flags* reach the record. None of them
+    asks whether the record **parses back**, and a manifest that cannot is the
+    identical outcome to a manifest that is missing a flag: the tree can never
+    be upgraded. `--reproducing` arrived as a `store_true`, was recorded as
+    `--reproducing False` by a loop that wrote `flag value` for every action,
+    and every scaffold from that hour died on `unrecognized arguments: False`
+    at the first re-render. It is *in* the recorded set, so all four checks
+    above stayed green.
+
+    So the record is now replayed through the parser and required to be a
+    **fixed point** — the arguments it yields must record the same arguments —
+    and the render it produces must be the same render. The first catches a
+    value that does not survive the round trip, the second a flag that is
+    missing from the record entirely, which is the original `--versioning` bug
+    arriving at its consequence rather than at its cause.
+
+    The replay is run against **two** argument vectors, because the bare one
+    cannot discriminate: a flag left out of the record replays to its own
+    default, so every check passes on a probe that never moved one. The second
+    vector is derived from the parser — `choices` supply an alternative, a
+    `store_true` flips, an `int` steps — and the gate reports which flags it
+    could not move, since the ones it cannot are exactly the ones this proves
+    nothing about.
     """
     started = time.time()
     scaffolder = load_scaffolder()
@@ -3488,7 +3602,11 @@ def manifest_args_gate() -> Result:
 
     # `--tagline` is required, so the probe must supply it: this gate asks what
     # the parser declares, not what a caller may omit.
-    args = parser.parse_args(["probe", "--tagline", "t"])
+    #
+    # Through `resolve()`, which is what a scaffold's arguments go through
+    # before its manifest is written. Parsing alone leaves `--python-ceiling`
+    # at `None` and models a record no scaffold produces.
+    args = scaffolder.resolve(parser.parse_args(["probe", "--tagline", "t"]))
     recorded = set(scaffolder.manifest_args(args, scaffolder.substitutions(args))[::2])
 
     problems = []
@@ -3515,11 +3633,56 @@ def manifest_args_gate() -> Result:
     if recorded_but_exempt:
         problems.append(f"{recorded_but_exempt} are exempt from recording and recorded anyway")
 
+    def off_default(action):
+        """A value the parser itself says is legal and is not the default."""
+        if action.dest in scaffolder.NOT_RENDERED or action.dest == "help" or not action.option_strings:
+            return None
+        if action.nargs == 0:
+            return not action.default
+        if action.choices:
+            return next((c for c in action.choices if c != action.default), None)
+        if action.type is int and isinstance(action.default, int):
+            return action.default + 1
+        return None
+
+    moved, unmoved, vector = [], [], ["probe", "--tagline", "t"]
+    for action in parser._actions:
+        value = off_default(action)
+        if value is None or value is False:
+            if action.option_strings and action.dest not in scaffolder.NOT_RENDERED and action.dest != "help":
+                unmoved.append(action.option_strings[0])
+            continue
+        moved.append(action.option_strings[0])
+        vector += [action.option_strings[0]] if action.nargs == 0 else [action.option_strings[0], str(value)]
+
+    for label, argv in (("defaults", ["probe", "--tagline", "t"]), ("off-default", vector)):
+        original = scaffolder.resolve(parser.parse_args(argv))
+        record = scaffolder.manifest_args(original, scaffolder.substitutions(original))
+        try:
+            replayed = scaffolder.resolve(parser.parse_args(["probe", *record]))
+        except SystemExit:
+            problems.append(
+                f"the {label} record does not parse back: {record} — a tree scaffolded this way "
+                "can never be upgraded, because every re-render starts by replaying these."
+            )
+            continue
+        again = scaffolder.manifest_args(replayed, scaffolder.substitutions(replayed))
+        if again != record:
+            problems.append(f"the {label} record is not a fixed point: {record} replays as {again}")
+        if scaffolder.substitutions(replayed) != scaffolder.substitutions(original):
+            differs = sorted(
+                k
+                for k, v in scaffolder.substitutions(original).items()
+                if scaffolder.substitutions(replayed).get(k) != v
+            )
+            problems.append(f"the {label} record re-renders differently: {differs}")
+
     return Result(
-        f"manifest args: {len(recorded)} of {len(declared)} flags recorded, {len(scaffolder.NOT_RENDERED)} exempt",
+        f"manifest args: {len(recorded)} of {len(declared)} flags recorded, "
+        f"{len(scaffolder.NOT_RENDERED)} exempt, {len(moved)} replayed off-default",
         not problems,
         time.time() - started,
-        "\n".join(problems),
+        "\n".join(problems + [f"the parser offers no non-default value for {unmoved} — not exercised"]),
     )
 
 
