@@ -959,6 +959,189 @@ def _gating_shape(tier: str, workdir: Path, shape: str, base: str, release: str)
             "the only one that distinguishes the split from a single condition.",
         )
     )
+    results += monotonic_gate(shape, target, actual, base, release)
+    return results
+
+
+#: The two condition forms `ci.yml` gates a job on, as `(pattern, does it turn
+#: the job on)`. Not a general YAML-expression evaluator and deliberately not:
+#: an unrecognised form is a hard failure below, never a silent `False`.
+#: Treating an unknown condition as "does not run" would shrink the computed
+#: job set in the reassuring direction, and the property under test is a
+#: SUBSET relation — so silence would make it pass.
+_CONDITIONS = (
+    (re.compile(r"needs\.gate\.outputs\.full_suite\s*==\s*'true'"), lambda o: o["fullSuite"]),
+    (re.compile(r"needs\.gate\.outputs\.docs_only\s*!=\s*'true'"), lambda o: not o["docsOnly"]),
+)
+
+
+def monotonic_gate(shape: str, target: Path, actual: dict, base: str, release: str) -> List[Result]:
+    """`ready_for_review` must never reduce what runs.
+
+    ## Why this is a different claim from the ordering
+
+    The reorder put the draft test below the classification, and the previous
+    gate asserts that ordering through its twelve verdicts. mind.head named
+    what the ordering is *for*:
+
+    > The ordering is the mechanism; monotonicity is the behaviour; only one of
+    > them is what anybody depends on.
+
+    A later reordering — for a good reason, by somebody who never saw this —
+    could preserve every verdict in the table and still break the property, or
+    break a verdict and preserve it. And the bug that made this necessary was
+    exactly a monotonicity violation an ordering check would have called
+    correct, because the ordering *was* deliberate: draft above the classifier
+    meant a docs-only draft ran two jobs and marking it ready ran none.
+
+    ## What it derives rather than knows
+
+    stash.flow measured the property on the shipped release and then made the
+    point that matters: their harness hardcoded *`full_suite` gates lint,
+    integration and ui; `docs_only` gates node and unit-tests* — **a fact about
+    `ci.yml` spelled somewhere that is not `ci.yml`**, which is the same defect
+    as the docstring this release deleted. That map already moved once, when
+    the node steps left `lint` and became a job with a different gate.
+
+    So neither half is written here. The classifier supplies the outputs; the
+    scaffolded tree's own `ci.yml` supplies which jobs those outputs turn on. A
+    job moving between gates, a new job, or a third output all flow through
+    unchanged.
+
+    ## Why it is not in the template, where the consumer lives
+
+    It belongs in the adopting tree by every argument this repository makes —
+    `ci.yml` is the half adopters edit, and both recent defects landed there.
+    It is here because a template test cannot execute `docs-only.cjs`: node is
+    not in a `--language python` tree's toolchain, so the test would skip on a
+    clean box, and `skip_budget.json` ships at 0 — a scaffold red on arrival,
+    which is the one outcome this project refuses. Raising the budget to 1
+    would buy a permanent allowance for an unexplained skip. The gap is real
+    and is recorded rather than papered over.
+
+    ## The pairs are discovered, not listed
+
+    A draft row and a ready row that share a base and a file list are the same
+    pull request either side of the transition, which is what makes them a
+    pair. Reading that out of `DECISIONS` means a row added there joins this
+    automatically; a hand-written list of three would not, and would be right
+    until somebody added a fourth event.
+    """
+    results: List[Result] = []
+    started = time.time()
+    workflow = (target / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    #: `{job id: its `if:` condition}` — jobs with no `if:` run unconditionally.
+    gated: Dict[str, str] = {}
+    ungated: List[str] = []
+    # Scoped to the `jobs:` block. Read over the whole file, `on:`'s trigger
+    # keys — `push`, `pull_request`, `workflow_dispatch` — sit at the same
+    # indent as a job id and were picked up as three unconditional jobs. They
+    # appear on both sides of every pair, so the subset property held and the
+    # gate was green while its own output named four jobs this workflow does
+    # not have. A check whose scope is wrong in a direction the assertion
+    # cannot feel is exactly what the reported job list is for.
+    job, in_jobs = None, False
+    for line in workflow.splitlines():
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_-]*:", line):
+            in_jobs = line.startswith("jobs:")
+            job = None
+            continue
+        if not in_jobs:
+            continue
+        if match := re.match(r"^  (?P<id>[A-Za-z0-9_-]+):\s*$", line):
+            job = match.group("id")
+            ungated.append(job)
+        elif job and (match := re.match(r"^    if:\s*(?P<cond>.+?)\s*$", line)):
+            gated[job] = match.group("cond")
+            ungated.remove(job)
+            job = None
+
+    def runs(outputs: dict) -> set:
+        """Which jobs this pair of outputs turns on.
+
+        A job whose condition never mentions `needs.gate.outputs` is out of
+        scope rather than unevaluated: whatever it decides, it decides the same
+        thing either side of `ready_for_review`, so it cancels in a subset
+        comparison. `release-please` is the live case — gated on
+        `github.event_name == 'push'`, which is false for every pull request
+        and equally false for both ends of every pair.
+
+        A condition that DOES mention an output and is not recognised is a hard
+        failure, never a silent `False`. The property is a subset relation, so
+        an unknown condition quietly shrinking a job set makes it pass — the
+        failure would arrive wearing the result it was meant to detect.
+        """
+        on = set(ungated)
+        for name, condition in gated.items():
+            if "needs.gate.outputs" not in condition:
+                continue
+            matched = [decides for pattern, decides in _CONDITIONS if pattern.search(condition)]
+            if not matched:
+                raise AssertionError(
+                    f"`{name}` is gated on {condition!r}, which names a gate output this cannot "
+                    "evaluate. Add the form to `_CONDITIONS` rather than letting it default: the "
+                    "property below is a subset relation, so a silently-shrunk job set passes."
+                )
+            if all(decides(outputs) for decides in matched):
+                on.add(name)
+        return on
+
+    #: `(base, files) -> {draft: label, ready: label}` — the same pull request
+    #: either side of `ready_for_review`.
+    pairs: Dict[tuple, Dict[str, str]] = {}
+    for label, pr, _, _ in DECISIONS:
+        if pr is None or pr.get("user"):
+            continue
+        key = (pr["base"], tuple(pr.get("files") or ()))
+        pairs.setdefault(key, {})["draft" if pr.get("draft") else "ready"] = label
+    complete = {key: ends for key, ends in pairs.items() if len(ends) == 2}
+
+    # A scan that found nothing proves nothing, and this one reports its own
+    # size in the output rather than asserting it — so it says so instead.
+    if not gated:
+        return [
+            Result(
+                f"gating/{shape}: ready_for_review never reduces what runs",
+                False,
+                time.time() - started,
+                f"no job in this tree's ci.yml carries an `if:` at all, so `runs()` returns the same "
+                f"set for every input and the subset property is a tautology. Found {len(ungated)} "
+                f"job(s): {sorted(ungated)}",
+            )
+        ]
+
+    if not complete:
+        return [
+            Result(
+                f"gating/{shape}: ready_for_review never reduces what runs",
+                False,
+                time.time() - started,
+                f"no draft/ready pair could be formed from {len(DECISIONS)} decisions, so this asserted "
+                "nothing. A pair is two rows sharing a base and a file list; if the table stopped "
+                "carrying both ends of one, the property is unmeasured rather than satisfied.",
+            )
+        ]
+
+    lines, reduced = [], []
+    for key, ends in sorted(complete.items()):
+        drafted, ready = runs(actual[ends["draft"]]), runs(actual[ends["ready"]])
+        lines.append(f"{ends['draft']!r} runs {sorted(drafted)}  →  {ends['ready']!r} runs {sorted(ready)}")
+        if not drafted <= ready:
+            reduced.append(f"{ends['draft']} → {ends['ready']} LOSES {sorted(drafted - ready)}")
+
+    results.append(
+        Result(
+            f"gating/{shape}: ready_for_review never reduces what runs ({len(complete)} pair(s))",
+            not reduced,
+            time.time() - started,
+            "\n".join(reduced + lines)
+            + "\n\nread from this tree's own ci.yml — "
+            + f"classifier-gated: {sorted(j for j, c in gated.items() if 'needs.gate.outputs' in c)}; "
+            + f"unconditional: {sorted(ungated)}; "
+            + f"out of scope: {sorted(j for j, c in gated.items() if 'needs.gate.outputs' not in c)}",
+        )
+    )
     return results
 
 
@@ -1093,6 +1276,49 @@ def set_arg_gate(workdir: Path) -> List[Result]:
             time.time() - started,
             f"exit {code}\n{after}\nThe applying run recorded the new arguments; a base rendered from "
             "them must reproduce this tree, or every later upgrade diffs against a base it never had.",
+        )
+    )
+
+    # ## The silent case, and it is the one an operator cannot see
+    #
+    # The new values ride the manifest, and a run that leaves anything pending
+    # holds the manifest back — correctly. So a run that plans the change,
+    # applies most of it, and stops on one conflict writes files into the tree
+    # and leaves the record exactly as it was, with every line above reading
+    # like progress. proto.pilot declined to bundle `--set-arg` with a
+    # conflicted merge for precisely this reason and then verified the record
+    # afterwards; **an operator who does not check cannot tell a partial apply
+    # from a success**, which is what makes it the tool's sentence to say.
+    #
+    # The conflict is manufactured on the **matrix line itself**, so `ci.yml` is
+    # both the delivery and the obstruction and one edit produces the whole
+    # scenario. The first attempt planted a comment above the job: it merged
+    # cleanly, nothing was pending, the record advanced correctly, and the gate
+    # failed for want of a conflict rather than for want of the sentence — a
+    # plant that did not land, which the assertion below now refuses to confuse
+    # with a working gate.
+    started = time.time()
+    before_line = legs()
+    workflow.write_text(
+        workflow.read_text(encoding="utf-8").replace(before_line, f"{before_line}  # ours, do not touch"),
+        encoding="utf-8",
+    )
+    assert legs() != before_line, "the plant did not land: the matrix line is unchanged"
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "-m", "adopter edit on the matrix line")
+    held = ceiling()
+    code, partial = run([sys.executable, str(upgrade_bin), str(tree), "--set-arg", "python-ceiling=3.13"], cwd=tree)
+    said = "were NOT recorded" in partial and f"still recorded as {held!r}" in partial
+    pending = "still pending" in partial
+    results.append(
+        Result(
+            "set-arg: a run that leaves anything pending says the value was NOT recorded",
+            pending and ceiling() == held and said,
+            time.time() - started,
+            f"exit {code}, the run left something pending: {pending}, record held at {ceiling()!r} "
+            f"(was {held!r}), the tool said so: {said}\n"
+            "Without the sentence this is a run that writes files, reports progress and silently "
+            "does not record the argument it was asked for.\n" + partial,
         )
     )
 

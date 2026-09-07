@@ -1479,6 +1479,25 @@ def main() -> int:
                 detail("If your version of these IS the resolution — an adopter's file the")
                 detail("template also ships, and you are not taking ours — say so with --ported")
                 detail("and the base advances. That is an assertion nothing can check for you.")
+                if set_args_applied:
+                    # The contract fact `--set-arg` rests on, said at the moment
+                    # it bites instead of only in a docstring. The new values
+                    # ride the manifest, and the manifest is held back here — so
+                    # a run that plans the change, applies most of it, and stops
+                    # on one conflict leaves the record exactly as it was, while
+                    # every line above it reads like progress. proto.pilot
+                    # declined to bundle `--set-arg` with a conflicted merge for
+                    # this reason and then verified the record afterwards;
+                    # **an operator who does not check cannot tell a partial
+                    # apply from a success**, which makes this the tool's
+                    # sentence to say rather than theirs to know.
+                    say("⚠️ ", f"the {len(set_args_applied)} --set-arg value(s) were NOT recorded")
+                    for flag, (was, now) in sorted(set_args_applied.items()):
+                        item(f"{flag}  still recorded as {was!r}, not {now!r}")
+                    detail("They ride the manifest, and the manifest is held back above. Whatever")
+                    detail("this run wrote into your tree is there; the RECORD still says the old")
+                    detail("value, so the next upgrade renders the old base and offers the change")
+                    detail("again. Resolve the conflicts, then re-run with the same --set-arg.")
             else:
                 # `--ported` is the user asserting the tree is now at this
                 # version: they took our change, or they took their own and mean
@@ -1707,6 +1726,21 @@ def main() -> int:
             detail("than replacing them, and `--ported` advances the base without erasing that.")
             for rel in diverged:
                 item(rel)
+            # The one class of standing edit that is not a decision to keep, and
+            # it is invisible from inside the list. If you edited one of these to
+            # change a value skeletor RENDERS — a python version, a line length —
+            # then the record still says the old value, the base still renders
+            # it, and that hunk conflicts on every upgrade forever. Green,
+            # current, and re-fighting the same lines.
+            #
+            # Two of six trees were in that state and **neither was found by an
+            # instrument**: one by resolving the recurring conflict, one because
+            # the tree said so in prose. `--set-arg` is the exit and nothing
+            # pointed at it from the place somebody actually reads.
+            detail()
+            detail("If one of these is a file you edited to change a value skeletor RENDERS, the")
+            detail("record still says the old one and that hunk will conflict on every upgrade.")
+            detail("Move the record instead: skeletor-upgrade . --set-arg <flag>=<value> --dry-run")
 
         # After the two blocks that name files needing a decision, because this
         # is about those files — and before `dropped`, which is unrelated.
