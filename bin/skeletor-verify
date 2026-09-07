@@ -6793,6 +6793,70 @@ def tagline_required_gate(workdir: Path) -> Result:
     )
 
 
+def hostile_parent_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """A tree whose PARENT directory is named in one of its own skip lists.
+
+    Every path filter here and in a generated tree is a name matched against a
+    path's components, and several of those paths are **absolute** — so the name
+    is matched against the path *to* the checkout as well as the path inside it.
+    A tree cloned under a directory that happens to share a name with a skip
+    entry then filters away everything it owns.
+
+    Measured, not imagined. `check_doc_links.py` filtered `node_modules` out of
+    an absolute path: under such a parent it found 32 documents, kept **0**, and
+    printed `broken links: 0 (at the ceiling)` — character for character what a
+    healthy tree prints, because a ratchet at zero cannot tell an empty
+    population from a clean one.
+
+    sky.boss hit the identical predicate with `tmp` in the list, which is far
+    likelier, and worse: theirs was parametrised, so it rendered as a `[NOTSET]`
+    parameter id — an empty set, passing — and it was introduced by the very
+    commit that fixed a milder form of the same defect.
+
+    The general shape is theirs and it is why this gate exists rather than a
+    tighter review of the entries:
+
+        A gate that enumerates has two halves — what it checks, and what it
+        checks it ON — and only the first is ever reviewed. The subject set of
+        a check is part of the check, and it is the half nobody reads.
+
+    `node_modules` is the parent used because it is a real entry in a real skip
+    list here. The gate asserts the tree's enumerating checks still see the tree:
+    `check docs` (which owns the doc-link scan), `check output` (which walks the
+    source), and the unit suite, whose own scans go through `scanned()`.
+    """
+    results = []
+    started = time.time()
+    nest = workdir / "node_modules"
+    nest.mkdir(exist_ok=True)
+    target = nest / "hosted"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Hosted",
+         "--slug", "hosted", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
+        cwd=workdir,
+    )
+    if code != 0:
+        return [Result("hostile parent: scaffold under node_modules/", False, time.time() - started, output)]
+    results.append(Result("hostile parent: scaffold under node_modules/", True, time.time() - started, output))
+
+    (target / ".venv").symlink_to(venv_python.parents[1])
+    for command in (["check", "docs"], ["check", "output"]):
+        started = time.time()
+        code, output = run([f"./{CLI_NAME}", *command], cwd=target)
+        results.append(
+            Result(f"hostile parent: {CLI_NAME} {' '.join(command)}", code == 0, time.time() - started, output)
+        )
+
+    started = time.time()
+    code, output = run(
+        [str(venv_python), "-m", "pytest", "tests/", "-m", "unit", "-q"],
+        cwd=target,
+        env_extra={"PYTHONPATH": str(target)},
+    )
+    results.append(Result("hostile parent: pytest -m unit", code == 0, time.time() - started, output))
+    return results
+
+
 def product_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     """A tree that also contains the ADOPTER's own `python -m` package still works.
 
@@ -7254,6 +7318,12 @@ def main() -> int:
         # fixture in this file is a fresh scaffold, so every one has exactly one
         # root `__main__.py` — a population that could not contain the subject.
         for gate in product_package_gate(fullest, workdir, venv_python, pyright_ok):
+            results.append(gate)
+
+        # And the other half of the same class: not what the tree CONTAINS but
+        # where it SITS. A skip entry matched against an absolute path matches
+        # the path to the checkout too.
+        for gate in hostile_parent_gate(fullest, workdir, venv_python):
             results.append(gate)
 
         for gate in badge_gate(fullest, workdir, venv_python):
