@@ -89,29 +89,104 @@ def test_declared_markers_are_registered():
     assert not unknown, f"Unregistered markers (add them to tests/pytest.ini): {unknown}"
 
 
-def _normalise(value) -> list:
-    """One shape for a setting, whichever file it was read from.
+#: Keys pytest splits on ANY whitespace rather than on newlines. `markers` and
+#: `filterwarnings` are linelists — one entry per line, and a marker's help text
+#: contains spaces, so splitting those on whitespace destroys them.
+#:
+#: proto.pilot hit this with `norecursedirs = tmp .venv`, which pytest reads
+#: identically to `["tmp", ".venv"]` and this gate reported as *set in both,
+#: different*. A fix correct for pytest was still red, with nothing in the
+#: message hinting the two values were semantically equal.
+_ARGS_KEYS = {"addopts", "norecursedirs", "testpaths", "pythonpath"}
+
+#: Of those, the ones pytest resolves against **the rootdir of the file that
+#: declared them** — which is the directory holding the config pytest found, so
+#: it is a DIFFERENT directory for each of our two files.
+#:
+#: That makes a raw comparison unsatisfiable rather than merely noisy. sky.boss
+#: measured it: `pytest tests/…` takes rootdir `<repo>/tests`, a bare `pytest`
+#: takes `<repo>`, so the correct values are `pythonpath = ..` / `testpaths = .`
+#: in the inner file and `["."]` / `["tests"]` in the outer one. **Same two
+#: directories, necessarily different strings, and no assignment satisfies a
+#: value comparison while both files stay correct.** A gate with no correct move
+#: is worse than no gate, so these are resolved to absolute paths and compared
+#: by what they MEAN. mind.head found the same shape at `testpaths` and declined
+#: to hand-edit this file, which was right.
+#:
+#: Not derivable from pytest. Its own registry types `norecursedirs` and
+#: `testpaths` identically as `args` — one is a list of basename globs and the
+#: other a list of rootdir-relative paths, and nothing in the schema separates
+#: them. So this set is pytest's semantics written down, which is the one kind
+#: of list this project keeps: knowledge about another tool that no predicate
+#: over this tree can discover. `test_the_key_types_match_pytests_own` checks it
+#: against pytest wherever pytest registers the key.
+_ROOTDIR_RELATIVE = {"testpaths", "pythonpath"}
+
+
+def _normalise(key: str, value, rootdir: Path) -> list:
+    """One shape and one meaning for a setting, whichever file declared it.
 
     `pyproject.toml` gives a real list and a real int; `pytest.ini` gives a
-    string that may be newline-separated. Comparing them raw would report every
-    key as drifted, which is a gate nobody can keep green.
+    string that may be newline- or whitespace-separated. Comparing them raw
+    would report every key as drifted, which is a gate nobody can keep green.
     """
     if isinstance(value, str):
-        return [line.strip() for line in value.strip().splitlines() if line.strip()]
-    if isinstance(value, list):
-        return [str(item).strip() for item in value]
-    return [str(value).strip()]
+        entries = value.split() if key in _ARGS_KEYS else value.strip().splitlines()
+    elif isinstance(value, list):
+        entries = [str(item) for item in value]
+    else:
+        entries = [str(value)]
+    entries = [entry.strip() for entry in entries if entry.strip()]
+    if key in _ROOTDIR_RELATIVE:
+        return sorted(str((rootdir / entry).resolve()) for entry in entries)
+    return entries
 
 
 def _ini_settings() -> dict:
     config = configparser.ConfigParser()
     config.read(TESTS_DIR / "pytest.ini")
-    return {key: _normalise(value) for key, value in config["pytest"].items()}
+    # rootdir is the directory holding the config pytest found — `tests/` for
+    # this one, and the repository root for the other. That asymmetry IS the
+    # finding above; it is not a quirk of how this test reads them.
+    return {key: _normalise(key, value, TESTS_DIR) for key, value in config["pytest"].items()}
 
 
 def _toml_settings() -> dict:
     root = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    return {key: _normalise(value) for key, value in root["tool"]["pytest"]["ini_options"].items()}
+    settings = root["tool"]["pytest"]["ini_options"]
+    return {key: _normalise(key, value, PROJECT_ROOT) for key, value in settings.items()}
+
+
+def test_the_key_types_match_pytests_own():
+    """`_ARGS_KEYS` agrees with pytest wherever pytest has an opinion.
+
+    The set above is a second home for pytest's schema, which is the thing this
+    project refuses unless the copy is checked against its source on every run.
+    It is checked here: a key pytest registers as `args` must be in the set and
+    one it registers as `linelist` must not, so a pytest release that changes a
+    key's type turns this red instead of silently changing what drift means.
+
+    Keys pytest does not register in a bare config — `addopts` and `pythonpath`
+    among them, because they arrive with plugins — cannot be checked and are
+    reported rather than assumed. **A negative over an empty set is a
+    tautology**, so the scan asserts it saw something.
+    """
+    from _pytest.config import get_config
+
+    registry = get_config([])._parser._inidict
+    known = {key: registry[key][1] for key in sorted(_ARGS_KEYS | _ROOTDIR_RELATIVE) if key in registry}
+    scanned(sorted(known), "keys pytest registers a type for", least=2)
+
+    wrong = sorted(
+        f"{key}: pytest says {kind}, this file treats it as {'args' if key in _ARGS_KEYS else 'linelist'}"
+        for key, kind in known.items()
+        if (kind == "args") is not (key in _ARGS_KEYS)
+    )
+    assert not wrong, (
+        f"the key types in this file disagree with pytest's own registry: {wrong}. Splitting a "
+        "linelist on whitespace destroys it — a marker's help text has spaces — and joining an "
+        "args key on newlines reports a correct config as drifted."
+    )
 
 
 def test_every_config_declares_the_same_settings():
