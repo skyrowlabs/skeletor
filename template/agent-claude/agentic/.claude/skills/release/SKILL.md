@@ -47,17 +47,8 @@ place:
 3. `{{CLI}} check docs` — links, refs, tables, anchors.
 4. Commit as one `docs:` commit.
 
+<!-- SCAFFOLD-IF-DIFFER {{BASE_BRANCH}} {{RELEASE_BRANCH}} -->
 ## Phase C — Open the release PR and babysit it
-
-**This tree was scaffolded `--base-branch {{BASE_BRANCH}} --release-branch
-{{RELEASE_BRANCH}}`. If those two read the same, Phases C and D do not apply
-here** — there is no second branch to open a pull request from, and `gh` refuses
-a PR whose head and base are one branch, so the command below fails rather than
-doing nothing. The work is already on `{{RELEASE_BRANCH}}`; the release proceeds
-by whatever this tree's `--versioning {{VERSIONING}}` does with a push to it,
-which for `release-please` is the PR that bot opens on its own and for `tag` is
-an annotated tag you cut. Then go to Phase E, whose back-merge is also a no-op
-in a one-branch tree.
 
 ```bash
 gh pr create --base {{RELEASE_BRANCH}} --head {{BASE_BRANCH}} \
@@ -74,6 +65,30 @@ it.** Admin enforcement is deliberately off on the release branch precisely so
 this step is a human's.
 
 Then watch for the tag Release Please publishes.
+<!-- /SCAFFOLD-IF -->
+<!-- SCAFFOLD-IF-SAME {{BASE_BRANCH}} {{RELEASE_BRANCH}} -->
+## Phase C — Push to the release branch and babysit it
+
+This tree was scaffolded with `--base-branch` and `--release-branch` both
+`{{RELEASE_BRANCH}}` — one branch, so there is no release PR for you to open.
+`gh` refuses a pull request whose head and base name the same branch, so the
+two-branch form of this phase would hand you a command that fails rather than
+one that harmlessly does nothing.
+
+Push Phase B's commit to `{{RELEASE_BRANCH}}`. That push is what a merge into
+the release branch is in a two-branch tree: it runs everything, and it is what
+Release Please watches. Watch its checks, fix what breaks, and report when they
+are green.
+
+## Phase D — STOP. The human merges.
+
+The pull request to stop at is **Release Please's own**, opened against
+`{{RELEASE_BRANCH}}` by the push in Phase C. Report its number and URL. **Do not
+merge it.** Admin enforcement is deliberately off on the release branch
+precisely so this step is a human's.
+
+Then watch for the tag Release Please publishes.
+<!-- /SCAFFOLD-IF -->
 
 ## Phase E — Close the window
 
@@ -81,12 +96,16 @@ Once the tag lands:
 
 ```bash
 {{CLI}} docs freeze-release --tag <tag>   # archive editions, re-anchor regular/, rebuild the index
-git switch {{BASE_BRANCH}} && git merge --no-ff {{RELEASE_BRANCH}}   # back-merge the release commit
 ```
+<!-- SCAFFOLD-IF-DIFFER {{BASE_BRANCH}} {{RELEASE_BRANCH}} -->
 
-The back-merge is for a two-branch tree. With `--base-branch {{BASE_BRANCH}}
---release-branch {{RELEASE_BRANCH}}` reading the same, there is nothing to merge
-back and the second line is a no-op you can skip.
+Then back-merge, so `{{BASE_BRANCH}}` carries the release commit and the next
+release PR does not re-propose it:
+
+```bash
+git switch {{BASE_BRANCH}} && git merge --no-ff {{RELEASE_BRANCH}}
+```
+<!-- /SCAFFOLD-IF -->
 
 Report: tag, what shipped, where the frozen editions went, and anything left
 open.

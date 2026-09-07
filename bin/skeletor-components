@@ -75,6 +75,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.machinery
+import importlib.util
 import json
 import subprocess
 import sys
@@ -179,14 +181,33 @@ def save(tree: Path, data: dict) -> Path:
     return path
 
 
+def scaffolder():
+    """Import ``bin/skeletor-new`` for its marker constants.
+
+    It has no ``.py`` suffix, so the import is by path; everything at its module
+    level is a definition and ``main()`` is guarded. Same loader
+    ``bin/skeletor-verify`` uses, for the same reason.
+    """
+    loader = importlib.machinery.SourceFileLoader("skeletor_new", str(SKELETOR / "bin" / "skeletor-new"))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
 #: What the scaffolder does to a template file on its way into a tree:
-#: `render()` substitutes `{{NAME}}` and `drop_absent_prose` removes
-#: `SCAFFOLD-IF` blocks whose path is absent. A file carrying neither is copied
-#: byte for byte, and that is the whole basis of `taken_verbatim` below. Read
-#: from `bin/skeletor-new`'s own constants rather than repeated, so a new
-#: transform cannot make this quietly wrong — it would have to be added here to
-#: be missed, instead of merely forgotten.
-TRANSFORMS = ("{{", "<!-- SCAFFOLD-IF ", "<!-- SCAFFOLD-IF-NOT ")
+#: `render()` substitutes `{{NAME}}`, and `drop_absent_prose` removes marked
+#: blocks whose condition the tree does not satisfy. A file carrying neither is
+#: copied byte for byte, and that is the whole basis of `taken_verbatim` below.
+#:
+#: **Read from `bin/skeletor-new`, not repeated.** The comment here used to say
+#: that and the line below it was a hand-written tuple — a claim about a
+#: mechanism that did not exist, in the one place where being wrong is silent:
+#: an unlisted marker makes a *rendered* file look verbatim, which promotes
+#: `baseline` from "unknowable" to "provably clean" and reports a fork as
+#: unchanged. It was found the only way that is ever found, by somebody adding
+#: a fourth marker and having to edit two files.
+TRANSFORMS = ("{{",) + scaffolder().OPENERS
 
 
 def rendered_verbatim(blob: bytes) -> bool:

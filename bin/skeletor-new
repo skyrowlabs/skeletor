@@ -358,6 +358,10 @@ def register_shipped_docs(target: Path, values: Dict[str, str]) -> None:
 #:     ... prose about the release train ...
 #:     <!-- /SCAFFOLD-IF -->
 #:
+#:     <!-- SCAFFOLD-IF-DIFFER {{BASE_BRANCH}} {{RELEASE_BRANCH}} -->
+#:     ...open a pull request from one to the other...
+#:     <!-- /SCAFFOLD-IF -->
+#:
 #: `<!-- SCAFFOLD-IF-NOT <path> -->` is the same marker inverted, and it exists
 #: because subtraction alone leaves a lie behind. `--versioning tag` removes the
 #: release machinery and a "## Releases" heading with nothing under it is worse
@@ -373,11 +377,67 @@ def register_shipped_docs(target: Path, values: Dict[str, str]) -> None:
 #: the configuration the author was looking at.
 CONDITIONAL_OPEN = "<!-- SCAFFOLD-IF "
 CONDITIONAL_OPEN_NOT = "<!-- SCAFFOLD-IF-NOT "
+#: Keep the block only when its two arguments render to different strings.
+#:
+#: The other two ask whether a PATH is in the tree, which is the right question
+#: for machinery a flag subtracts. It is the wrong question for a block whose
+#: validity turns on two substituted VALUES being distinct — the release skill's
+#: `gh pr create --base X --head Y`, which `gh` refuses when X and Y are one
+#: branch. No file's presence answers that.
+#:
+#: General rather than a named predicate, deliberately. `render()` runs during
+#: the copy and this runs after it, so a marker arrives here already
+#: substituted — `SCAFFOLD-IF-DIFFER main main` — and comparing two words needs
+#: no knowledge of which placeholders produced them. A registry of condition
+#: names would be the list this project refuses; two rendered strings and `!=`
+#: is a pattern.
+CONDITIONAL_OPEN_DIFFER = "<!-- SCAFFOLD-IF-DIFFER "
+#: Its inverse. Present because the pair is how the true half of an alternative
+#: gets shipped without hedging either half — the same reason
+#: `SCAFFOLD-IF-NOT` exists beside `SCAFFOLD-IF`.
+CONDITIONAL_OPEN_SAME = "<!-- SCAFFOLD-IF-SAME "
 CONDITIONAL_CLOSE = "<!-- /SCAFFOLD-IF -->"
+#: Every opener, so a third one cannot be added and then missed by one of
+#: the two places that scan for them.
+OPENERS = (CONDITIONAL_OPEN_DIFFER, CONDITIONAL_OPEN_SAME, CONDITIONAL_OPEN_NOT, CONDITIONAL_OPEN)
+#: The value-comparing subset.
+COMPARERS = (CONDITIONAL_OPEN_DIFFER, CONDITIONAL_OPEN_SAME)
+
+#: `drop_absent_prose` resolves a marker line by taking the first opener that
+#: appears in it, which is sound only because no opener contains another — the
+#: character after `SCAFFOLD-IF` is a space in one and a hyphen in the other
+#: three. That is a property of four string literals rather than of the loop,
+#: so it is asserted where the literals are, and the ordering of `OPENERS`
+#: carries no weight.
+#:
+#: **The trailing space is what does the work**, and it narrows what this can
+#: catch to exactly one mistake — which is the mistake. A new marker cannot
+#: collide by being longer: `SCAFFOLD-IF-DIFFER-BY` does not contain
+#: `SCAFFOLD-IF-DIFFER ` because the space is a hyphen. It collides by putting
+#: a space where the convention puts a hyphen — `SCAFFOLD-IF SAME` contains
+#: `SCAFFOLD-IF `, so every one of its blocks would be resolved as a plain
+#: `SCAFFOLD-IF` testing for a path named `SAME`, silently, with the only
+#: symptom a block kept or dropped for the wrong reason.
+#:
+#: The first version of this comment claimed the longer-name case, and the
+#: plant written to prove it passed green — which is this repository's own rule
+#: arriving on the guard that states it: a plant that did not land is
+#: indistinguishable from a gate that works.
+for _opener in OPENERS:
+    for _other in OPENERS:
+        if _opener is not _other and _opener in _other:
+            raise SystemExit(f"❌ marker `{_opener.strip()}` is a substring of `{_other.strip()}`")
 
 
 def drop_absent_prose(target: Path) -> None:
-    """Remove every marked block whose named path is not in this tree.
+    """Remove every marked block whose condition this tree does not satisfy.
+
+    Two conditions, and they ask about different kinds of thing. `SCAFFOLD-IF
+    <path>` and its inverse ask whether a FILE is here, which is the right
+    question for machinery a flag subtracts — the flag is gone by now and the
+    tree is what remains. `SCAFFOLD-IF-DIFFER <a> <b>` and its inverse compare
+    two RENDERED VALUES, for a block whose validity turns on two substitutions
+    being distinct rather than on anything existing.
 
     A doc describing machinery a configuration omitted is not merely untidy: the
     index tables and the rules files are ROUTING, so a surviving block is a
@@ -407,7 +467,7 @@ def drop_absent_prose(target: Path) -> None:
             original = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        if CONDITIONAL_OPEN not in original and CONDITIONAL_OPEN_NOT not in original:
+        if not any(marker in original for marker in OPENERS):
             continue
 
         lines = original.splitlines(keepends=True)
@@ -415,21 +475,31 @@ def drop_absent_prose(target: Path) -> None:
         index = 0
         while index < len(lines):
             line = lines[index]
-            if CONDITIONAL_OPEN not in line and CONDITIONAL_OPEN_NOT not in line:
+            if not any(marker in line for marker in OPENERS):
                 out.append(line)
                 index += 1
                 continue
 
-            inverted = CONDITIONAL_OPEN_NOT in line
-            opener = CONDITIONAL_OPEN_NOT if inverted else CONDITIONAL_OPEN
+            opener = next(marker for marker in OPENERS if marker in line)
+            compares = opener in COMPARERS
+            inverted = opener in (CONDITIONAL_OPEN_NOT, CONDITIONAL_OPEN_SAME)
             needed = line.split(opener, 1)[1].split("-->")[0].strip()
             close = index + 1
             while close < len(lines) and CONDITIONAL_CLOSE not in lines[close]:
                 close += 1
             if close >= len(lines):
-                raise SystemExit(f"❌ {path}: `{CONDITIONAL_OPEN}{needed}` has no closing marker")
+                raise SystemExit(f"❌ {path}: `{opener}{needed}` has no closing marker")
 
-            if (target / needed).exists() is not inverted:
+            if compares:
+                words = needed.split()
+                if len(words) != 2:
+                    raise SystemExit(
+                        f"❌ {path}: `{opener.strip()}` takes exactly two rendered values, got {needed!r}"
+                    )
+                keep = (words[0] == words[1]) is inverted
+            else:
+                keep = (target / needed).exists() is not inverted
+            if keep:
                 # Keep the body, drop the scaffolder's bookkeeping. A leftover
                 # marker in a generated tree invites somebody to add a second by
                 # hand, in a tree this scaffolder will never run against again.

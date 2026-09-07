@@ -1489,6 +1489,150 @@ def host_exemption_gate(tier: str, workdir: Path, venv_python: Path) -> List[Res
     return results
 
 
+def one_branch_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """A tree whose base branch IS its release branch, in both versioning modes.
+
+    **This grid scaffolds every tier, every language, every agent and both
+    versioning modes, and never a one-branch tree.** `--base-branch` defaults to
+    `develop` and `--release-branch` to `main`, so every configuration above
+    renders with two distinct names — and five pieces of shipped prose turned
+    out to be false when those names are the same. `gh pr create --base main
+    --head main`, which git refuses. *"BOTH branches, not just the release
+    one"*, of one branch. A docstring contrasting `{{BASE_BRANCH}}` with
+    `{{RELEASE_BRANCH}}` that interpolated to a word set against itself. And
+    `docs-only.cjs` arguing that the merge is the release, which is true only
+    where a push to that branch cuts one.
+
+    None of it was reachable from any tree this harness built. It was found by
+    three adopters reading their own rendered files, which is the population a
+    generator hears from **last**.
+
+    ## Why a scaffold rather than a validator
+
+    `--base-branch main` alone lands a tree here, because `--versioning`
+    defaults to `release-please`: one override, of the flag somebody wanting a
+    single-branch repository reaches for first. The three one-branch trees in
+    the fleet escaped only by *also* passing `--versioning tag`, which is a
+    second override that travels with the first for reasons of disposition
+    rather than knowledge — solo-and-early wants one branch *and* wants less
+    automation.
+
+    So the obvious move is to refuse the combination. That would be wrong: one
+    branch plus release automation is a coherent workflow — commit to the
+    branch, the bot opens its release PR, you merge, it tags — and it is
+    plausibly the next adopter, the one who has outgrown cutting tags by hand
+    without outgrowing a single branch. **Refusing a configuration because our
+    prose about it was wrong is fixing the wrong thing.**
+
+    `long_lived_branches` already deduplicates, so the mechanical half was never
+    broken; only the sentences were. What was missing is an occupant, and a
+    harness can be one. mind.head's rule, which this gate is: *for any claim
+    keyed to a scaffold argument, ask which combinations with its neighbours
+    have zero occupants, and treat each as **unverified** rather than
+    **unaffected**.*
+
+    ## Both modes, because the cell that matters is the empty one
+
+    `--versioning tag` is where all three real one-branch trees are, and
+    `release-please` is the cell with no occupants at all — which is exactly the
+    one whose prose was wrong, since the escape correlates with the mode. Both
+    are scaffolded and both run the tree's own gates.
+    """
+    results: List[Result] = []
+    for versioning in ("release-please", "tag"):
+        label = f"one-branch/{versioning}"
+        started = time.time()
+        target = workdir / f"one-branch-{versioning}"
+        code, output = run(
+            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Solo",
+             "--slug", f"solo-{versioning}", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
+             "--language", "python", "--versioning", versioning,
+             "--base-branch", "main", "--release-branch", "main"],
+            cwd=workdir,
+        )
+        results.append(Result(f"{label}: scaffold", code == 0, time.time() - started, output))
+        if code != 0:
+            continue
+
+        # The branch pair collapsed to one everywhere it is spelled. Checked
+        # against the rendered workflows rather than against `long_lived_branches`,
+        # because the question is what the tree received and not what the helper
+        # returned — those are the same today and are two different facts.
+        started = time.time()
+        doubled = []
+        for workflow in sorted((target / ".github" / "workflows").glob("*.yml")):
+            for line in workflow.read_text(encoding="utf-8").splitlines():
+                if "branches:" in line and line.count("main") > 1:
+                    doubled.append(f"{workflow.name}: {line.strip()}")
+        results.append(
+            Result(
+                f"{label}: no branch list names the one branch twice",
+                not doubled,
+                time.time() - started,
+                "\n".join(doubled) or "every rendered branch list is deduplicated",
+            )
+        )
+
+        # A pull request from a branch to itself. `gh` refuses it, so a rendered
+        # command naming the same branch on both sides is a procedure that
+        # cannot run — the shape that shipped in the release skill.
+        started = time.time()
+        pattern = re.compile(r"gh pr create[^\n]*--base\s+(\S+)[^\n]*--head\s+(\S+)")
+
+        def scan(root: Path) -> Tuple[List[str], List[str]]:
+            """Every `gh pr create` under `root`, split into self-PRs and the rest."""
+            self_prs: List[str] = []
+            others: List[str] = []
+            for path in sorted(root.rglob("*.md")):
+                if ".git/" in path.as_posix():
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+                for number, line in enumerate(text.splitlines(), 1):
+                    match = pattern.search(line)
+                    if not match:
+                        continue
+                    where = f"{path.relative_to(root)}:{number}: {line.strip()}"
+                    (self_prs if match.group(1) == match.group(2) else others).append(where)
+            return self_prs, others
+
+        # The positive control, and it is not optional here. In a one-branch
+        # tree the correct outcome is that the command is *gone* — so the
+        # finding set and the search space empty out together, and "the marker
+        # dropped the block" is indistinguishable from "the regex never matched
+        # this construct anywhere". The template is where the construct
+        # provably lives: unrendered, its two arguments are different
+        # placeholders, so a match there proves the pattern reads the shape
+        # without proving anything about branches.
+        _, template_hits = scan(SKELETOR / "template")
+        results.append(
+            Result(
+                f"{label}: the self-PR scan can see a `gh pr create` at all ({len(template_hits)} in template/)",
+                bool(template_hits),
+                time.time() - started,
+                "\n".join(template_hits) or "the pattern matched nothing in template/ — it is not reading the shape",
+            )
+        )
+
+        started = time.time()
+        self_prs, rendered = scan(target)
+        results.append(
+            Result(
+                f"{label}: no documented pull request runs from a branch to itself",
+                not self_prs,
+                time.time() - started,
+                "\n".join(self_prs)
+                or f"no `gh pr create` names one branch on both sides ({len(rendered)} rendered, none self-directed)",
+            )
+        )
+
+        (target / ".venv").symlink_to(venv_python.parents[1])
+        for name, command in (("check docs", ["check", "docs"]), ("unit suite", ["test", "unit"])):
+            started = time.time()
+            code, output = run([f"./{CLI_NAME}", *command], cwd=target)
+            results.append(Result(f"{label}: {name}", code == 0, time.time() - started, output))
+    return results
+
+
 def versioning_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     """`--versioning tag` produces a tree that passes its own gates.
 
@@ -5418,6 +5562,9 @@ def main() -> int:
         # wrong tree.
         fullest = max(tiers, key=lambda t: len(scaffolder.TIERS[t]))
         for gate in versioning_gate(fullest, workdir, venv_python):
+            results.append(gate)
+
+        for gate in one_branch_gate(fullest, workdir, venv_python):
             results.append(gate)
 
         for gate in host_exemption_gate(fullest, workdir, venv_python):
