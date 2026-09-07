@@ -703,31 +703,119 @@ def informational_step_gate(tree: Path, venv_bin: Path) -> List[Result]:
 #: change and it had no fixture: a stale docstring three files away kept
 #: asserting the old behaviour and stayed green, because its assertions were
 #: about something else.
+#: Every event `docs-only.cjs` can reach, with the verdict expected of a
+#: two-branch tree and of a one-branch tree. A row carries a `reason` fragment
+#: as well as the two booleans, because **the booleans are not enough**: a
+#: fail-open returns exactly what a healthy release-candidate returns, so a
+#: broken probe and a working one are distinguishable only by `reason`.
+#: dream-doll lost a measurement to that — their harness omitted `github.rest`,
+#: `listFiles` threw, and the script's failing-open branch handed back the
+#: previous release's answer, which is the one you are least likely to
+#: challenge. **When a system fails open, an instrument that breaks reports
+#: the safe answer.**
+#:
+#: The table is a cross product on purpose. Every previous version of it walked
+#: one axis and every previous version was wrong in a place the other axis
+#: would have shown: `docs-only PR -> release branch` and `code PR -> release
+#: branch` are where the two sets overlap, and a row that needs both conditions
+#: at once is invisible to an analysis anchored on either.
 DECISIONS = (
-    ("push", None, {"docsOnly": False, "fullSuite": True}, {"docsOnly": False, "fullSuite": True}),
     (
-        "draft PR",
-        {"draft": True, "base": "{base}", "files": ["cli/check.py"]},
-        {"docsOnly": False, "fullSuite": False},
-        {"docsOnly": False, "fullSuite": False},
+        "push",
+        None,
+        {"docsOnly": False, "fullSuite": True, "reason": "not a pull request"},
+        {"docsOnly": False, "fullSuite": True, "reason": "not a pull request"},
+    ),
+    # Above the classifier, and it has to stay there. Classified, a lockfile-only
+    # bump is `nonDoc` -> code -> a non-release base -> no integration, and this
+    # file's own comment calls dependency bumps the change class integration
+    # exists to catch. node-zero's finding, from executing the classified order.
+    (
+        "dependabot lockfile",
+        {"user": {"login": "dependabot[bot]"}, "base": "{base}", "files": ["package-lock.json"]},
+        {"docsOnly": False, "fullSuite": True, "reason": "dependency bump"},
+        {"docsOnly": False, "fullSuite": True, "reason": "dependency bump"},
     ),
     (
-        "docs-only PR -> release branch",
-        {"base": "{release}", "files": ["README.md"]},
-        {"docsOnly": False, "fullSuite": True},
-        {"docsOnly": True, "fullSuite": False},
+        "dependabot docs-only",
+        {"user": {"login": "dependabot[bot]"}, "base": "{base}", "files": ["README.md"]},
+        {"docsOnly": False, "fullSuite": True, "reason": "dependency bump"},
+        {"docsOnly": False, "fullSuite": True, "reason": "dependency bump"},
+    ),
+    # The pair that proves `ready_for_review` cannot DE-escalate. With the draft
+    # test above the classifier, a docs-only draft never reached `docsOnly` and
+    # landed in the code verdict — two jobs — and marking it ready dropped it to
+    # zero. Both rows must now be the docs-only verdict.
+    (
+        "draft, docs-only",
+        {"draft": True, "base": "{base}", "files": ["README.md"]},
+        {"docsOnly": True, "fullSuite": False, "reason": "docs-only"},
+        {"docsOnly": True, "fullSuite": False, "reason": "docs-only"},
+    ),
+    (
+        "draft, code",
+        {"draft": True, "base": "{base}", "files": ["cli/check.py"]},
+        {"docsOnly": False, "fullSuite": False, "reason": "draft PR carrying code"},
+        {"docsOnly": False, "fullSuite": False, "reason": "draft PR carrying code"},
+    ),
+    # A draft aimed at the release branch is still a draft: `ready_for_review`
+    # is what escalates it to the full suite, which is the direction that
+    # transition is supposed to move in.
+    (
+        "draft, code -> release branch",
+        {"draft": True, "base": "{release}", "files": ["cli/check.py"]},
+        {"docsOnly": False, "fullSuite": False, "reason": "draft PR carrying code"},
+        {"docsOnly": False, "fullSuite": False, "reason": "draft PR carrying code"},
     ),
     (
         "docs-only PR -> base",
         {"base": "{base}", "files": ["README.md"]},
-        {"docsOnly": True, "fullSuite": False},
-        {"docsOnly": True, "fullSuite": False},
+        {"docsOnly": True, "fullSuite": False, "reason": "docs-only"},
+        {"docsOnly": True, "fullSuite": False, "reason": "docs-only"},
+    ),
+    # The row two-branch trees LOSE. It ran the entire suite before the reorder,
+    # because the release-branch test fired above the classifier. A docs-only
+    # release candidate is now the gate alone, which is this file's premise
+    # applied to the one base it used to exempt itself from. release-please's
+    # own pull request is unaffected: `VERSION` and the release manifest are not
+    # in `DOC_PATTERNS`, so it classifies as code and takes the row below.
+    (
+        "docs-only PR -> release branch",
+        {"base": "{release}", "files": ["README.md"]},
+        {"docsOnly": True, "fullSuite": False, "reason": "docs-only"},
+        {"docsOnly": True, "fullSuite": False, "reason": "docs-only"},
     ),
     (
         "code PR -> base",
         {"base": "{base}", "files": ["cli/check.py"]},
-        {"docsOnly": False, "fullSuite": False},
-        {"docsOnly": False, "fullSuite": False},
+        {"docsOnly": False, "fullSuite": False, "reason": "unit tests only"},
+        {"docsOnly": False, "fullSuite": True, "reason": "release branch"},
+    ),
+    # The row one-branch trees GAIN, and the reason the reorder exists. That
+    # branch is what a stranger clones, so code reaching it un-integrated has no
+    # other gate in front of it.
+    (
+        "code PR -> release branch",
+        {"base": "{release}", "files": ["cli/check.py"]},
+        {"docsOnly": False, "fullSuite": True, "reason": "release branch"},
+        {"docsOnly": False, "fullSuite": True, "reason": "release branch"},
+    ),
+    # Both fail-opens, asserted in BOTH shapes, because the tidy refactor after
+    # the reorder is to route them into the code verdict and let the
+    # release-branch rule decide them — which makes them fail-PARTIAL in a
+    # two-branch tree. A fail-open whose answer depends on the base branch is
+    # not failing open.
+    (
+        "empty file list -> base",
+        {"base": "{base}", "files": []},
+        {"docsOnly": False, "fullSuite": True, "reason": "failing open"},
+        {"docsOnly": False, "fullSuite": True, "reason": "failing open"},
+    ),
+    (
+        "listFiles throws -> base",
+        {"base": "{base}", "files": None},
+        {"docsOnly": False, "fullSuite": True, "reason": "failing open"},
+        {"docsOnly": False, "fullSuite": True, "reason": "failing open"},
     ),
 )
 
@@ -737,7 +825,14 @@ const cases = JSON.parse(process.argv[3]);
 (async () => {
   const out = {};
   for (const [label, pr, files] of cases) {
-    const github = { paginate: async () => files.map((f) => ({ filename: f })), rest: { pulls: { listFiles: null } } };
+    // `files === null` asks for the throwing path. Everything else resolves.
+    const github = {
+      paginate: async () => {
+        if (files === null) throw new Error('planted: the API is unreachable');
+        return files.map((f) => ({ filename: f }));
+      },
+      rest: { pulls: { listFiles: null } },
+    };
     const payload = pr ? { pull_request: { number: 1, head: { ref: 'f' }, user: { login: 'me' }, ...pr } } : {};
     const r = await decide({ github, context: { payload, repo: { owner: 'o', repo: 'r' } }, core: { warning() {} } });
     out[label] = { docsOnly: r.docsOnly, fullSuite: r.fullSuite, reason: r.reason };
@@ -803,7 +898,7 @@ def _gating_shape(tier: str, workdir: Path, shape: str, base: str, release: str)
         built["base"] = {"ref": pr["base"].format(base=base, release=release)}
         return built
 
-    cases = [[label, payload(pr), (pr or {}).get("files", [])] for label, pr, _, _ in DECISIONS]
+    cases = [[label, payload(pr), None if pr is None else pr.get("files", [])] for label, pr, _, _ in DECISIONS]
     started = time.time()
     code, output = run(["node", str(harness), str(script), json.dumps(cases)], cwd=target)
     harness.unlink(missing_ok=True)
@@ -812,12 +907,26 @@ def _gating_shape(tier: str, workdir: Path, shape: str, base: str, release: str)
 
     actual = json.loads(output.strip().splitlines()[-1])
     expectations = {label: (two if base != release else one) for label, _, two, one in DECISIONS}
+
+    def disagrees(label: str, expected: dict) -> bool:
+        """Booleans exactly; `reason` as a fragment that must appear.
+
+        The booleans alone cannot separate a healthy verdict from a broken
+        probe — a fail-open returns what a release candidate returns — so the
+        reason is asserted, and as a substring rather than in full because the
+        script interpolates file names and counts into it.
+        """
+        got = actual[label]
+        if {k: got[k] for k in ("docsOnly", "fullSuite")} != {k: expected[k] for k in ("docsOnly", "fullSuite")}:
+            return True
+        return expected["reason"] not in got["reason"]
+
     wrong = [
         f"{label}: expected {expected}, got "
         f"{{'docsOnly': {actual[label]['docsOnly']}, 'fullSuite': {actual[label]['fullSuite']}}}"
-        f"  ({actual[label]['reason']})"
+        f"  ({actual[label]['reason']!r})"
         for label, expected in expectations.items()
-        if {k: actual[label][k] for k in expected} != expected
+        if disagrees(label, expected)
     ]
     results.append(
         Result(
@@ -832,7 +941,13 @@ def _gating_shape(tier: str, workdir: Path, shape: str, base: str, release: str)
     # because it is the only event that carries it. If these two ever agree
     # here, the split has stopped meaning anything and one job could gate both.
     started = time.time()
-    code_pr = actual["code PR -> base"]
+    # Named by shape, because the reorder moved it. In a two-branch tree the
+    # disagreeing event is a code PR into the base branch; in a one-branch tree
+    # that PR now earns the full suite, and the event where the two conditions
+    # differ is a code DRAFT — the only ready code PR there targets the release
+    # branch. If no event separated them the split would mean nothing and one
+    # condition would do.
+    code_pr = actual["code PR -> base" if base != release else "draft, code"]
     results.append(
         Result(
             f"gating/{shape}: full_suite and docs_only DIFFER on a ready code PR",
@@ -842,6 +957,155 @@ def _gating_shape(tier: str, workdir: Path, shape: str, base: str, release: str)
             f"gate on `docs_only != true` and run; `lint`, `integration` and `ui` gate on "
             f"`full_suite == true` and do not. This is the ONLY event where the two disagree, so it is "
             "the only one that distinguishes the split from a single condition.",
+        )
+    )
+    return results
+
+
+def set_arg_gate(workdir: Path) -> List[Result]:
+    """`--set-arg` delivers an argument a scaffolded tree cannot otherwise reach.
+
+    A tree scaffolds once, so every argument it records is fixed at that moment
+    and a flag the template gains later is unreachable to it. `ci.yml` offered a
+    second matrix leg as *"a scaffold argument rather than a workflow edit"* —
+    a door that had closed for every existing adopter before the feature
+    existed. node-zero measured the closed door; sky.boss arrived from a tree
+    whose matrix has been two legs since before the flag was written.
+
+    ## What the assertions are actually separating
+
+    The **base must not move.** An earlier design amended the record and
+    re-derived every hash from a re-render at the recorded ref; it refused the
+    first honest case, correctly, because the tree genuinely was not rendered
+    with the new value. So this changes only the head render, and the whole
+    correctness argument is that `--set-arg` is invisible to the base.
+
+    So the fourth assertion runs an upgrade with **no** `--set-arg` and requires
+    `already current`: after the applying run the manifest records the new
+    arguments, and this is what makes the record and the tree agree — a base
+    rendered from the recorded arguments has to reproduce what is on disk, or
+    every later upgrade diffs against the wrong base, which looks like it
+    worked.
+
+    **What it does not catch is worth writing down, because the plant landed
+    somewhere else.** Leaking `--set-arg` into the base render was planted
+    expecting this assertion to fire. It did not: with the flag on both sides
+    the two renders agree, there is nothing to deliver, and the tree never
+    changes — so `already current` is true and vacuous. The two **delivery**
+    assertions caught it instead, because a dry run that plans nothing and a
+    real run that changes nothing are both visible.
+
+    The first write-up of this docstring claimed the opposite — that delivery
+    alone would have missed the leak — and the plant refuted it in one run. A
+    gate's own account of which assertion earns its place is a claim like any
+    other, and this one was wrong before it was tested.
+
+    The **positive control** is the run without the flag, required to leave the
+    matrix alone. Without it, a matrix that was already two legs for some other
+    reason would pass every assertion here — the plant that did not land,
+    wearing a delivery's clothes.
+    """
+    results: List[Result] = []
+    started = time.time()
+    # Scaffolded by the CLEAN clone, not by this checkout. The grid's `scaffold`
+    # passes `--allow-dirty`, so its trees record a `-dirty` ref that the base
+    # render cannot reproduce whenever anything under `template/` is
+    # uncommitted — and every assertion below is about what the base render
+    # does. The clone carries this working tree in as a commit, so its ref
+    # resolves and still holds the changes under test.
+    clean = clean_skeletor(workdir)
+    upgrade_bin = clean / "bin" / "skeletor-upgrade"
+    tree = workdir / "set-arg"
+    if tree.exists():
+        shutil.rmtree(tree)
+    code, output = run(
+        [sys.executable, str(clean / "bin" / "skeletor-new"), str(tree),
+         "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
+         "--tier", "governed", "--language", "python"],
+        cwd=SKELETOR,
+    )
+    results.append(Result("set-arg: scaffold governed/python from a clean clone", code == 0, time.time() - started, output))
+    if code != 0:
+        return results
+
+    workflow = tree / ".github" / "workflows" / "ci.yml"
+    manifest_name = load_scaffolder().MANIFEST_NAME
+
+    def ceiling() -> str:
+        recorded = json.loads((tree / manifest_name).read_text(encoding="utf-8"))["args"]
+        return recorded[recorded.index("--python-ceiling") + 1]
+
+    def legs() -> str:
+        return next(line.strip() for line in workflow.read_text(encoding="utf-8").splitlines() if "python: [" in line)
+
+    before_legs, before_ceiling = legs(), ceiling()
+
+    # The control: an ordinary upgrade must change neither.
+    run([sys.executable, str(upgrade_bin), str(tree)], cwd=tree)
+    control_ok = legs() == before_legs and ceiling() == before_ceiling
+    results.append(
+        Result(
+            "set-arg: an upgrade WITHOUT the flag leaves the matrix and the record alone",
+            control_ok,
+            time.time() - started,
+            f"matrix {before_legs!r} → {legs()!r}, ceiling {before_ceiling!r} → {ceiling()!r}\n"
+            "Without this, a tree that already had two legs would satisfy every assertion below.",
+        )
+    )
+
+    started = time.time()
+    code, dry = run(
+        [sys.executable, str(upgrade_bin), str(tree), "--set-arg", "python-ceiling=3.14", "--dry-run"], cwd=tree
+    )
+    planned = ".github/workflows/ci.yml" in dry and "'3.12' → '3.14'" in dry
+    results.append(
+        Result(
+            "set-arg: a dry run plans the workflow and writes nothing",
+            code == 0 and planned and legs() == before_legs and ceiling() == before_ceiling,
+            time.time() - started,
+            f"exit {code}, planned the workflow: {planned}, tree unchanged: "
+            f"{legs() == before_legs and ceiling() == before_ceiling}\n{dry}",
+        )
+    )
+
+    started = time.time()
+    code, real = run([sys.executable, str(upgrade_bin), str(tree), "--set-arg", "python-ceiling=3.14"], cwd=tree)
+    delivered = "3.14" in legs() and before_legs != legs()
+    results.append(
+        Result(
+            "set-arg: a real run delivers the argument and records it",
+            code == 0 and delivered and ceiling() == "3.14",
+            time.time() - started,
+            f"exit {code}, matrix {before_legs!r} → {legs()!r}, recorded ceiling {ceiling()!r}\n{real}",
+        )
+    )
+
+    # The assertion the design rests on: the BASE never moved, so a plain
+    # upgrade against the same skeletor still reproduces this tree exactly.
+    started = time.time()
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "-m", "set-arg")
+    code, after = run([sys.executable, str(upgrade_bin), str(tree), "--dry-run"], cwd=tree)
+    results.append(
+        Result(
+            "set-arg: the base did not move — a plain upgrade is still 'already current'",
+            code == 0 and "already current" in after,
+            time.time() - started,
+            f"exit {code}\n{after}\nThe applying run recorded the new arguments; a base rendered from "
+            "them must reproduce this tree, or every later upgrade diffs against a base it never had.",
+        )
+    )
+
+    started = time.time()
+    code, refusal = run(
+        [sys.executable, str(upgrade_bin), str(tree), "--set-arg", "not-a-flag=1", "--dry-run"], cwd=tree
+    )
+    results.append(
+        Result(
+            "set-arg: a flag the record does not carry is refused, not invented",
+            code != 0 and "nothing to change" in refusal,
+            time.time() - started,
+            f"exit {code}\n{refusal}",
         )
     )
     return results
@@ -3600,13 +3864,14 @@ def manifest_args_gate() -> Result:
     parser.print_usage(usage)
     printed = set(re.findall(r"--[\w-]+", usage.getvalue())) - {"--help"}
 
-    # `--tagline` is required, so the probe must supply it: this gate asks what
-    # the parser declares, not what a caller may omit.
-    #
+    #: `--tagline` is required, so every probe must supply it: this gate asks
+    #: what the parser declares, not what a caller may omit.
+    BARE = ["probe", "--tagline", "t"]
+
     # Through `resolve()`, which is what a scaffold's arguments go through
     # before its manifest is written. Parsing alone leaves `--python-ceiling`
     # at `None` and models a record no scaffold produces.
-    args = scaffolder.resolve(parser.parse_args(["probe", "--tagline", "t"]))
+    args = scaffolder.resolve(parser.parse_args(BARE))
     recorded = set(scaffolder.manifest_args(args, scaffolder.substitutions(args))[::2])
 
     problems = []
@@ -3645,17 +3910,68 @@ def manifest_args_gate() -> Result:
             return action.default + 1
         return None
 
-    moved, unmoved, vector = [], [], ["probe", "--tagline", "t"]
-    for action in parser._actions:
-        value = off_default(action)
-        if value is None or value is False:
-            if action.option_strings and action.dest not in scaffolder.NOT_RENDERED and action.dest != "help":
-                unmoved.append(action.option_strings[0])
-            continue
-        moved.append(action.option_strings[0])
-        vector += [action.option_strings[0]] if action.nargs == 0 else [action.option_strings[0], str(value)]
+    #: The shapes `off_default` must be able to move, asserted individually
+    #: rather than in aggregate: a heuristic that silently stops handling one
+    #: branch still returns a non-empty vector from the others, so a single
+    #: non-empty check would report a partly-blind scan as a working one.
+    #:
+    #: **`store_true` is deliberately not here, and its absence is the finding.**
+    #: Requiring it failed on the first run: `--reproducing` is exempt from the
+    #: record, so the parser declares no render-affecting `store_true` at all —
+    #: meaning the exact shape that caused the bug has no live flag to exercise
+    #: it. Listing it here would be a requirement no tree can satisfy, and
+    #: dropping it silently would leave that shape uncovered while the gate
+    #: reported three kinds moved. It is covered by a **planted** action
+    #: instead, below, and this comment is where the two halves meet.
+    kinds = {"choice": lambda a: bool(a.choices), "int": lambda a: a.type is int}
 
-    for label, argv in (("defaults", ["probe", "--tagline", "t"]), ("off-default", vector)):
+    def off_default_vector() -> Tuple[List[str], List[str], List[str]]:
+        """The vector, what it moved, and what it could not — or a hard failure.
+
+        **The refusal lives here rather than in a guard beside the call.** A
+        companion assertion is a convention somebody has to remember, which is
+        a registry with no enforcement — proto.pilot's rule, and their argument
+        against lifting the template's `scanned()` into this file: that helper
+        earns its place where there are many producers and one shape, and this
+        has one producer, so the assertion belongs inside it and there is no
+        code path returning a degenerate vector at all.
+
+        What is being refused is stash.flow's finding. If `off_default` ever
+        returns nothing for every action — a parser refactor, `type=` becoming
+        a callable — the vector is byte-identical to the defaults vector, the
+        loop below runs the same probe twice, both pass, and the gate goes
+        green having performed one vector while its docstring claims two. The
+        second vector's whole reason for existing is that the first **cannot**
+        discriminate a flag left out of the record from a flag recorded
+        correctly, so a silently-collapsed pair is not a weaker check, it is
+        the absence of one wearing the label of two.
+        """
+        vector, moved, unmoved = list(BARE), [], []
+        seen = {kind: 0 for kind in kinds}
+        for action in parser._actions:
+            if not action.option_strings or action.dest == "help" or action.dest in scaffolder.NOT_RENDERED:
+                continue
+            value = off_default(action)
+            if value is None or value is False:
+                unmoved.append(action.option_strings[0])
+                continue
+            moved.append(action.option_strings[0])
+            for kind, matches in kinds.items():
+                seen[kind] += 1 if matches(action) else 0
+            vector += [action.option_strings[0]] if action.nargs == 0 else [action.option_strings[0], str(value)]
+        blind = sorted(kind for kind, count in seen.items() if not count)
+        if blind:
+            raise AssertionError(
+                f"off_default() moved no {blind} flag, so the off-default vector cannot exercise that "
+                f"shape. It moved {moved} and could not move {unmoved}. A vector that collapses toward "
+                "the defaults runs the same probe twice and passes, and the second vector exists "
+                "precisely because the first cannot discriminate a missing flag from a recorded one."
+            )
+        return vector, moved, unmoved
+
+    vector, moved, unmoved = off_default_vector()
+
+    for label, argv in (("defaults", list(BARE)), ("off-default", vector)):
         original = scaffolder.resolve(parser.parse_args(argv))
         record = scaffolder.manifest_args(original, scaffolder.substitutions(original))
         try:
@@ -3676,6 +3992,51 @@ def manifest_args_gate() -> Result:
                 if scaffolder.substitutions(replayed).get(k) != v
             )
             problems.append(f"the {label} record re-renders differently: {differs}")
+
+    # ## The shape that broke, exercised by a planted flag
+    #
+    # `--reproducing` recorded as `--reproducing False` and made every fresh
+    # scaffold unupgradable. It is exempt now, and that fix removed the last
+    # render-affecting `store_true` from the parser — so the checks above
+    # cannot reach the shape at all, and the mechanism handling it
+    # (`action.nargs == 0` in `manifest_args`) is dead code until somebody adds
+    # a flag, at which point it is load-bearing and unproven.
+    #
+    # So the flag is planted rather than waited for. `manifest_args` calls
+    # `build_parser()` itself, which is why this patches the module attribute
+    # instead of passing a parser: a locally-extended parser would not be the
+    # one under test, and the gate would pass having exercised nothing — the
+    # plant that does not land, in the gate written to stop that.
+    real_build = scaffolder.build_parser
+
+    def planted() -> argparse.ArgumentParser:
+        extended = real_build()
+        extended.add_argument("--probe-flag", action="store_true", help="planted by skeletor-verify")
+        return extended
+
+    try:
+        scaffolder.build_parser = planted
+        for state, argv in (("unset", list(BARE)), ("set", [*BARE, "--probe-flag"])):
+            probe = scaffolder.resolve(planted().parse_args(argv))
+            record = scaffolder.manifest_args(probe, scaffolder.substitutions(probe))
+            present = "--probe-flag" in record
+            if present != (state == "set"):
+                problems.append(
+                    f"a planted store_true that is {state} records as {present and 'present' or 'absent'}: "
+                    "a flag taking no value must record as presence or absence, never as `flag value`."
+                )
+            if "True" in record or "False" in record:
+                problems.append(
+                    f"the {state} record contains a bare boolean: {record}. This is the `--reproducing` "
+                    "bug verbatim — argparse rejects it as an unrecognized argument, so the tree can "
+                    "never be re-rendered and can never be upgraded."
+                )
+            try:
+                planted().parse_args(["probe", *record])
+            except SystemExit:
+                problems.append(f"the {state} planted record does not parse back: {record}")
+    finally:
+        scaffolder.build_parser = real_build
 
     return Result(
         f"manifest args: {len(recorded)} of {len(declared)} flags recorded, "
@@ -6079,6 +6440,9 @@ def main() -> int:
 
         for gate in sidecar_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        for gate in set_arg_gate(workdir):
             results.append(gate)
 
         for gate in collect_diff_gate(fullest, workdir, venv_python):

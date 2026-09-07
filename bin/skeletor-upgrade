@@ -655,7 +655,78 @@ def repair_manifest(target: Path, manifest: dict, base_files: Dict[str, Path], a
     return 0
 
 
-#: How to run a formatter over one file, keyed by the hook id a tree declares in
+def set_args(recorded: List[str], args) -> Tuple[List[str], Dict[str, Tuple[str, str]]]:
+    """The arguments the HEAD render uses, with `--set-arg` applied.
+
+    ## The gap
+
+    A scaffolded tree scaffolds **once**. Every argument it will ever record is
+    fixed at that moment, so a flag the template gains later is unreachable to
+    it: `ci.yml`'s own comment offered a second matrix leg as *"a scaffold
+    argument rather than a workflow edit"*, and for all six existing adopters
+    that described a door which closed before the feature existed. node-zero
+    measured it; sky.boss arrived at the same place from a tree whose matrix
+    has been two legs since before the flag was written and whose record
+    therefore says one. The two routes without this were hand-editing a file
+    whose header says not to, or editing the workflow — the very thing the
+    comment offers as the alternative you are being spared, and which becomes
+    a standing three-way-merge conflict on every future upgrade.
+
+    ## Why it moves the HEAD render and not the base
+
+    The first design amended the **record**, re-derived every hash from a
+    re-render at the recorded ref, and asserted *this tree was rendered as
+    though the flag had this value*. Built, and it refused the first honest
+    case it was given: a pristine `ci.yml`, a real change to `--python-ceiling`,
+    and the amended render correctly did not match the disk — **because the
+    tree genuinely was not rendered with that value.** The refusal was right and
+    it made the verb useless: an amendment that changes nothing is accepted, and
+    one that changes something cannot be.
+
+    The record was never the wrong thing. `--python-ceiling 3.12` is the honest
+    account of how that tree was made, and rewriting it would be deleting the
+    only true statement in the file. What an adopter wants is not a corrected
+    past, it is a **different future** — and this tool already has a mechanism
+    for delivering one: render the base from the recorded arguments, render
+    ours from the new ones, three-way merge. A new argument is a template change
+    that happens to originate with the adopter rather than with the template.
+
+    So this is a one-line transformation of the head render's arguments, and
+    every guarantee downstream is untouched. The base still reproduces the tree
+    byte-for-byte, so `cross_check` still refuses a manifest that disagrees. A
+    file you edited still merges or conflicts. A file you declined stays
+    declined — which is sky.boss's case, and it needs no special handling at
+    all. The manifest records the new arguments only where it already records
+    the new render: on a run that applied everything, never on one that left a
+    conflict.
+
+    proto.pilot's re-base hazard evaporates with the design rather than being
+    guarded against: **nothing moves the base, so no file's next merge is
+    computed against a base it never had.** Their naming point stands and is
+    why this is `--set-arg` and not `--amend-record`: it does set an argument
+    for this run, which was the misleading reading of the first design and is
+    the literal truth of this one.
+    """
+    updated = list(recorded)
+    applied: Dict[str, Tuple[str, str]] = {}
+    for raw in args.set_arg:
+        if "=" not in raw:
+            die(f"--set-arg takes flag=value, got {raw!r}")
+        flag, value = raw.split("=", 1)
+        flag = "--" + flag.lstrip("-")
+        if flag not in updated:
+            die(
+                f"{flag} is not among this tree's recorded arguments, so there is nothing to change.\n"
+                f"   Recorded: {' '.join(sorted(a for a in updated if a.startswith('--')))}\n"
+                "   A flag the record does not carry arrives by upgrading to a template that ships it."
+            )
+        index = updated.index(flag) + 1
+        applied[flag] = (updated[index], value)
+        updated[index] = value
+    return updated, applied
+
+
+#: How to run a formatter over one file, keyed by the hook id a tree declares in#: How to run a formatter over one file, keyed by the hook id a tree declares in
 #: `.pre-commit-config.yaml`. Not a policy list and not an allowlist — it is a
 #: capability map, and there is nothing to derive it from: knowing that `isort`
 #: takes `--settings-path` and `black` takes `--config` is not a fact any
@@ -837,6 +908,18 @@ def main() -> int:
         "For a manifest written by a version of skeletor that recorded the wrong thing.",
     )
     parser.add_argument(
+        "--set-arg",
+        action="append",
+        default=[],
+        metavar="FLAG=VALUE",
+        help="change a `skeletor-new` argument for THIS upgrade's render, and carry the "
+        "difference in as a template change. Repeatable. For a flag the template gained "
+        "after this tree was scaffolded — a tree scaffolds once, so there is no other way "
+        "to reach one. The base still renders from the recorded arguments, so nothing about "
+        "how the tree was made is rewritten; the new value is recorded only if the run applies "
+        "cleanly, exactly like any other upgrade.",
+    )
+    parser.add_argument(
         "--ported",
         action="store_true",
         help="assert every conflict and collision is resolved as you want it, and advance "
@@ -872,6 +955,13 @@ def main() -> int:
     try:
         base_src: Optional[Path] = None
         scaffolded_dirty = False
+        if args.no_base and args.set_arg:
+            # `--no-base` classifies from recorded hashes and never merges, so
+            # it can report that a file changed and cannot deliver the change.
+            # A new argument is only ever delivered by a merge.
+            die("--set-arg needs a base render to merge against; drop --no-base")
+        if args.set_arg and args.repair_manifest:
+            die("--repair-manifest re-derives from the RECORDED arguments; --set-arg changes the new ones")
         if args.no_base and args.repair_manifest:
             # The correct hashes ARE the base render's. Without one there is
             # nothing to derive them from, and the alternative — keeping what is
@@ -924,7 +1014,20 @@ def main() -> int:
             warn_a_dirty_base(SKELETOR, "checkout this renders from")
         else:
             refuse_a_dirty_base(SKELETOR, "The upgrade", "checkout this renders from")
-        render_with(SKELETOR, recorded, head_tree)
+        # **The head render, and the only place `--set-arg` reaches.** The base
+        # above rendered from `recorded` and must keep doing so: it is the
+        # statement of how this tree was actually made, and every classification
+        # in this tool is a comparison against it.
+        ours_args, set_args_applied = set_args(recorded, args)
+        if set_args_applied:
+            say("→", f"{len(set_args_applied)} argument(s) changed for this render")
+            for flag, (was, now) in sorted(set_args_applied.items()):
+                item(f"{flag}  {was!r} → {now!r}")
+            detail("The base still renders from the recorded values, so this arrives as an ordinary")
+            detail("template change: a file you never touched is replaced, one you edited merges or")
+            detail("conflicts, one you declined stays declined. The new values are recorded only if")
+            detail("this run applies everything — the same rule as the ref.")
+        render_with(SKELETOR, ours_args, head_tree)
         head_files = files_under(head_tree)
         # The version this run is comparing the tree against, read out of the
         # render rather than asked of git a second time — it is the value that
@@ -1021,6 +1124,7 @@ def main() -> int:
             base_files = files_under(base_tree)
             if args.repair_manifest:
                 return repair_manifest(target, manifest, base_files, args)
+
             if hashes:
                 drift = cross_check(base_files, hashes)
                 if drift:

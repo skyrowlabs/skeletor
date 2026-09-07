@@ -381,8 +381,22 @@ jobs:
     #
     # `--python-ceiling` defaults to `--python`, so a scaffold that says nothing
     # gets a ONE-leg matrix: same coverage as before, same minutes, and the only
-    # change is the context name. Opting in to two is a scaffold argument rather
-    # than a workflow edit.
+    # change is the context name.
+    #
+    # **Opting in without editing this file:**
+    #
+    #     skeletor-upgrade . --set-arg python-ceiling=3.14 --dry-run
+    #
+    # This line used to say only *"a scaffold argument rather than a workflow
+    # edit"*, which was true and unreachable. **A tree scaffolds once**, so
+    # every argument it records is fixed at that moment and this one was fixed
+    # before the flag existed — the sentence described a door that had closed
+    # for every reader it was written for, leaving the two routes it offers as
+    # the alternative: hand-editing `.skeletor.json`, whose own header says not
+    # to, or editing this file, which becomes a standing merge conflict on
+    # every future upgrade. Found by node-zero and by sky.boss, from opposite
+    # ends — a closed door and a tree that had been running two legs since
+    # before the flag was written.
     strategy:
       fail-fast: false
       matrix:

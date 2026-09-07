@@ -598,6 +598,49 @@ slowness*, and it is declared as an ini key rather than a `--timeout` flag
 because an unknown ini key is a warning without the plugin while an unknown CLI
 flag is a hard error.
 
+### A reason written when a job is *placed* is what makes an unrelated change auditable
+
+The `FULL-SUITE-BECAUSE:` markers on `lint`, `integration` and `ui` exist so a
+job gated on `full_suite` has to say why it can afford to sit out a pull
+request. That is a claim about the job. What was not anticipated is what the
+claim is worth **later**, when something the job's author never saw changes the
+condition underneath it.
+
+`ecf1029` changed how `docs-only.cjs` classifies and moved `full_suite` alone.
+Six adopters had to work out what that cost them, and the answers ranged from
+*five jobs to one* to *nothing at all* — the same commit, different trees.
+Nobody could answer it centrally, because the cost is a fact about which of a
+tree's gates are duplicated elsewhere and which of its suites are empty. What
+made it answerable **per tree**, in minutes, was that each job carried a written
+reason that could be tested against that tree:
+
+    lint          "every gate also runs in the pre-commit hooks and in `dd check pre-push`"
+                                                      TRUE here — all four
+    integration   "needs the stack up and seeded"      collects 0 tests here
+    ui            "it drives a user interface"         collects 0 tests here
+
+The marker turns *is this change safe?* — unanswerable — into *is each of these
+three sentences true in my tree?*, which anybody can check.
+
+**The stronger evidence is a job that was placed on the other condition.** When
+the node steps were split out of `lint` into their own job, the proposal was to
+gate it on `full_suite` like the job it came from. dream-doll argued it belonged
+with `unit-tests` on `docs_only`, because the node job is *the product's own
+suite*. That was an argument about a job which did not yet exist, settled on a
+principle rather than on a consequence — and the consequence arrived two
+releases later:
+
+> Had the node job shipped on `full_suite`, this release would have silently
+> stopped running eslint, typecheck, vitest and the build on every pull
+> request — and nothing would have gone red.
+
+So the rule is not merely that a gated job should explain itself. It is that
+**the condition a job is placed on is a decision with a blast radius nobody can
+see at the time**, and the only thing that makes it reviewable afterwards is
+having written down which question the job answers. Every gate that touches the
+product sits behind `docs_only`; `full_suite` is for gates whose absence is
+recoverable. Placing a job is choosing which of those it is.
+
 ### The other half of a marker, which took a consumer to see
 
 Marker-based registration is the strongest pattern here and it has an edge that
