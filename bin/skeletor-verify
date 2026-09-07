@@ -248,20 +248,27 @@ def scaffold(tier: str, language: str, workdir: Path, name: Optional[str] = None
 
 
 def shell_package(tree: Path) -> Path:
-    """The tree's shell package, found the way the tree finds it.
+    """The tree's shell package, read from the value the scaffolder wrote.
 
     `--shell-package` renames `cli/`, so every gate here that reached for a
-    literal `cli/` was asking about a directory that need not exist. It is found
-    the same way `scripts/paths.py` finds it — the one root directory holding a
-    `__main__.py` — rather than read out of `.skeletor.json`, because the
-    manifest is a record of what was asked for and this is a question about what
-    is on disk. A gate that read the record would agree with a scaffolder that
-    ignored the flag.
+    literal `cli/` was asking about a directory that need not exist.
+
+    It is read out of the tree's own `scripts/paths.py` — the same string every
+    file in that tree uses — rather than discovered by walking for a
+    `__main__.py`. Discovery is what `v0.22.0` shipped and it was wrong for a
+    reason no fixture here could show: every tree this grid builds is a fresh
+    scaffold, so every one has exactly one root `__main__.py`, while an adopter
+    whose own product is a `python -m` CLI has two and gets a dead toolchain.
+    A population that cannot contain the subject cannot measure it.
     """
-    found = [d for d in sorted(tree.iterdir()) if d.is_dir() and (d / "__main__.py").exists()]
-    if len(found) != 1:
-        raise AssertionError(f"expected exactly one shell package in {tree}, found {[d.name for d in found]}")
-    return found[0]
+    source = (tree / "scripts" / "paths.py").read_text(encoding="utf-8")
+    match = re.search(r'^SHELL_PACKAGE = "([^"]+)"', source, re.MULTILINE)
+    if not match:
+        raise AssertionError(f"{tree}/scripts/paths.py declares no SHELL_PACKAGE literal")
+    package = tree / match.group(1)
+    if not package.is_dir():
+        raise AssertionError(f"scripts/paths.py names {match.group(1)!r} and there is no such directory")
+    return package
 
 
 def expected_command_names(tree: Path) -> List[str]:
@@ -6786,6 +6793,91 @@ def tagline_required_gate(workdir: Path) -> Result:
     )
 
 
+def product_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
+    """A tree that also contains the ADOPTER's own `python -m` package still works.
+
+    This is the gate `v0.22.0` did not have, and the release that shipped
+    without it was broken for a large fraction of adopters on the day it was
+    tagged. `scripts/paths.py` located the shell by walking for a root
+    `__main__.py` and raising unless there was exactly one. Its comment named
+    the two-candidate case and called it worse than a wrong answer; it did not
+    notice it was the **ordinary** case, because `__main__.py` is precisely what
+    `python -m` needs and an adopter's own CLI is a `python -m` package.
+
+    The consequence was not a wrong path. `scripts/paths.py` is imported by the
+    CLI, by every `scripts/check_*.py` and at pytest **collection**, so a second
+    package killed the whole toolchain: `./cli --help`, the suite, `check docs`,
+    every gate. sky.boss upgraded, lost all of it, and reverted to `v0.20.0`.
+
+    ## Why nothing here could have caught it
+
+    Every fixture in this file is a fresh scaffold, so **every tree this grid
+    has ever built has exactly one root `__main__.py`** — the population could
+    not contain the subject, which is the sentence `scripts/paths.py` itself
+    states about `SCAFFOLD_MANIFEST` two screens further down. CI was green on
+    the release for the same reason.
+
+    So the fixture is the adopter's half rather than the generator's: a package
+    with a `__main__.py` that skeletor did not write, committed, the way a real
+    product arrives. The assertion is `gates()` unmodified — if the shell cannot
+    be located, none of it runs at all.
+
+    It is asserted at the DEFAULT name as well as a renamed one, because the
+    defect was never about `--shell-package`: a tree that never passed the flag
+    broke identically, which is what made it a regression against every adopter
+    rather than a rough edge on a new one.
+    """
+    results = []
+    for label, extra in (("default", []), ("renamed", ["--shell-package", "shell"])):
+        started = time.time()
+        target = workdir / f"product-{label}"
+        code, output = run(
+            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Product",
+             "--slug", "product", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
+             "--language", "python", *extra],
+            cwd=workdir,
+        )
+        if code != 0:
+            results.append(Result(f"product package ({label}): scaffold", False, time.time() - started, output))
+            continue
+
+        # The adopter's own `python -m` entry point, committed the way a real one
+        # is. `git add` matters: an untracked directory is invisible to several of
+        # the tree's own gates, and the population being modelled is a repository
+        # somebody works in.
+        product = target / "myproduct"
+        product.mkdir()
+        (product / "__init__.py").write_text("def main() -> None:\n    pass\n", encoding="utf-8")
+        (product / "__main__.py").write_text("from . import main\n\nmain()\n", encoding="utf-8")
+        # AMENDED into the scaffold commit rather than added as a second one.
+        # `check_scaffold_is_its_own_repo` asserts exactly one commit, which is
+        # true of every other fixture here and is not the property under test —
+        # a second commit would fail it for a reason belonging to this fixture
+        # rather than to the tree. Amending keeps the product tracked, which is
+        # what several of the tree's own gates need, and keeps the tree at its
+        # first commit, which is what they assert.
+        run(["git", "add", "-A"], cwd=target)
+        run(["git", "commit", "--amend", "--no-edit"], cwd=target)
+
+        roots = sorted(
+            d.name for d in target.iterdir() if d.is_dir() and (d / "__main__.py").exists()
+        )
+        results.append(
+            Result(
+                f"product package ({label}): the tree has {len(roots)} root __main__.py",
+                len(roots) == 2,
+                time.time() - started,
+                f"found: {roots} — the plant must create the ambiguity this gate exists for",
+            )
+        )
+
+        (target / ".venv").symlink_to(venv_python.parents[1])
+        for gate in gates(target, venv_python, pyright_ok):
+            gate.label = f"product package ({label}): {gate.label}"
+            results.append(gate)
+    return results
+
+
 def shell_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     """`--shell-package` renames the shell's package, and the tree must not
     notice.
@@ -7155,6 +7247,13 @@ def main() -> int:
         # is asked for something other than the default shape, and this one
         # costs a full `gates()` run on a tree of its own.
         for gate in shell_package_gate(fullest, workdir, venv_python, pyright_ok):
+            results.append(gate)
+
+        # Beside it, and the one that would have stopped v0.22.0: a tree that
+        # also contains the ADOPTER's own `python -m` package. Every other
+        # fixture in this file is a fresh scaffold, so every one has exactly one
+        # root `__main__.py` — a population that could not contain the subject.
+        for gate in product_package_gate(fullest, workdir, venv_python, pyright_ok):
             results.append(gate)
 
         for gate in badge_gate(fullest, workdir, venv_python):

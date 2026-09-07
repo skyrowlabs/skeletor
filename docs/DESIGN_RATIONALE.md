@@ -3885,6 +3885,61 @@ whether `copy_overlay` consumes the value as a destination name — is how you
 check it, not what it means, and a future flag will trip over the second while
 passing the first by looking harmless.
 
+### A constraint proven about one syntactic position, applied to all of them
+
+`v0.22.0` shipped a `scripts/paths.py` that located the shell by walking for a
+root `__main__.py` and raising unless there was exactly one. Its own comment
+named the two-candidate case and called it *"worse than a wrong answer"* — and
+treated it as the branch that could not happen.
+
+It is the **ordinary** case. `__main__.py` is exactly what `python -m` needs, so
+any adopter whose own product is a `python -m` CLI has a second one. sky.boss
+upgraded and lost the entire toolchain: `paths.py` is imported by the CLI, by
+every `scripts/check_*.py` and at pytest **collection**, so the failure was not
+a wrong path but a dead tree — `./cli --help`, the suite, `check docs`, every
+gate. They reverted to `v0.20.0`.
+
+**It was not confined to `--shell-package`.** A tree that never passed the flag
+broke identically, which makes it a regression against every adopter holding a
+second `python -m` package rather than a rough edge on a new option.
+
+**The root cause is a reasoning error worth naming, because the proof was
+correct.** The name cannot be substituted into an `import` statement — `from
+<token>.x import y` does not parse, and several gates read this template with
+`ast`. True, established, and load-bearing. It was then carried to *every*
+construct, and discovery was built for all of them. It was never true of a
+**string constant**: `SHELL_PACKAGE = "{{SHELL_PACKAGE}}"` was legal the whole
+time, and nothing in a generated tree imports *through* the name — the package
+finds its groups by `__name__`/`__path__`, `__main__.py` imports relatively, and
+`tests/shell.py` goes through `importlib`.
+
+> A constraint proven about one syntactic position, generalised to all
+> positions. The proof stays correct and the conclusion is wrong everywhere it
+> was carried to.
+
+sky.boss supplied the ordering principle: **an inference that can be ambiguous
+must not outrank a record that cannot.** They proposed the record be
+`.skeletor.json`; it is the rendered literal instead, for two reasons written at
+the site before either of us needed them — the manifest is a **supported
+deletion**, and `paths.py` reading its arg list would make the tree a second
+reader of a format it does not control. A rendered literal is written by the
+same render that created the directory and survives both.
+
+**Why nothing here caught it, which is the sentence this template already had.**
+Every fixture in `bin/skeletor-verify` is a fresh scaffold, so every tree the
+grid has ever built has exactly one root `__main__.py`. CI was green on the
+release; the 279-check grid was green on it. *A measurement over a population
+that contains none of the subject is not a measurement of the subject* — stated
+in `scripts/paths.py` itself, about `SCAFFOLD_MANIFEST`, two screens below where
+this bug lived.
+
+`product_package_gate` is the population fixed: a package with a `__main__.py`
+skeletor did not write, committed the way a real product arrives, asserted at
+the default name and a renamed one because the defect was never about the flag.
+Planting the old discovery back turns 22 checks red and leaves every other gate
+in the grid green — which measures both that the gate works and that nothing
+else was ever going to.
+
 ### And the door a refusal does not cover: a new flag's default
 
 Asked by sky.boss the same evening, holding a `v0.20.0` manifest, and it is the

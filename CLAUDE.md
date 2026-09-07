@@ -426,6 +426,40 @@ and nothing else, which is only possible because the package already never named
 itself — `_discover()` reads `__name__` and `__path__`, `__main__.py` imports
 relatively, and `scripts/paths.py` finds the directory by its `__main__.py`.
 
+**The first version of it located the shell by discovery, and that shipped as
+`v0.22.0` and was yanked.** `scripts/paths.py` walked for a root `__main__.py`
+and raised unless there was exactly one; its comment named the two-candidate
+case and treated it as unreachable. It is the *ordinary* case — `__main__.py` is
+what `python -m` needs, so any adopter whose own product is a `python -m` CLI
+has a second one — and because that module is imported by the CLI, every
+`scripts/check_*.py` and pytest **collection**, the result was a dead tree
+rather than a wrong path. sky.boss lost their whole toolchain and reverted. It
+was never about the flag: a tree that passed no `--shell-package` broke
+identically.
+
+The name is a **rendered literal** now, `SHELL_PACKAGE = "{{SHELL_PACKAGE}}"`,
+which was legal the whole time. The error that produced discovery is worth more
+than the fix: the name genuinely cannot go in an `import` statement — `from
+<token>.x import y` does not parse, and gates here read the template with `ast` —
+and that correct proof about **one syntactic position** was carried to every
+position. Nothing imports *through* the name, so a string constant was always
+available. sky.boss's ordering principle is the general form: *an inference that
+can be ambiguous must not outrank a record that cannot.* The record is in the
+rendered file rather than `.skeletor.json` because that manifest is a supported
+deletion and because reading its arg list would make a tree a second reader of
+the generator's format.
+
+**Nothing here could have caught it, and the sentence was already in the tree.**
+Every fixture in this file is a fresh scaffold, so every tree the grid has built
+has exactly one root `__main__.py`; CI and a 279-check grid were both green on
+the broken release. *A measurement over a population that contains none of the
+subject is not a measurement of the subject* — `scripts/paths.py` states that
+about `SCAFFOLD_MANIFEST`, two screens below where the bug was.
+`product_package_gate` supplies the missing population: a `__main__.py` package
+skeletor did not write, committed, at the default name and a renamed one.
+Planting the old discovery back turns 22 checks red and leaves every other gate
+in the grid green.
+
 **`bin/skeletor-verify` could not survive the rename.** Five sites reached for a
 literal `cli/`, and one of them was `_TOLERANT_SUITES` — a `from cli.test_cmds
 import SUITES` executed inside the tree, which is *precisely* the construct the

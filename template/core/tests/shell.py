@@ -1,10 +1,9 @@
-"""The shell's package, reached through its discovered name.
+"""The shell's package, reached through its recorded name.
 
 `cli` is the most collided-with package name in a python monorepo, so
-`--shell-package` renames it — and **no file in this tree spells the result**.
-The package finds its own command groups through `__name__` and `__path__`,
-`__main__.py` imports relatively, `scripts/paths.py` finds the directory by its
-`__main__.py`, and the tests come here.
+`--shell-package` renames it. `scripts/paths.py` holds the name — written there
+by the scaffolder — and everything else asks that module rather than spelling
+it.
 
 ## Why this is a module and not six `importlib` calls
 
@@ -15,18 +14,15 @@ SUITES` is the single thing a rename cannot survive, and it fails at collection
 time with `ModuleNotFoundError`, which reads as a broken tree rather than as a
 missed site.
 
-## And why the name is discovered rather than substituted
+## The name is a value here and never a token in an import
 
-The generator could have written the name into every file. It cannot: a
-placeholder works in a string literal and **not** in an import statement, where
-`from <token>.x import y` is a syntax error — so the template's own python would
-stop parsing, and several of the generator's checks read that python with `ast`.
-Discovery keeps the property and costs one indirection.
-
-(This paragraph deliberately does not spell the placeholder. The generator
-substitutes every occurrence of one, including inside the sentence explaining
-why it does not — which is the same trick as a detector that assembles its own
-needle rather than containing it.)
+A placeholder cannot appear in an `import` statement — `from <token>.x import y`
+does not parse — which is why the name arrives as a **string** and this module
+turns it into a module object through `importlib`. An earlier version drew the
+wider conclusion that the name could not be written down at all and had
+`paths.py` *discover* it by looking for a root `__main__.py`. That broke every
+adopter whose own product is a `python -m` CLI, because two candidates is the
+ordinary case rather than the impossible one.
 """
 
 from __future__ import annotations
