@@ -67,7 +67,28 @@ def window(release: Optional[str] = None) -> Dict[str, object]:
     Before the first release there is no previous tag, so the range opens at the
     root commit. That is the honest answer: the report genuinely describes
     everything, and inventing a boundary would be worse than a wide one.
+
+    **A shallow clone is refused, and this is the only place that can refuse
+    it.** `git tag --list` returns nothing there and `rev-list --max-parents=0`
+    finds no parentless commit, so the range opens at the graft boundary and
+    comes back **well-formed and describing nothing** — no error, no warning,
+    valid JSON. sky.boss measured it against their own history: 63 commits from
+    a full clone, 0 from a `--depth 1` clone of the same repository, and
+    `--apply` would stamp the second into every anchored report.
+
+    The workflow that runs this does check out with `fetch-depth: 0`, so
+    nothing is wrong today. What was missing is the thing that would say so if
+    it stopped — and unlike the suite's history check, no marker-keyed gate can
+    reach this one: it is not a pytest test and it runs in a different
+    workflow. `tests/test_ci_job_settings.py` covers the job that runs it now,
+    by reading which scripts a job invokes rather than which markers it selects.
     """
+    if (PROJECT_ROOT / ".git" / "shallow").exists():
+        die(
+            "shallow clone: this reads git history and would return a well-formed window "
+            "describing nothing — no tags, no root commit, a range opening at the graft "
+            "boundary. Check out with `fetch-depth: 0`, or run it somewhere with history."
+        )
     all_tags = tags()
     if release:
         if release not in all_tags:

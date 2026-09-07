@@ -27,7 +27,11 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: {{CI_BRANCHES}}
   push:
-    # BOTH branches, not just the release one. A repo that commits directly to
+    # Every long-lived branch, which here is {{CI_BRANCHES}} — and if that reads
+    # as one branch, this tree was scaffolded with `--base-branch` and
+    # `--release-branch` the same and there is only ever one to cover. The rule
+    # is *the branch work lands on*, not *both*, and the two coincide only in a
+    # two-branch tree. A repo that commits directly to
     # {{BASE_BRANCH}} — every project does, while it is one person — otherwise
     # runs nothing at all on those commits, and "no workflow ran" is
     # indistinguishable from "the workflow passed" anywhere you would look for
@@ -146,6 +150,11 @@ jobs:
           fi
 
   # ── Lint ────────────────────────────────────────────────────────────────
+  # FULL-SUITE-BECAUSE: every gate in this job also runs in the pre-commit
+  # hooks and in `{{CLI}} check pre-push`, so a pull request that skips it is
+  # not one nobody has linted — and a lint finding is not a broken build. The
+  # jobs that execute this repository's own code are gated on `docs_only`
+  # instead, because for those a skip is a question nobody asked.
   lint:
     name: Lint & Types
     needs: gate
@@ -204,20 +213,54 @@ jobs:
           pip install pyright==1.1.411
           pyright --project pyrightconfig.json
 
-      # ── Node, when this project has one ─────────────────────────────────
+  # ── Node ────────────────────────────────────────────────────────────────
+  # Its OWN job, and the `if:` is the reason rather than the tidiness. These
+  # steps used to sit at the end of `lint`, which is gated on
+  # `full_suite == 'true'` — and `.github/scripts/docs-only.cjs` returns
+  # `fullSuite: false` for the ordinary case, *a code change into a
+  # non-release base*. So in any repository working on a branch other than the
+  # release branch, eslint and prettier ran on the eventual push to
+  # `{{RELEASE_BRANCH}}` and on no pull request at all: after review, after
+  # merge, where the answer is too late to be a gate. Found by dream-doll.
+  #
+  # **How many trees that reached is a conjunction, and counting one half of it
+  # is how the first version of this comment got it wrong.** The condition
+  # needs `--base-branch` different from `--release-branch`; the consequence
+  # needs a `package.json`. Six adopters, three with different branches, one of
+  # those with a manifest. So the live blast radius was a single repository —
+  # and not dream-doll, who reported the class and whose own tree is
+  # `main`/`main` and could never reach the condition at all. Surveying either
+  # axis alone comes back reassuring, which is why it read as four.
+  #
+  # `docs_only != 'true'` is `unit-tests`' condition and it is the right one
+  # here for `unit-tests`' reason: **the node job is the product's own suite.**
+  # `lint` and `integration` can afford `full_suite` because a lint finding is
+  # not a broken build; a product that does not typecheck is.
+  #
+  # It is in `release-please`'s `needs:`, so deleting this job is a
+  # `startup_failure` — zero jobs, no logs, nothing on the commit naming the
+  # line. `tests/test_workflow_job_graph.py` catches that in THIS tree, before
+  # the push, which is what makes a separate job safe to hand over.
+  node:
+    name: Node
+    needs: gate
+    if: needs.gate.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
       # SCAFFOLD-OPTIONAL package.json
-      # Absent under `--language python` and `--language none`. Guarded the way
-      # the release job guards its config, and for the same reason: this job is
-      # in `release-please`'s `needs:`, so it must RUN and REPORT whatever a
-      # tree ships. It just has nothing to do here.
+      # Absent under `--language python` and `--language none`. The guard stays
+      # at STEP level and the job runs unconditionally, which is deliberate: a
+      # skipped job skips its dependents, and this one is in `release-please`'s
+      # `needs:`. Same posture the release job takes for a `--versioning tag`
+      # tree — it runs, it reports, it has nothing to do.
       #
-      # These four steps exist because nothing shipped them. `.flake8`,
+      # These steps exist because nothing shipped them. `.flake8`,
       # `eslint.config.js` and `package.json` all configure gates that
-      # `{{CLI}} check pre-push` runs, and until now only the python half was
-      # ever run by CI — so a `--language node` tree lint-checked its product on
-      # the author's laptop and nowhere else. `tests/test_pre_push_covers_ci.py`
-      # could not see it: it asks whether `pre-push` keeps up with `ci.yml`, and
-      # this was the opposite gap, a gate in `pre-push` and in no CI at all.
+      # `{{CLI}} check pre-push` runs, and only the python half was ever run by
+      # CI — so a `--language node` tree lint-checked its product on the
+      # author's laptop and nowhere else.
       - name: Is there a node toolchain
         id: node
         run: |
@@ -232,19 +275,37 @@ jobs:
       # lockfile and no `engines` field, so there is no node version here to be
       # faithful TO, and a number invented in a generator is one every adopter
       # inherits and nobody maintains. Pin it in your own tree once you have a
-      # lockfile. No `cache: npm` for the same reason — it fails outright
-      # without one.
+      # lockfile — `node-version-file: .nvmrc` is the seam, and it needs a file
+      # you declare before it needs anything from the template.
+      #
+      # `cache: npm` is deliberately absent and it is NOT because a lockfile
+      # might be missing — `cache: ${{ hashFiles('...') != '' && 'npm' || '' }}`
+      # would express that. Nobody has run that expression on a runner, and
+      # this repository has a standing rule against shipping a workflow
+      # expression it has only reasoned about. It is one line for an adopter
+      # who wants it and a broken CI for every node tree if an empty `cache:`
+      # turns out to be rejected.
       - uses: actions/setup-node@v7
         if: steps.node.outputs.present == 'true'
         with:
           node-version: 'lts/*'
 
-      # Same flags as `bin/skeletor-verify` uses, so the generator's grid and
-      # the tree's own CI install the toolchain identically. `npm ci` would be
-      # stricter and needs the lockfile this template does not ship.
+      # `npm ci` when a lockfile exists, `npm install` when it does not, and
+      # the branch is the fix rather than the fallback. `npm install` against a
+      # tree that HAS a lockfile resolves a fresh dependency set and ignores
+      # it — so the template was weakening the gate in exactly the adopters who
+      # had done the more careful thing. The template itself ships no lockfile,
+      # which is why the second branch stays and why its flags match
+      # `bin/skeletor-verify`'s, so the generator's grid and a scaffold's own CI
+      # install identically. Found by dream-doll.
       - name: Install node toolchain
         if: steps.node.outputs.present == 'true'
-        run: npm install --no-audit --no-fund
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
 
       # `--if-present`, because the guard above and the scripts below live in
       # DIFFERENT TIERS. `core` asks whether a `package.json` exists; what it
@@ -266,8 +327,7 @@ jobs:
       # guard cannot test for the thing it depends on.** `bin/skeletor-verify`
       # structurally cannot produce it either — a fresh scaffold always receives
       # the overlay's `package.json` and therefore always has both scripts, so
-      # the harness only ever observes the state it always creates. That is the
-      # third instance of that shape in a day.
+      # the harness only ever observes the state it always creates.
       #
       # Measured on npm 12.0.2 rather than assumed, because a flag that
       # swallowed a real failure would be worse than the bug: absent -> exit 0,
@@ -374,6 +434,10 @@ jobs:
   # branch protection accepts — that is why it is skipped at the job level and
   # never via a trigger `paths-ignore`. A never-reported required check blocks
   # a PR forever.
+  # FULL-SUITE-BECAUSE: it needs the stack up and seeded, which is the
+  # expensive half of this file, and its findings are about the composed
+  # system rather than about the change's own code. `check pre-push`
+  # declares it unreachable on a host for the same reason.
   integration:
     name: Integration Tests
     needs: gate
@@ -450,6 +514,10 @@ jobs:
   # with `unscheduled="empty"` on the row in cli/test_cmds.py and no other file
   # references this one. `tests/test_workflow_job_graph.py` is what makes that
   # claim checkable rather than remembered.
+  # FULL-SUITE-BECAUSE: it drives a user interface, so it needs the stack the
+  # integration job needs plus a display, and it is deliberately outside
+  # `release-please`'s `needs:` — a job that does not block a release has
+  # nothing to gain from running on every draft.
   ui:
     name: UI Tests
     needs: gate
@@ -508,10 +576,27 @@ jobs:
   # jobs, no logs, and nothing on the commit naming the line. proto.pilot pushed
   # exactly that and got an empty run to stare at. `manual` is absent for the
   # same reason, one step further along — it never had a job at all.
+  #
+  # **`node` IS in `needs` below, and that makes it non-deletable.** Read this
+  # before deleting it, because the sentence above invites exactly that: it
+  # names `ui` as *the one job here documented as removable*, and a `node` job
+  # in a repository with no `package.json` looks far more removable than `ui`
+  # does — it emits a `::notice` saying there is no node toolchain here and
+  # passes, every run, forever. That is four of six adopters at the time of
+  # writing, and deleting it without deleting the entry below is proto.pilot's
+  # empty run one job over.
+  #
+  # It is in `needs` on purpose: eslint and prettier are a product's gate where
+  # a product has one, and a release should not go out over them. If this tree
+  # will never have a `package.json`, deleting the job is reasonable — delete
+  # the `node` entry from `needs` in the same commit.
+  # `tests/test_workflow_job_graph.py` fails before the push either way, which
+  # is the backstop and not the instruction. Named by node-zero, who read this
+  # comment's authority against the change rather than only the change.
   release-please:
     name: Release Please
     if: github.event_name == 'push' && github.ref == 'refs/heads/{{RELEASE_BRANCH}}'
-    needs: [lint, unit-tests, integration]
+    needs: [lint, node, unit-tests, integration]
     runs-on: ubuntu-latest
     permissions:
       contents: write
