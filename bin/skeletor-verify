@@ -587,6 +587,44 @@ def informational_step_gate(tree: Path, venv_bin: Path) -> List[Result]:
             )
         )
 
+        # stash.flow's assertion, and it belongs beside the two above rather
+        # than in a gate of its own because it is the SAME bait file — the
+        # finding is precisely that two commands disagree about one file.
+        #
+        # `.pre-commit-config.yaml`'s flake8 hook carried the comment *"Match CI
+        # exactly"* while its `--select` structurally cannot emit one code the
+        # informational step reports. So `flake8 Passed` locally had been made
+        # to mean *CI agrees*, in those words, and stash.flow measured the two
+        # in one tree in one second: passed here, four E501/E201/E202 findings
+        # there. **Two gates with the same name covering different sets, with
+        # the prose on the narrow half asserting they were the same** — which is
+        # the commit-subject hook's defect a second time, at a different tool.
+        #
+        # The gap is deliberate and is not the bug; the bug was a sentence
+        # claiming it away. So this pins the gap rather than closing it: the
+        # local set must NOT see what the informational step just reported, and
+        # a `--select` somebody widens turns this red instead of leaving a
+        # comment about the old one standing.
+        #
+        # Args read from the tree's own config. An empty read cannot pass here
+        # by accident — with no args the command is bare `flake8`, which reads
+        # `.flake8` and finds the bait — but it is named anyway, because the
+        # label is what a reader uses to tell a narrow set from no set.
+        started = time.time()
+        local = hook_args(tree, "flake8")
+        code, output = run(["flake8", bait.name, *local], cwd=tree, env_extra=env)
+        results.append(
+            Result(
+                f"informational step: the local hook cannot see it ({' '.join(local) or 'NO ARGS READ'})",
+                bool(local) and code == 0,
+                time.time() - started,
+                f"exit {code} from `flake8 {bait.name} {' '.join(local)}`\n"
+                "non-zero means the local hook and the informational step cover the same set, so the\n"
+                "comment distinguishing them is stale; empty args mean the config read found nothing.\n"
+                f"{output[-2000:]}",
+            )
+        )
+
         # The plant, on the command rather than on the file: strip the trailer
         # the step ends with and the same run must fail. If this comes back 0,
         # flake8 never read the bait and the assertion above was vacuous.
