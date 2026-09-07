@@ -99,7 +99,7 @@ Full rules: [`docs/rules/testing.md`](rules/testing.md).
 | ------------------------------ | -------------------------------------- | ---- |
 | Draft PR                       | `CI Gate` alone                        | ~1   |
 | Ready PR → `{{BASE_BRANCH}}`, docs-only | `CI Gate` alone               | ~1   |
-| Ready PR → `{{BASE_BRANCH}}`, code      | `CI Gate` + `Unit Tests`      | ~5   |
+| Ready PR → `{{BASE_BRANCH}}`, code      | `CI Gate` + `Node` + `pytest` | ~5   |
 | Ready PR opened by Dependabot  | **everything** — deliberately exempt   | full |
 <!-- SCAFFOLD-IF .github/release-please-config.json -->
 | Push to `{{RELEASE_BRANCH}}`   | **everything** + Release Please        | full |

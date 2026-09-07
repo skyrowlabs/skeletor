@@ -347,10 +347,39 @@ jobs:
   # Ungated by full_suite: the host-side suite is minutes, and it is the check
   # most likely to catch the thing a docs-only detector got wrong.
   unit-tests:
-    name: Unit Tests (host-side)
+    # The interpreter is in the NAME on purpose, and the cost is real: a
+    # required status context is named, not discovered, so changing this string
+    # costs anybody with branch protection an edit and a window where the old
+    # context never reports. It is here because the matrix makes one job report
+    # as several, and a matrix whose legs share a name is a matrix you cannot
+    # require individually — which is the whole point of running two.
+    name: pytest ${{ matrix.python }}
     needs: gate
     if: needs.gate.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    # `--python` is a FLOOR — it renders into pyrightconfig's `pythonVersion`
+    # and black's `target-version`, both of which mean "at least this". CI used
+    # to test the floor alone, which is the one version whose failures you are
+    # least likely to hit in development and the one you are most likely to be
+    # running.
+    #
+    # The two failure modes a version matrix catches both live at the ENDS. A
+    # deprecation lands at the ceiling: something that works on the floor stops
+    # working on the newest interpreter your users have, and a single-version
+    # job finds out when somebody upgrades. A syntax feature lands below the
+    # floor: you write a `match` or a `|` union, it runs on your machine, and
+    # the floor you promised in your own config cannot parse it. Neither is
+    # visible from a job that runs one version, and which one it runs decides
+    # which half you are blind to.
+    #
+    # `--python-ceiling` defaults to `--python`, so a scaffold that says nothing
+    # gets a ONE-leg matrix: same coverage as before, same minutes, and the only
+    # change is the context name. Opting in to two is a scaffold argument rather
+    # than a workflow edit.
+    strategy:
+      fail-fast: false
+      matrix:
+        python: {{PYTHON_MATRIX}}
     env:
       # Under this flag an env-gate skip becomes a FAILURE. CI guarantees the
       # environment, so a skip here means the harness broke — and a harness that
@@ -369,7 +398,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
-          python-version: '{{PY}}'
+          python-version: ${{ matrix.python }}
       - run: pip install -r scripts/requirements.txt
 
       # A scaffold ships no `[project]` block, so this does nothing until the

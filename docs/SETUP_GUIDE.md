@@ -194,12 +194,22 @@ money if you get them backwards:**
 gh api -X PUT repos/<org>/<slug>/branches/develop/protection \
   -f 'required_status_checks[strict]=false' \
   -f 'required_status_checks[contexts][]=CI Gate' \
-  -f 'required_status_checks[contexts][]=Unit Tests (host-side)' \
+  -f 'required_status_checks[contexts][]=Node' \
+  -f 'required_status_checks[contexts][]=pytest 3.12' \
   -f 'required_status_checks[contexts][]=Integration Tests' \
   -F 'enforce_admins=false' -F 'restrictions=null' \
   -F 'required_pull_request_reviews=null'
 ```
 
+- **The unit-test contexts are named for the interpreter**, one per leg of
+  `ci.yml`'s matrix — `pytest 3.12` above assumes you scaffolded with the
+  default `--python`. If you passed `--python-ceiling`, there are two, and both
+  belong here. Read the names off a run rather than from this page: a required
+  context that never reports blocks every pull request forever, and a typo here
+  is indistinguishable from a job that is not running.
+- **`Node` is a context on every tree**, including one with no `package.json` —
+  it reports, prints a notice and skips its own steps. That is deliberate, and
+  it is why requiring it costs nothing.
 - **Require every context that must gate, including ones that usually skip.** A
   required context satisfied by a `skipped` report costs nothing and blocks
   nothing — but it is what makes the job gate on the runs where it *does*
