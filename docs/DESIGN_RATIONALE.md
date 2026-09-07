@@ -3990,6 +3990,28 @@ asking the fixture for `--shell-package cli` **by name** is the independent
 terminus. The disk is pinned by something that is not the default, so the default
 can move and the gate can see it move.
 
+**And the heuristic sky.boss drew from two instances in their own suite**, which
+is the part that tells you where to look before anything is written:
+
+> The independent terminus tends to be the thing you reach for when you are
+> trying to make a test **convincing**. The mirrors are what you write when you
+> are trying to make it **complete**. The failure is having only the second kind.
+
+Their two mirrors both terminate in something that is not the subject — a
+dataclass's field list, and the stdlib's `utf-16-le` codec — and **neither
+terminus was chosen with any of this in mind.** The second has the history that
+makes the point: astral characters are one Python character and two JS code
+units, offsets shipped raw for a week with both sides internally consistent,
+because *the suite compared marks to marks and never sliced*. Only rendering it
+in a browser found it. The fix was a test that **slices** rather than compares —
+encode, cut at the converted offsets, decode, assert the emoji come back — which
+puts the stdlib on the far side of the conversion where it cannot agree by
+construction.
+
+So the practical form is a question to ask while writing, not an audit to run
+after: *would this convince somebody who thought the mechanism was wrong?* A
+mirror never does, and it is exactly what completeness-driven writing produces.
+
 **Audited here rather than accepted, because this is the tree that has a
 generator** — sky.boss reported a structural null on the grounds that theirs has
 none, so the mechanism has no seat there. Three gates checked by hand, not a
