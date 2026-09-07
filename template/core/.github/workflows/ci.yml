@@ -9,14 +9,30 @@ name: CI
 #      protection, so size the required list for what must gate — never trim it
 #      to save money. The savings come from job-level gating, below.
 #
+#      **That fact has a sharp edge, and `gate` is where it cuts.** Every job
+#      below carries `needs: gate`, so if `gate` fails they do not run — they
+#      report `skipped`, which protection ACCEPTS. Requiring only the jobs and
+#      not `CI Gate` therefore leaves a hole exactly the size of the gate: the
+#      one job whose failure silences every other required context. So the
+#      required list must name `CI Gate` itself, or a job that transitively
+#      depends on all of them. Requiring only the leaves is requiring nothing.
+#
+#      **No check in this tree can catch that**, because which contexts are
+#      required is a list in the account rather than a line in any file. It is
+#      the same class as the Actions pull-request switch.
+#
 #   2. A `synchronize` event on a READY pull request re-runs everything that PR
 #      earns. Iterating in draft and flipping to ready once, at the end, is the
 #      single largest saving available — in the project this was extracted from,
 #      42% of all Actions minutes ended in a failed or cancelled run because
 #      every PR was opened ready and pushed to four to six times.
 #
-# So: draft PRs run the gate job alone; a ready PR runs what its base branch
-# earns; and the heavy suite runs only where its verdict changes a decision.
+# So: a draft carrying code runs the cheap jobs, a docs-only change runs the
+# gate alone whether draft or ready, a ready PR runs what its base branch earns,
+# and the heavy suite runs only where its verdict changes a decision. The
+# decision order is `.github/scripts/docs-only.cjs` and nowhere else — this
+# sentence said "draft PRs run the gate job alone" for five releases while the
+# script returned `docsOnly: false` for a draft, which runs two more.
 
 on:
   pull_request:

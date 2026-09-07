@@ -1145,6 +1145,133 @@ def monotonic_gate(shape: str, target: Path, actual: dict, base: str, release: s
     return results
 
 
+def required_contexts_gate(workdir: Path) -> List[Result]:
+    """The contexts `docs/SETUP_GUIDE.md` tells an adopter to require must exist.
+
+    Step 4 hands over a `gh api` call naming status contexts as exact strings,
+    and warns in its own prose that **a required context that never reports
+    blocks every pull request forever** and that a typo is indistinguishable
+    from a job that is not running. That warning is about the adopter's typing;
+    this is about ours. Rename a job in `ci.yml` and the guide prescribes a
+    context nothing will ever report — the same outcome, produced upstream, and
+    delivered to everybody who follows the page.
+
+    ## The gate job, derived rather than spelled
+
+    The second assertion is the finding this gate was built for. Every job in
+    `ci.yml` carries `needs: gate`, so a failing gate leaves them all `skipped`
+    — and a skipped required context *satisfies* branch protection. **Require
+    only the leaves and you have required nothing**: one failure in the cheapest
+    job in the workflow silences every check the list was relying on.
+
+    Found in a real repository with protection on two branches — three required
+    contexts, all of them downstream of the gate, and neither the gate nor an
+    aggregate required. Nothing was wrong with its workflow. The shape is
+    arrived at honestly, because a required list gets written from *which suites
+    must pass* and the gate is not a suite.
+
+    **No check in a scaffolded tree can catch it**, since which contexts are
+    required is a list in the account. What is checkable from here is that the
+    page telling people what to require names the job whose failure would
+    silence the rest — and that job is computed from the `needs:` graph rather
+    than named, so a workflow that grows a second root, or renames this one, is
+    a failure here instead of a silent hole in somebody's protection.
+    """
+    started = time.time()
+    guide = (SKELETOR / "docs" / "SETUP_GUIDE.md").read_text(encoding="utf-8")
+    named = sorted(set(re.findall(r"required_status_checks\[contexts\]\[\]=([^'\"\n\\]+)", guide)))
+
+    result, tree = scaffold("core", "python", workdir, name="required-contexts")
+    if not result.ok:
+        return [Result(f"required contexts: {result.label}", False, result.seconds, result.output)]
+
+    workflow = (tree / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    recorded = json.loads((tree / load_scaffolder().MANIFEST_NAME).read_text(encoding="utf-8"))["args"]
+    legs = {recorded[recorded.index("--python") + 1], recorded[recorded.index("--python-ceiling") + 1]}
+
+    #: `{job id: (display name, its needs)}`, read out of the rendered file.
+    jobs: Dict[str, Tuple[str, str]] = {}
+    job, in_jobs = None, False
+    for line in workflow.splitlines():
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_-]*:", line):
+            in_jobs, job = line.startswith("jobs:"), None
+            continue
+        if not in_jobs:
+            continue
+        if match := re.match(r"^  (?P<id>[A-Za-z0-9_-]+):\s*$", line):
+            job = match.group("id")
+            jobs[job] = (job, "")
+        elif job and (match := re.match(r"^    name:\s*(?P<name>.+?)\s*$", line)):
+            jobs[job] = (match.group("name"), jobs[job][1])
+        elif job and (match := re.match(r"^    needs:\s*(?P<needs>.+?)\s*$", line)):
+            jobs[job] = (jobs[job][0], match.group("needs"))
+
+    def reportable(name: str) -> set:
+        """What a job's `name:` actually reports as, matrix legs expanded."""
+        if "${{ matrix.python }}" in name:
+            return {name.replace("${{ matrix.python }}", leg) for leg in legs}
+        return {name}
+
+    contexts = {value for name, _ in jobs.values() for value in reportable(name)}
+    unreportable = sorted(c for c in named if c not in contexts)
+
+    problems = []
+    if not named:
+        problems.append(
+            "SETUP_GUIDE.md names no required contexts at all, so this gate asserted nothing. "
+            "The scan is a `required_status_checks[contexts][]=` match; if Step 4 stopped using "
+            "that form, this needs to learn the new one rather than pass quietly."
+        )
+    if unreportable:
+        problems.append(
+            f"Step 4 tells adopters to require {unreportable}, and no job in a rendered ci.yml "
+            f"reports under that name. Available: {sorted(contexts)}. A required context that "
+            "never reports blocks every pull request forever, and the guide says so itself."
+        )
+
+    # The root of the `needs:` graph — the job whose failure skips every other.
+    # A root has no `needs:` of its own; the one that matters is the root every
+    # OTHER job reaches, which is a transitive question and not a direct one:
+    # `release-please` names four jobs and not the gate, and is still silenced
+    # by it.
+    direct = {j: set(re.findall(r"[A-Za-z0-9_-]+", needs)) for j, (_, needs) in jobs.items()}
+
+    def reaches(job: str) -> set:
+        seen, stack = set(), list(direct.get(job, ()))
+        while stack:
+            nxt = stack.pop()
+            if nxt in seen:
+                continue
+            seen.add(nxt)
+            stack += list(direct.get(nxt, ()))
+        return seen
+
+    roots = sorted(j for j in jobs if not direct[j] and all(j in reaches(o) for o in jobs if o != j))
+    if len(roots) != 1:
+        problems.append(
+            f"expected exactly one job with no `needs:` that every other job transitively depends "
+            f"on, got {roots}. This gate computes the gate job rather than naming it, so a second "
+            "root — or none — means the advice in Step 4 is no longer 'require the gate' and the "
+            "page needs rewriting rather than this assertion relaxing."
+        )
+    elif jobs[roots[0]][0] not in named:
+        problems.append(
+            f"every job carries `needs: {roots[0]}`, so if it fails they all report `skipped` — "
+            f"which branch protection ACCEPTS. Step 4 must tell adopters to require "
+            f"{jobs[roots[0]][0]!r} (or a job depending on all of them) and it does not: {named}. "
+            "Requiring only the leaves is requiring nothing."
+        )
+
+    return [
+        Result(
+            f"required contexts: Step 4's {len(named)} context(s) all report, and the gate is one",
+            not problems,
+            time.time() - started,
+            "\n".join(problems) or f"named {named}, reportable {sorted(contexts)}, root {roots}",
+        )
+    ]
+
+
 def set_arg_gate(workdir: Path) -> List[Result]:
     """`--set-arg` delivers an argument a scaffolded tree cannot otherwise reach.
 
@@ -6775,6 +6902,8 @@ def main() -> int:
         for gate in sidecar_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
+
+        results += required_contexts_gate(workdir)
 
         for gate in set_arg_gate(workdir):
             results.append(gate)

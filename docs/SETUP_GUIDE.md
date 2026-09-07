@@ -215,6 +215,18 @@ gh api -X PUT repos/<org>/<slug>/branches/develop/protection \
   nothing — but it is what makes the job gate on the runs where it *does*
   execute. Trimming the list to "save minutes" saves nothing and breaks the
   Dependabot path.
+- **`CI Gate` is in that list for a different reason, and dropping it is the
+  expensive mistake on this page.** Every other job carries `needs: gate`, so if
+  the gate job fails they never run — they report `skipped`, and a skipped
+  required context *satisfies* protection. Require only the jobs and you have
+  required nothing: one failure in the cheapest job in the workflow silences
+  every check you were relying on, and the pull request goes green having run
+  the classifier and stopped.
+
+  So require `CI Gate` itself, or add a job that `needs:` all of them and
+  require that instead. Either closes it; requiring only the leaves does not.
+  The shape is easy to arrive at honestly — the required list gets written from
+  *which suites must pass*, and the gate is not a suite.
 - **`strict: false` on the integration branch.** "Require branches to be up to
   date" means every merge invalidates every other open PR, so a queue of N PRs
   costs N re-runs and drains one at a time.
@@ -339,12 +351,19 @@ refused; the reason it offers is the refuser's account of itself. Discriminating
 takes a control that violates the stated condition and succeeds — and here that
 control was sitting in the same directory the whole time.
 
-**Step 4 is the one setup step no gate here can check**, and now for two
+**Step 4 is the one setup step no gate here can check**, and now for three
 reasons. Every check a scaffolded tree ships asks whether the tree is consistent
-with itself; the Actions switch is a fact about the account the tree runs under,
-and `default_branch` is a fact about the repository's settings. Neither is in
-any file, so a repository can be entirely green while shipping a release
-pipeline that fails on first use and a nightly job that has never run.
+with itself. The Actions switch is a fact about the account the tree runs under;
+`default_branch` is a fact about the repository's settings; and **which contexts
+are required is a list in the account rather than a line in any file** — so a
+job that gates nothing is structurally identical to a job that gates plenty, and
+no file can tell them apart. A repository can therefore be entirely green while
+shipping a release pipeline that fails on first use, a nightly job that has
+never run, and a required-check list with a hole in the middle of it.
+
+The last of the three was found in a real repository with protection on two
+branches: three required contexts, all of them `needs: gate`, and neither the
+gate nor an aggregate required. Nothing was wrong with the workflow.
 
 ---
 
