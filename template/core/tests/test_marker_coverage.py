@@ -9,6 +9,7 @@ undeclared file fails the unit suite rather than silently never running.
 from __future__ import annotations
 
 import configparser
+import functools
 import re
 import sys
 import tomllib
@@ -89,15 +90,49 @@ def test_declared_markers_are_registered():
     assert not unknown, f"Unregistered markers (add them to tests/pytest.ini): {unknown}"
 
 
-#: Keys pytest splits on ANY whitespace rather than on newlines. `markers` and
-#: `filterwarnings` are linelists — one entry per line, and a marker's help text
-#: contains spaces, so splitting those on whitespace destroys them.
+#: The two whitespace-split keys pytest does NOT register in a bare config,
+#: because they arrive with plugins rather than with the core parser. Every
+#: other key of that kind is discovered — see `args_keys()`.
 #:
-#: proto.pilot hit this with `norecursedirs = tmp .venv`, which pytest reads
-#: identically to `["tmp", ".venv"]` and this gate reported as *set in both,
-#: different*. A fix correct for pytest was still red, with nothing in the
-#: message hinting the two values were semantically equal.
-_ARGS_KEYS = {"addopts", "norecursedirs", "testpaths", "pythonpath"}
+#: An exemption checked against what it exempts: `test_the_key_types_match_
+#: pytests_own` fails if pytest ever starts registering one of these, so the
+#: supplement cannot outlive its reason.
+_ARGS_NOT_REGISTERED = {"addopts", "pythonpath"}
+
+
+@functools.lru_cache(maxsize=1)
+def args_keys() -> frozenset:
+    """Every key pytest splits on ANY whitespace, read from pytest's registry.
+
+    `markers` and `filterwarnings` are linelists — one entry per line, and a
+    marker's help text contains spaces, so splitting those on whitespace
+    destroys them. Getting the two classes backwards is not cosmetic: it reports
+    a correct config as drifted, or silently mangles a marker.
+
+    proto.pilot hit the first with `norecursedirs = tmp .venv`, which pytest
+    reads identically to `["tmp", ".venv"]` and this gate called *set in both,
+    different* — a fix correct for pytest, still red, with nothing in the
+    message hinting the values were equal.
+
+    **Discovered, because the hand-written set was already wrong.** sky.boss
+    asked whether a FIFTH args-typed key arriving in a future pytest would be
+    compared textually by default, and guessed it was not worth building.
+    Measuring the registry answered the other way: pytest types **seven** keys
+    as `args` today — `doctest_optionflags`, `python_classes`, `python_files`,
+    `python_functions` and `usefixtures` alongside the two we had — so the
+    four-key list was not one release away from being wrong, it was wrong when
+    it shipped, and an adopter setting `python_files` in both files would have
+    hit it.
+
+    The question was posed as a hypothetical and the answer was a live defect,
+    which is the argument for measuring an enumeration rather than estimating
+    what it would cost.
+    """
+    from _pytest.config import get_config
+
+    registry = get_config([])._parser._inidict
+    return frozenset({key for key, spec in registry.items() if spec[1] == "args"} | _ARGS_NOT_REGISTERED)
+
 
 #: Of those, the ones pytest resolves against **the rootdir of the file that
 #: declared them** — which is the directory holding the config pytest found, so
@@ -131,7 +166,7 @@ def _normalise(key: str, value, rootdir: Path) -> list:
     would report every key as drifted, which is a gate nobody can keep green.
     """
     if isinstance(value, str):
-        entries = value.split() if key in _ARGS_KEYS else value.strip().splitlines()
+        entries = value.split() if key in args_keys() else value.strip().splitlines()
     elif isinstance(value, list):
         entries = [str(item) for item in value]
     else:
@@ -158,34 +193,34 @@ def _toml_settings() -> dict:
 
 
 def test_the_key_types_match_pytests_own():
-    """`_ARGS_KEYS` agrees with pytest wherever pytest has an opinion.
+    """The two hand-kept sets are checked against pytest on every run.
 
-    The set above is a second home for pytest's schema, which is the thing this
-    project refuses unless the copy is checked against its source on every run.
-    It is checked here: a key pytest registers as `args` must be in the set and
-    one it registers as `linelist` must not, so a pytest release that changes a
-    key's type turns this red instead of silently changing what drift means.
-
-    Keys pytest does not register in a bare config — `addopts` and `pythonpath`
-    among them, because they arrive with plugins — cannot be checked and are
-    reported rather than assumed. **A negative over an empty set is a
-    tautology**, so the scan asserts it saw something.
+    `args_keys()` is discovered, so it cannot go stale. What is left is a
+    supplement and a set pytest's schema genuinely cannot supply, and both are
+    checked here rather than trusted.
     """
     from _pytest.config import get_config
 
     registry = get_config([])._parser._inidict
-    known = {key: registry[key][1] for key in sorted(_ARGS_KEYS | _ROOTDIR_RELATIVE) if key in registry}
-    scanned(sorted(known), "keys pytest registers a type for", least=2)
+    scanned(sorted(registry), "ini keys pytest registers", least=20)
 
-    wrong = sorted(
-        f"{key}: pytest says {kind}, this file treats it as {'args' if key in _ARGS_KEYS else 'linelist'}"
-        for key, kind in known.items()
-        if (kind == "args") is not (key in _ARGS_KEYS)
+    # The supplement is the exemption, so it is checked against the thing it
+    # exempts. A key pytest starts registering no longer needs naming here, and
+    # a stale entry is deleted rather than re-justified.
+    landed = sorted(key for key in _ARGS_NOT_REGISTERED if key in registry)
+    assert not landed, (
+        f"pytest now registers {landed}, so naming them here is a second home for a type the "
+        "registry states. Delete the entries; `args_keys()` picks them up."
     )
-    assert not wrong, (
-        f"the key types in this file disagree with pytest's own registry: {wrong}. Splitting a "
-        "linelist on whitespace destroys it — a marker's help text has spaces — and joining an "
-        "args key on newlines reports a correct config as drifted."
+
+    # `_ROOTDIR_RELATIVE` is hand-kept because it is NOT derivable — pytest
+    # types `norecursedirs` and `testpaths` identically as `args`, one basename
+    # globs and one rootdir-relative paths — but every member must still BE an
+    # args key, or it is split on the wrong axis before it is ever resolved.
+    misfiled = sorted(key for key in _ROOTDIR_RELATIVE if key not in args_keys())
+    assert not misfiled, (
+        f"{misfiled} are resolved as paths but are not args keys, so they are split on newlines "
+        "first. Either pytest changed the type or this set is wrong."
     )
 
 
