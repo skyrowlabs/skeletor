@@ -4,12 +4,13 @@
     "jam-sense": {
       "origin": "https://github.com/skyrowlabs/jam-sense",
       "why": "the repository every mechanism in this template was extracted from",
-      "read_through": "28c7f12bf",
+      "read_through": "8835dff73",
       "read_on": "2026-09-07",
       "sources": {
         "cli/task.py": "the second capture intake, and the argument for two lanes over a --kind flag",
         "scripts/reporting/remediation.py": "the Capture descriptor: one engine, N lanes, and drainer_line deriving a schedule from the job registry rather than storing it",
-        "scripts/reporting/bug_capture.py": "the shared capture engine this template's cli/_capture.py is a smaller version of"
+        "scripts/reporting/bug_capture.py": "the shared capture engine this template's cli/_capture.py is a smaller version of",
+        "tests/test_pyright_scope.py": "the caller scan: config pins OR every caller passes --pythonpath. Merged to develop as 8835dff73 (PR #1423), which the watermark above now sits on. It is also the one file here whose direction has reversed: jam-sense took it FROM this template at v0.4.2 (their .skeletor-components.json records it at the path it had then, template/python/tests/test_pyright_scope.py), added the interpreter half, and it came back. Expect it to keep moving in both directions rather than reading either way as drift."
       },
       "sources_untracked": {
         "_comment": "Harvested from, and NOT trackable. These paths are gitignored upstream, so they have no history for a watermark to measure against and this report can never say whether they moved. Recorded as a limit rather than rediscovered as an error on every run — and kept out of `sources`, because a path git cannot see is not the same fact as one that has left the tree.",
@@ -23,7 +24,8 @@
       "scripts/reporting/remediation.py (the drainers)": "2501 lines of Kuma monitors, an escalation policy and a run ledger. The template ships ONE fully-worked job on purpose — a registry seeded with keys whose modules do not exist is red on arrival — so the drain side stays the adopter's. The capture side ported; the drain side is named by scripts/lanes.py and left to them.",
       "scripts/reporting/agent_test_gap.py": "a lane with no producer in this template. A view whose label nothing can create is empty forever, and an empty pane and a drained queue render identically.",
       "the editor fallback on a capture (jam task with no flags opens $EDITOR)": "worth having and not yet ported. It needs a body template per lane, which is a second copy of Lane.sections unless it is generated from them.",
-      "the agent-fix / agent-fix-excluded parking labels": "labels nothing in this template applies. Same rule as the test-gap lane: a lane needs a producer, and a view whose label nothing can create is empty forever — indistinguishable from a queue you have kept clear."
+      "the agent-fix / agent-fix-excluded parking labels": "labels nothing in this template applies. Same rule as the test-gap lane: a lane needs a producer, and a view whose label nothing can create is empty forever — indistinguishable from a queue you have kept clear.",
+      "a gate asserting the pinned virtualenv EXISTS (not merely that the config pins it)": "Correct and unassertable from a unit test. `venvPath` is relative to the config file, so it names the checkout: the pin falls through in a linked worktree, and jam-sense measured it falling through in four checkouts of five. Reproduced here — 0 errors in a scaffold's primary and 27 in a fresh worktree of the same commit. The honest assertion is checkout-dependent: red in CI, which passes --pythonpath instead, and red in every unprovisioned worktree. Written into pyrightconfig.json as a limit beside the pin, and closed for the case this template creates by having `worktree new` link a .venv."
     }
   }
 }
