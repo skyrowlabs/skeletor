@@ -14,7 +14,7 @@ import sys
 
 import click
 
-from cli.helpers import PROJECT_ROOT, badge, detail, fail, line, ok, skip, warn
+from .helpers import PROJECT_ROOT, badge, detail, fail, line, ok, skip, warn
 
 sys.path.insert(0, str(PROJECT_ROOT))
 

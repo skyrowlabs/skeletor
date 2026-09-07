@@ -17,7 +17,7 @@ from pathlib import Path
 
 import click
 
-from cli.helpers import PROJECT_ROOT, detail, fail, git, item, line, ok, run
+from .helpers import PROJECT_ROOT, detail, fail, git, item, line, ok, run
 
 # Bootstrap only: `scripts/` is not a package on the path for a CLI module.
 sys.path.insert(0, str(PROJECT_ROOT))

@@ -18,8 +18,9 @@ import sys
 
 import click
 
-from cli.helpers import PROJECT_ROOT, current_branch, detail, fail, ok, run, step, summarize
 from scripts.paths import TMP_DIR
+
+from .helpers import PROJECT_ROOT, current_branch, detail, fail, ok, run, step, summarize
 
 
 def _staged_check(paths: list, message: str) -> int:
