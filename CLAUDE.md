@@ -77,7 +77,7 @@ bin/skeletor-check-pins
 bin/skeletor-bump pyright 1.1.413 --dry-run
 bin/skeletor-bump pyright 1.1.413
 
-# The weekly pass: is CI green, is anything stale, and hand the work over
+# The weekly pass: is CI green, is anything stale, has upstream moved, hand it over
 bin/skeletor-maintain            # docs/MAINTENANCE.md is the procedure
 bin/skeletor-maintain --agent
 
@@ -1002,6 +1002,49 @@ needs `git worktree add`), while **untagged is an adopter's policy** and this
 tool holds no opinion about it. The `⚠️` is on the writing path only, because an
 unpushed HEAD is the normal state between a commit and a push here and a warning
 that fires through every grid run is one nobody reads.
+
+**`upstream.json` is provenance in the other direction, and it exists because
+that direction had been recorded backwards.** skeletor was extracted from one
+mature production repository, and that repository kept going — so there are two
+questions here with the same words: *are the trees I generate current with me*
+(`.skeletor.json`, `bin/skeletor-upgrade`, the workspace ledger) and *am I
+current with the repository I came from*, which nothing asked.
+
+For a while the second was recorded as though it were the first. The source
+repository carried a `.skeletor-components.json` naming six files it had copied
+back out of this template, so the workspace ledger listed it as an *adopter*,
+measured it 37 releases behind, and reported four deliberate forks as staleness.
+That was answered with a hold — an exemption meaning *this one is not expected to
+move* — which was true, and which was quieting a question that should never have
+been asked. **A component manifest describes a downstream relationship; pointing
+one at the repository you were extracted from inverts the arrow, and every
+reading after that is wrong in the reassuring direction** — a row saying somebody
+owes work, in a tree where nobody does. Deleted 2026-09-07, both there and the
+hold in `skyrow-workspace/scripts/skeletor-currency.py`, whose `HELD` map gained
+the staleness check it had been arguing for and lacked.
+
+`bin/skeletor-maintain` reads `upstream.json` as a third cheap question beside CI
+and pins. Like `bin/skeletor-check-pins` it **reports and never adopts**: which of
+an upstream's changes generalises is a judgment every time, and the machine's job
+is to say where to look and how far you have already read. It itemises only the
+paths that were harvested before *and* have moved since the watermark, and counts
+the rest — the harvested paths are the ones with a decision behind them, and
+burying four of those under a week of somebody else's commits is how a report
+stops being read.
+
+Two things it learned by being wrong. It locates a checkout **by origin URL,
+never by a recorded path**, because a stale path resolves to *some* directory and
+reads that history instead of failing. And it **skips linked worktrees**: every
+worktree reports the same `origin`, so the first alphabetical match is whichever
+one sorts first, sitting on some feature branch — the first run found a
+dependency-bump worktree and reported 11 commits of a Dependabot branch as
+upstream movement.
+
+The `_not_taken` section is the half that pays. Without it the next pass re-reads
+the same 2500-line module and reaches the same conclusion, and **a decision that
+has to be re-made on a schedule is not a decision** — the argument that stopped
+`bin/skeletor-upgrade` restoring files a user had deleted, at a different
+artifact.
 
 `bin/skeletor-components` is the provenance half of adoption, for a repository
 that took files by hand. It reports and never merges, so **its whole failure

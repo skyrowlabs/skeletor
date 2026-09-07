@@ -3124,6 +3124,49 @@ The same reasoning excluded a test-gap lane: it has no producer here, and **a
 view whose label nothing can create is empty forever, which is exactly what a
 drained queue looks like.**
 
+## Upstream is a direction, and it had been recorded backwards
+
+skeletor was extracted from one mature production repository. That repository
+kept going, so there are two questions with the same words:
+
+* *are the trees I generate current with me?* — `.skeletor.json`,
+  `bin/skeletor-upgrade`, and the workspace's currency ledger;
+* *am I current with the repository I came from?* — which nothing asked.
+
+For a while the second was recorded as though it were the first. The source
+repository carried a `.skeletor-components.json` naming six files it had copied
+back out of the template, so the ledger listed it as an adopter, measured it as
+37 releases behind, and reported four deliberate forks as staleness. It was
+answered with a hold — an exemption saying *this one is not expected to move* —
+which was true and was quieting a question that should never have been asked.
+
+**A component manifest describes a downstream relationship. Pointing one at the
+repository you were extracted from inverts the arrow, and every reading after
+that is wrong in the reassuring direction:** it produces a row that says
+somebody owes work, in a tree where nobody does.
+
+Deleted, and replaced with `upstream.json` — the same provenance in the
+direction it actually runs. It records what was taken, from where, why, and the
+commit the source has been read through. `bin/skeletor-maintain` reads it as a
+third cheap question beside CI and pins, and, like `bin/skeletor-check-pins`, it
+**reports and never adopts**: which of an upstream's changes generalises is a
+judgment, and the machine's job is to say where to look and how far you have
+already read.
+
+Two things it learned the hard way. It locates the checkout **by origin URL**,
+never by a recorded path, because a path is right on one machine and wrong on
+every other — and a stale one resolves to *some* directory and reads that
+history instead of failing. And it **skips linked worktrees**, because every
+worktree of a repository reports the same origin: the first run matched a
+dependency-bump worktree that sorted first alphabetically and reported 11
+commits of a Dependabot branch as upstream movement.
+
+The file also carries a `_not_taken` section, which is the half that pays.
+Without it the next pass re-reads the same module and reaches the same
+conclusion, and **a decision that has to be re-made on a schedule is not a
+decision** — the same argument that stopped `bin/skeletor-upgrade` restoring
+files a user had deleted.
+
 ## The shared-tree problem — the newest and least obvious lesson
 
 Multi-agent work introduced a failure class that single-developer repos do not

@@ -1,0 +1,29 @@
+{
+  "_comment": "Where this template's mechanisms came FROM, and how far each source has been read. Written by hand, read by bin/skeletor-maintain, never merged from. skeletor was extracted from a mature production repository and that repository kept going; this is the record of how far along it we have looked. An upstream is located by its origin URL, never by a path — a path is right on one machine and wrong on every other.",
+  "upstreams": {
+    "jam-sense": {
+      "origin": "https://github.com/skyrowlabs/jam-sense",
+      "why": "the repository every mechanism in this template was extracted from",
+      "read_through": "28c7f12bf",
+      "read_on": "2026-09-07",
+      "sources": {
+        "cli/task.py": "the second capture intake, and the argument for two lanes over a --kind flag",
+        "scripts/reporting/remediation.py": "the Capture descriptor: one engine, N lanes, and drainer_line deriving a schedule from the job registry rather than storing it",
+        "scripts/reporting/bug_capture.py": "the shared capture engine this template's cli/_capture.py is a smaller version of"
+      },
+      "sources_untracked": {
+        "_comment": "Harvested from, and NOT trackable. These paths are gitignored upstream, so they have no history for a watermark to measure against and this report can never say whether they moved. Recorded as a limit rather than rediscovered as an error on every run — and kept out of `sources`, because a path git cannot see is not the same fact as one that has left the tree.",
+        ".vscode/settings.json": "the issue and pull-request query grouping — the read side of the capture lanes. jam-sense's .gitignore:52 ignores .vscode/, so their queries live on one machine and are not shared or backed up. Ours are generated from scripts/lanes.py and tracked, which is the difference that made the port worth doing rather than copying."
+      }
+    }
+  },
+  "_not_taken": {
+    "_comment": "Judged and declined, with the reason, so the next pass does not re-litigate it. An entry here is a decision; delete it if the reason stops holding rather than silently harvesting anyway.",
+    "jam-sense": {
+      "scripts/reporting/remediation.py (the drainers)": "2501 lines of Kuma monitors, an escalation policy and a run ledger. The template ships ONE fully-worked job on purpose — a registry seeded with keys whose modules do not exist is red on arrival — so the drain side stays the adopter's. The capture side ported; the drain side is named by scripts/lanes.py and left to them.",
+      "scripts/reporting/agent_test_gap.py": "a lane with no producer in this template. A view whose label nothing can create is empty forever, and an empty pane and a drained queue render identically.",
+      "the editor fallback on a capture (jam task with no flags opens $EDITOR)": "worth having and not yet ported. It needs a body template per lane, which is a second copy of Lane.sections unless it is generated from them.",
+      "the agent-fix / agent-fix-excluded parking labels": "labels nothing in this template applies. Same rule as the test-gap lane: a lane needs a producer, and a view whose label nothing can create is empty forever — indistinguishable from a queue you have kept clear."
+    }
+  }
+}

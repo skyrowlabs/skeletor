@@ -46,6 +46,49 @@ network problem and not a finding. `behind` and `disagrees` are the work.
 different versions in two files, and the copy that is wrong is the one nobody is
 reading.
 
+### 1b. Read what moved upstream
+
+`bin/skeletor-maintain` asks a third cheap question, and it is the only one that
+looks outside this repository:
+
+```bash
+bin/skeletor-maintain              # includes the "from upstream" section
+```
+
+skeletor was **extracted from a mature production repository, and that
+repository kept going.** So "am I current" has a second meaning here that no
+gate in this tree can answer, because the answer lives in a checkout this one
+does not contain. `upstream.json` is the record: what was taken, from where,
+why, and how far along that repository has been read.
+
+The report names only the paths that have been harvested before *and* have moved
+since the watermark, plus a count of everything else. That split is deliberate —
+the harvested paths are the ones with a decision behind them, and burying four
+of those under every commit an upstream made this week is how a report stops
+being read.
+
+**It reports and never adopts**, for the same reason step 2 bumps a pin and this
+tool does not. Which of an upstream's changes generalises is a judgment every
+time: most of what moves there is that product's own work, and the fraction that
+is a reusable mechanism is decided by reading it.
+
+When you have read a diff, record the decision **either way**:
+
+* advance `read_through` to the commit you read to, and
+* add what you took to that upstream's `sources`, with why it was worth taking,
+* or add a `_not_taken` entry naming what you looked at and declined.
+
+The `_not_taken` half is the one that pays. Without it the next pass re-reads
+the same 2500-line module and re-reaches the same conclusion, and a decision
+that has to be re-made on a schedule is not a decision.
+
+The checkout is located **by its origin URL, never by a recorded path**, and a
+linked worktree is skipped. Every worktree of a repository reports the same
+`origin`, so the first alphabetical match is whichever one happens to sort
+first — sitting on some feature branch. The first run of this found a
+dependency-bump worktree and reported 11 commits of a Dependabot branch as
+upstream movement.
+
 ### 2. Bump the whole pin, never a location
 
 ```bash
