@@ -38,9 +38,18 @@ Common fixes:
 
 **Errors that appear only for some people.** `reportMissingImports` is `none`, so a package
 pyright cannot import becomes `Unknown` and stops constraining anything. This cuts both ways:
-a leaner environment is not a more permissive check, just a *different* one. Pyright resolves
-its interpreter from `PATH`, so **pass `--pythonpath` when reproducing a CI result**. CI pins
-its set in `.github/pyright-deps.txt`; keep that a superset of the unit-test job's installs.
+a leaner environment is not a more permissive check, just a *different* one — and because the
+root cause is the suppressed one, what you see is a pile of consequences in files your commit
+never touched.
+
+Pyright resolves its interpreter from `PATH` and does **not** read a virtualenv on its own;
+`.venv/bin/pyright` is a wrapper and changes nothing. `pyrightconfig.json` therefore pins it
+with `venvPath` + `venv`, which is the one place that reaches every caller — the pre-commit
+hook is `language: node` with `pass_filenames: false` and cannot pass a per-machine path.
+`tests/test_pyright_scope.py` holds that rule: the config pins, **or** every caller passes
+`--pythonpath`. Use the flag to check against a *different* interpreter than the pinned one,
+not to make an ordinary run correct. CI pins its dependency set in `.github/pyright-deps.txt`;
+keep that a superset of the unit-test job's installs.
 
 ## Pin the Lint Tools in One Place
 

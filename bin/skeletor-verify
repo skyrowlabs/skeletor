@@ -422,9 +422,17 @@ def pyright_gate(tree: Path, venv_python: Path, available: bool) -> List[Result]
     proc = subprocess.run(
         # `--pythonpath` is not optional here, and leaving it off is a green that
         # means nothing. pyright resolves imports against an interpreter it picks
-        # off PATH — it does NOT read the tree's `.venv`, symlinked or otherwise
-        # — so this gate silently checked whatever python the machine happened to
-        # offer. On a developer box with `click` installed system-wide that is
+        # off PATH; on its own it does NOT read the tree's `.venv`, symlinked or
+        # otherwise — so this gate silently checked whatever python the machine
+        # happened to offer.
+        #
+        # The template now pins that too, with `venvPath` + `venv` in
+        # `pyrightconfig.json`, and this flag stays anyway. It is the generator
+        # checking a tree rather than the tree checking itself: taking the pin
+        # from the artifact under test would make this gate agree with whatever
+        # the template happens to ship, including nothing at all. What the pin
+        # is worth to an adopter is `tests/test_pyright_scope.py`'s question,
+        # asked inside the tree, where every caller can be seen. On a developer box with `click` installed system-wide that is
         # every decorator resolved and a clean run; on a CI runner whose
         # setup-python has no `click` it is 24 errors, because
         # `reportMissingImports` is `none`, so an unresolved `click.group` leaves
