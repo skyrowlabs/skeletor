@@ -221,7 +221,44 @@ def ensure_region(text: str) -> str:
     # `null`: a guess at JSON's grammar, wrong for anything it had not thought
     # of, in the one place a wrong answer produces a file the editor silently
     # refuses to load.
-    return f"{head}{'' if _is_empty_object(head + chr(125)) else ','}\n\n  {BEGIN}\n  {END}\n{text[closing:]}"
+    #
+    # The probe puts the brace on its OWN line, which is not a detail. Glued
+    # onto `head` it lands on whatever the last line is, and when that is a
+    # `//` comment — the shape EVERY fresh tree has, because `HEADER` ends in
+    # one — `strip_comments` blanks the brace along with the comment, the parse
+    # raises, and `_is_empty_object`'s "somebody's hand-edit is mid-flight"
+    # fallback fires on the file this generator itself wrote a moment earlier.
+    probe = head + "\n" + chr(125)
+    if not _is_empty_object(probe):
+        head = _with_comma(head)
+    return f"{head}\n\n  {BEGIN}\n  {END}\n{text[closing:]}"
+
+
+def _with_comma(head: str) -> str:
+    """Separate the last member from the region, on the line that holds it.
+
+    Appending to `head` puts the comma wherever the file happens to END, and in
+    a JSONC file that is often a trailing comment — where a comma is inert, and
+    the key above it is then not separated from the generated region at all.
+    That is the file VS Code silently refuses to load: the exact failure
+    `_is_empty_object` exists to prevent, reached through the other door. It
+    needs a key AND a comment after it, which is why the fixture set missed it
+    — it had the shape that triggers the misclassification and not the shape
+    where the misclassification has a consequence.
+
+    A line already ending in one is left alone. Trailing commas are legal here
+    and this file's own header tells the reader so.
+    """
+    lines = head.splitlines()
+    for index in range(len(lines) - 1, -1, -1):
+        stripped = lines[index].strip()
+        if not stripped or stripped.startswith("//"):
+            continue
+        if lines[index].rstrip().endswith(","):
+            return head
+        lines[index] = lines[index].rstrip() + ","
+        return "\n".join(lines)
+    return head
 
 
 def strip_comments(text: str) -> str:

@@ -334,11 +334,45 @@ def test_the_region_is_added_without_breaking_the_object() -> None:
         "{\n  // only a comment\n}\n",
         '{\n  "a": [1, 2]\n}\n',
         '{\n  "a": {"b": 1}\n}\n',
+        # A key AND a comment after it. The seven shapes above contained the
+        # one that triggers the misclassification (`// only a comment`) and
+        # none where it has a consequence: with no prior key, a spurious comma
+        # has nothing to fail to separate. These are that population.
+        '{\n  "editor.formatOnSave": true\n  // keep this on\n}\n',
+        '{\n  "a": 1\n  // one\n  // two\n}\n',
+        # Legal JSONC, and this file's own header tells the reader so.
+        '{\n  "a": 1,\n}\n',
+        '{\n  "a": {\n    "b": 1\n  }\n}\n',
     ):
         result = gen.splice(gen.ensure_region(prior), gen.region())
         parsed = json.loads(gen.strip_comments(result))
         assert "githubIssues.queries" in parsed, prior
         assert "githubPullRequests.queries" in parsed, prior
+
+
+def test_the_file_this_generator_writes_is_one_it_can_read_back() -> None:
+    """`HEADER` ends in a comment, which is the shape that broke `ensure_region`.
+
+    The probe was `head + "}"`, gluing the brace onto the last line; when that
+    line is a `//` comment `strip_comments` blanks the brace with it, the parse
+    raises, and the "hand-edit mid-flight" fallback adds a comma to a file that
+    is empty. So every fresh tree carried a stray comma inside the final
+    sentence of its own header — in the file whose entire audience is somebody
+    opening the repository for the first time.
+
+    Asserting the file parses is not enough to catch it: a comma inside a
+    comment is invisible to the parser, which is exactly why it survived. The
+    site has to be named.
+    """
+    fresh = gen.ensure_region(gen.HEADER + "}\n")
+    assert gen.BEGIN in fresh
+    for line in fresh.splitlines():
+        if line.lstrip().startswith("//") and "drifted apart" in line:
+            assert not line.rstrip().endswith(","), "comma written into the header's prose"
+            break
+    else:  # pragma: no cover - the header changed shape
+        raise AssertionError("HEADER no longer ends in the sentence this pins")
+    assert json.loads(gen.strip_comments(gen.splice(fresh, gen.region()))) != {}
 
 
 def test_adding_the_region_twice_adds_it_once() -> None:
