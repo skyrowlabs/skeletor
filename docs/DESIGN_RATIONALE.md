@@ -4148,6 +4148,88 @@ Planting the old discovery back turns 22 checks red and leaves every other gate
 in the grid green — which measures both that the gate works and that nothing
 else was ever going to.
 
+### The command a gate names in its prose and has never run
+
+`v0.23.0` shipped a tree that could not commit its own generated file. The lane
+views' generator creates `.vscode/settings.json`, which is JSONC and tracked,
+and `check-json`'s exclude still named `pyrightconfig.json` alone. Two adopters
+hit it independently within a day — node-zero on an upgrade commit, stash.flow
+on theirs — and neither could have been warned by anything upstream.
+
+**The grid runs the linters. It has never run the hook set.** `black`, `isort`,
+`flake8` and `pyright` are each invoked here with the arguments read out of the
+generated tree's own `.pre-commit-config.yaml`, which is careful and is not the
+same thing as running `pre-commit`. Every hook that is not a linter —
+`check-json`, `check-yaml`, `end-of-file-fixer`, `check-merge-conflict` — had
+been unexercised for this file's whole life.
+
+The tell is the part worth keeping, because it is the opposite of a warning
+sign. `bin/skeletor-verify` **names** `pre-commit run --all-files` in its own
+prose, and names it accurately: *"the README's first command"*. It says so while
+explaining an earlier bug that made that command fail in a node tree. So the
+document that would tell you this file does not run it is the same document that
+tells you how much it matters — and a reader who checks whether the grid knows
+about the command finds that it does.
+
+> **Naming a command in a gate's rationale is indistinguishable, from the
+> outside, from running it.** The prose that establishes a command's importance
+> is the prose most likely to be mistaken for coverage of it.
+
+**And the enforcement was thinner than the hook.** `check-json` was reachable
+from exactly one instrument: a local `git commit` by somebody who had run
+`pre-commit install`. `ci.yml` does not run `pre-commit run --all-files` either
+— it runs the linters directly against the same pins — and `check pre-push` does
+not run hooks at all, which is why stash.flow's sixteen gates stayed green
+through it. `bin/skeletor-new` makes the first commit with `--no-verify`,
+correctly, because the hooks are not installed yet. So the failure is displaced
+by exactly one commit: out of every population this repository can observe, and
+into the adopter's, where it arrives looking like their mistake.
+
+That changes what the right fix was. Widening the exclude answers the reported
+bug and leaves tracked JSON with no blocking check anywhere. So it is the split
+this repository keeps arriving at — **same artifact, two questions, two homes.**
+`json_hook_gate` asks the generator's question: does the config I hand over work
+for the file set I ship, in every configuration, and is every exemption still
+earning its place. `tests/test_json_hook_covers_tracked_files.py` asks the
+tree's: does *your* `.vscode/extensions.json` parse. The second carries the
+`unit` marker, so `ci.yml` blocks on it — which is strictly more than the hook
+ever did.
+
+The gate is red on a tree scaffolded from clean `v0.23.0`, naming the file, and
+green on the fixed template. A gate validated against the release it was written
+for is worth more than one validated against a planted fault, and it was
+available here only because two adopters reported before it was built.
+
+#### The fixture set held the trigger and not the consequence
+
+The same seam carried a second bug with a sharper population lesson.
+`ensure_region` probed for emptiness with `head + "}"`, gluing the brace onto
+whatever the last line was; when that line is a `//` comment — which `HEADER`
+always ends in — `strip_comments` blanked the brace with it, the parse raised,
+and the "somebody's hand-edit is mid-flight" fallback added a comma to a file
+that was empty. Every fresh tree shipped a stray comma inside the final sentence
+of its own header.
+
+Its seven fixtures **contained the shape that triggers this** —
+`"{\n  // only a comment\n}\n"` — and passed, because with no prior key a
+spurious comma has nothing to fail to separate. The consequence needs a key
+*and* a comment after it, and no fixture had both; the one test that pairs a key
+with a comment puts the comment first, which is the safe order. node-zero found
+it by having real editor settings.
+
+> A fixture set can contain the input that reaches the bug and still be blind to
+> it. **Triggering a fault and observing it are different requirements**, and a
+> suite assembled by listing shapes tends to satisfy the first.
+
+Two things followed from measuring rather than accepting the reported fix. The
+proposed remedy — place the comma on the last line that is neither blank nor a
+comment — is right and still breaks on a legal JSONC **trailing comma**, which
+this file's own header tells the reader is allowed; found by running thirteen
+shapes rather than the three under discussion. And asserting the file *parses*
+does not catch the original bug at all, since a comma inside a comment is
+invisible to the parser — which is exactly why it survived. The test names the
+site.
+
 ### And the door a refusal does not cover: a new flag's default
 
 Asked by sky.boss the same evening, holding a `v0.20.0` manifest, and it is the
