@@ -901,8 +901,17 @@ def set_args(recorded: List[str], args) -> Tuple[List[str], Dict[str, Tuple[str,
                 "   reported as no longer shipped and left where they are — this tool never deletes.\n"
                 "   You get both, and for --shell-package that is a tree whose own scripts/paths.py\n"
                 "   then refuses to say which directory is the shell.\n"
-                "   Rename it with `git mv` and leave the record alone, or re-scaffold with the new\n"
-                "   value. A three-way merge is for a value inside a file; a name is what git is for."
+                "   Two routes, and they are NOT equivalent — the difference is what the tree is\n"
+                "   afterwards, and the earlier version of this message presented them as a pair.\n"
+                "   `git mv` and leave the record alone: every recorded entry under the old name\n"
+                "   becomes absent-from-tree, which this tool reads as a deliberate deletion and\n"
+                "   never restores. The renamed files stop receiving template updates for good,\n"
+                "   and nothing under the new name is recorded either, so neither side is tracked.\n"
+                "   The run afterwards still says `already current`, correctly — current and\n"
+                "   receiving updates are different facts and only one of them is on screen.\n"
+                "   Re-scaffolding with the new value keeps the tree a full adopter. Reported by\n"
+                "   node-zero, who took the first route on a throwaway clone and measured it.\n"
+                "   A three-way merge is for a value inside a file; a name is what git is for."
             )
         if flag not in updated:
             die(
@@ -1900,6 +1909,22 @@ def main() -> int:
             say("⏭️ ", f"{len(declined)} file(s) skeletor wrote and you deleted — NOT restored")
             detail("Recorded in the manifest, absent from the tree: a decision you made, which")
             detail("an upgrade does not re-make for you. Standing state, reported every run.")
+            # A rename is indistinguishable from a deletion when only one side is
+            # recorded, and `--shell-package`'s own refusal sends people here by
+            # recommending `git mv`. "A decision you made" is then the wrong
+            # sentence — the sentence is what the reader acts on, which is why a
+            # collision is already reported apart from an edit. This does not
+            # assert a rename happened: deleting the shell outright is a real
+            # partial adoption. The consequence is the same either way.
+            shell = recorded[recorded.index("--shell-package") + 1] if "--shell-package" in recorded[:-1] else "cli"
+            under_shell = [rel for rel in hashes if rel.startswith(f"{shell}/")]
+            if under_shell and all(rel in declined for rel in under_shell):
+                detail()
+                detail(f"Every recorded file under {shell}/ is among them — the whole shell package.")
+                detail("That is also what a `git mv` of it looks like from here, and if that is what")
+                detail("happened the tree now tracks neither side: not the old name, which is this")
+                detail("list, and not the new one, which the manifest never learned. Re-scaffold")
+                detail("with --shell-package to be a full adopter under the new name.")
             # The subset that is actually actionable: the template has moved
             # since the decline, so there is something new to say no to. It is
             # also the only part of `declined` the currency test below may look
