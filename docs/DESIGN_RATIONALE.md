@@ -1132,6 +1132,78 @@ about CI, made by a file CI runs, is checkable by the reader; a claim about a
 generator that has left is not.
 
 
+### A sibling's fix does not notify the tree it was made for
+
+The contrast above has a third case, and neither half of it covers this one.
+Invariant 7 asks whether a sentence is true in the reader's tree at the moment it
+is read, and it catches the sentence that was *never* true there — a guarantee
+implemented by rendering, a count measured in one tier. It is silent on a
+sentence that was true when written and **stopped** being true because somebody
+else fixed something.
+
+The instance is sky.boss's, and it cost this repository a reordered backlog.
+Their `CLAUDE.md` warned that a `cli/` on `sys.path` broke a named sibling's CLI.
+jam.sense had closed that months earlier — `-P` on both exec lines of their
+wrapper, with a comment citing sky.boss's repository by name and the issue number
+as the reason — and nothing in sky.boss's tree changed, because nothing could.
+**The fix landed in the repository that had the bug; the warning lived in the
+repository that had caused it.** Measured, when it finally mattered:
+
+```
+jam --help from /tmp        exit=0
+jam --help from sky-boss    exit=0
+```
+
+The named victim was immune, and the document naming it had said otherwise for
+months. They relayed that sentence to me as load-bearing, and I reordered a
+backlog on it without running the one command that refutes it; both were
+retracted the same evening. The reordering is the measure of the class rather
+than an aside, because **a warning about a hazard somebody has already fixed
+reads as more credible the longer it sits** — it ages into settled knowledge
+without ever being re-checked, and the citation-by-name that makes it persuasive
+is exactly what makes it unfalsifiable from inside the tree holding it.
+
+The general shape sky.boss named: *a true statement about a system whose state is
+owned somewhere the file cannot see.* The workspace already records the easier
+direction — a note about a neighbour's **pending** work becomes false the moment
+that repo does the work. This is the same sentence about **completed** work,
+which is harder in both directions: nothing fires, and the claim gets more
+authoritative rather than more suspect.
+
+**Why it belongs in this document specifically.** A scaffolded tree is dense with
+present-tense claims about machinery in repositories its reader does not own —
+what GitHub Actions permits, what `pre-commit` does on a hook, what a sibling
+tool puts on `sys.path`. Every one of them is a sentence whose truth is
+maintained by a third party with no obligation to this tree and no channel into
+it. The template cannot hold those to invariant 7, because invariant 7's test is
+*is this true in the reader's tree*, and the reader's tree is not where the
+answer lives.
+
+**It ships no gate, and that is the finding rather than a gap in it.** The
+enrolment would be "a sentence about somebody else's software", which is not a
+predicate; the requirement would be "re-verify it", which nothing local can
+perform. This is the same drawer as `can_approve_pull_request_reviews` — a fact
+about the account rather than the tree — and it takes the same remedy this
+repository already uses there: write the limit down where a reader meets it,
+rather than pretend an instrument covers it. What the writing rule adds is
+cheaper and available at the point of authorship:
+
+> **A claim about a neighbouring repository carries the command that checks it,
+> or it is not made.** `jam --help from sky-boss → exit=0` is one line, ages
+> honestly, and converts a belief into something the next reader can re-run in a
+> second. A prose warning that names a victim converts a belief into a
+> reputation.
+
+The narrower lesson for peer traffic is mine, not theirs: **a relayed claim gets
+one command before it is allowed to reorder anything.** I had a checkout of the
+tree the claim was about and did not use it — which is the fifth instance that
+evening, between three sessions, of somebody reasoning off a document where the
+mechanism was one command away. sky.boss's own summary of their half is the line
+worth keeping beside it: naming a failure mode does not immunise you against it,
+and they produced theirs in the same message where they corrected me for its
+cousin.
+
+
 ### A flag that reads as symmetric, and one language that shipped unrunnable
 
 Building the drift check above found a worse bug than the drift it was for.
