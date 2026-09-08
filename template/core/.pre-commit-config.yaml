@@ -35,12 +35,21 @@ repos:
       - id: check-merge-conflict
       - id: check-yaml
       - id: check-json
-        # pyrightconfig.json is JSONC, not JSON: pyright's own parser accepts
-        # `//` comments, and the reason for each suppression has to live next to
-        # the suppression or it gets deleted by whoever trips over it. The
-        # alternative — a `"//"` key — is valid JSON that makes pyright print
-        # `Config contains unrecognized setting` on every run.
-        exclude: '^pyrightconfig\.json$'
+        # Both of these are JSONC, not JSON, and both are tracked. pyright's own
+        # parser accepts `//` comments, and the reason for each suppression has
+        # to live next to the suppression or it gets deleted by whoever trips
+        # over it; the alternative — a `"//"` key — is valid JSON that makes
+        # pyright print `Config contains unrecognized setting` on every run.
+        # `.vscode/settings.json` is written by `scripts/gen_vscode_queries.py`
+        # and is comments almost to the last line, because its whole audience is
+        # somebody opening the repository for the first time.
+        #
+        # This is a list of two, so it is the kind that goes stale by addition:
+        # a third tracked JSONC file fails this hook on the commit that adds it.
+        # skeletor's `json_hook_gate` is what makes that loud there rather than
+        # here — it parses every tracked .json a scaffold ships and requires the
+        # unparseable ones to be exactly the ones this line names.
+        exclude: '^(pyrightconfig\.json|\.vscode/settings\.json)$'
       - id: check-added-large-files
         args: ['--maxkb=512']
 

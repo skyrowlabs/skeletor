@@ -6934,6 +6934,96 @@ def unlinted_source_gate(workdir: Path) -> List[Result]:
     return results
 
 
+def hook_block(tree: Path, hook: str) -> str:
+    """One hook's YAML, bounded so a missing key cannot read the next hook's."""
+    config = (tree / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    match = re.search(rf"- id: {re.escape(hook)}\b.*?(?=\n\s*- id: |\n\s*- repo: |\Z)", config, re.S)
+    return match.group(0) if match else ""
+
+
+def hook_exclude(tree: Path, hook: str) -> str:
+    """The `exclude:` regex the tree's own config gives a hook, or ``""``."""
+    match = re.search(r"^\s+exclude: \'([^\']*)\'", hook_block(tree, hook), re.M)
+    return match.group(1) if match else ""
+
+
+def json_hook_gate(tier: str, language: str, tree: Path) -> List[Result]:
+    """`check-json` over the files a scaffold really tracks, in both directions.
+
+    This gate exists because `v0.23.0` shipped a tree that could not commit its
+    own generated file. `scripts/gen_vscode_queries.py` creates
+    `.vscode/settings.json`, which is JSONC and tracked, and the `check-json`
+    exclude still named `pyrightconfig.json` alone — so `pre-commit run
+    --all-files`, the README's first command, failed on a tree nobody had
+    touched. node-zero found it by upgrading and trying to commit.
+
+    **Nothing here could see it, and the reason is worth stating exactly.** The
+    grid runs the *linters* by hand — black, isort, flake8, pyright, each with
+    the args read from the tree's own config — and has never once run the pre-
+    commit *hook set*. So every hook that is not a linter (`check-json`,
+    `check-yaml`, `end-of-file-fixer`, `check-merge-conflict`) has been
+    unexercised for this file's whole life. `bin/skeletor-new` makes the first
+    commit with `--no-verify`, correctly, because the hooks are not installed
+    yet — which means a fresh scaffold is green and the adopter's SECOND commit
+    is the first one that runs them. The failure is displaced by exactly one
+    commit, out of the population this grid can observe and into the one it
+    cannot.
+
+    Both directions are asserted, because an exclude is an allowlist and this
+    repository checks an exemption against the thing it exempts on every run. A
+    non-excluded file that does not parse is the bug above. An excluded file
+    that DOES parse is an entry that has outlived its reason — and worse than
+    untidy, because the path can come back later for something that genuinely is
+    JSON and arrive pre-exempted.
+
+    It runs for every `--language`, not just the gated one. The tracked JSON set
+    varies along that axis — the node overlay ships `package.json`, the claude
+    agent overlay `.claude/settings.json` — and a hook exclude is a fact about
+    the file set rather than about the toolchain, so gating it on `python` would
+    check the one configuration whose file set is already known.
+    """
+    started = time.time()
+    excluded = hook_exclude(tree, "check-json")
+    pattern = re.compile(excluded) if excluded else None
+    code, listed = run(["git", "ls-files", "*.json"], cwd=tree)
+    tracked = [name for name in listed.split() if name]
+
+    parses: List[str] = []
+    broken: List[str] = []
+    stale: List[str] = []
+    for name in tracked:
+        text = (tree / name).read_text(encoding="utf-8")
+        try:
+            json.loads(text)
+            readable = True
+        except ValueError:
+            readable = False
+        if pattern and pattern.match(name):
+            (parses if readable else broken).append(name)
+            if readable:
+                stale.append(name)
+        elif not readable:
+            broken.append(name)
+        else:
+            parses.append(name)
+
+    unparseable = [name for name in tracked if name in broken and not (pattern and pattern.match(name))]
+    # A negative assertion over a set that could be empty is a tautology, and a
+    # green one looks identical whether nothing failed or nothing was scanned.
+    found = len(tracked) >= 2 and any(pattern and pattern.match(name) for name in tracked)
+    return [
+        Result(
+            f"{tier}/{language}: check-json passes on every tracked .json, and excludes only what it must",
+            code == 0 and found and not unparseable and not stale,
+            time.time() - started,
+            f"tracked: {len(tracked)}  exclude: {excluded or '(none)'}\n"
+            f"unparseable and NOT excluded (would fail the hook): {unparseable or 'none'}\n"
+            f"excluded but parses fine (stale exemption): {stale or 'none'}\n"
+            f"scan found a tracked .json and an excluded one: {found}",
+        )
+    ]
+
+
 def tagline_required_gate(workdir: Path) -> Result:
     """Omitting `--tagline` is refused, rather than rendering placeholder text.
 
@@ -7473,6 +7563,9 @@ def main() -> int:
                 setup_gate = check_setup_blocks_agree(tree, tier, language)
                 setup_gate.label = f"{tier}: {setup_gate.label}"
                 results.append(setup_gate)
+                # Also every language: a hook exclude is a fact about the tracked
+                # file set, which is what `--language` varies.
+                results += json_hook_gate(tier, language, tree)
                 if language != gated_language:
                     continue
                 (tree / ".venv").symlink_to(venv_python.parents[1])
