@@ -1483,7 +1483,12 @@ interlock, and which you cannot understand from one file:
 
 - Conventional commits (`feat`/`fix`/`docs`/`chore`/`refactor`/`ci`/`test`), one
   subject line.
-- `docs:` for changes under `docs/` only.
+- `docs:` for hand-written prose, wherever it lives — `CLAUDE.md`, `AGENTS.md`
+  and `README.md` included, not only `docs/`. The path is a hint; the test is
+  whether a human wrote it for a human. This said "under `docs/` only" while
+  the log already carried `docs(readme):` commits against a root file, which is
+  how a path predicate fails: it is cheap to state, cheap to violate, and
+  nothing reads it. Ported from jam.sense (`jam-sense@e6e14d8cf`).
 - Template content is prose as much as code — match the surrounding voice:
   specific, causal, and willing to say what went wrong.
 
