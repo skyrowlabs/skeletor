@@ -3934,8 +3934,11 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
         for line in real_output.splitlines()
         if line.startswith("     ") and not line.strip().startswith("#") and line.strip()
     ]
-    # `/tmp/` is the recipe's own suggestion and is wrong for a gate — two trees
-    # would collide on it. Everything else is executed as printed.
+    # The recipe's two scratch FILES are rehomed: `collect-diff` and
+    # `collect-diff-none` would collide on a shared `/tmp/before.txt`. The
+    # worktree path is not, and is executed as printed — only one tree runs the
+    # recipe, the recipe removes it on its own last line, and the plant below
+    # needs the printed value to rewrite.
     scratch = workdir / "collect-diff-run"
     scratch.mkdir(exist_ok=True)
 
@@ -3979,13 +3982,29 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     )
 
     # The plant, in the gate, because the assertion above is a negative one and
-    # a negative over a set nobody sized is what shipped here. Strip the `tests/`
-    # scope back out — the exact defect node-zero reported — and the marker must
-    # fire. If it does not, the assertion above is decoration.
+    # a negative over a set nobody sized is what shipped here. It reconstructs
+    # the recipe as it was when node-zero reported it and the marker must fire.
+    # If it does not, the assertion above is decoration.
+    #
+    # **Two halves now, and the second one is why.** The plant used to be the
+    # `tests/` scope alone, because the worktree was created at `tmp/pre-upgrade`
+    # — inside the tree, where an unscoped `pytest` finds it. proto.pilot pointed
+    # out that `/tmp` satisfies both of the recipe's constraints at once, so the
+    # worktree moved out of the repository and the collision it caused is gone
+    # with it. Unscoping alone then reproduces nothing, and this gate went red
+    # saying so, which is the correct report: the hazard the plant recreated no
+    # longer exists at that location.
+    #
+    # The rule under test never was *scope to `tests/`* — it is *a failed
+    # collection announces itself rather than writing correct-looking files*, and
+    # `tmp/` is one cause of a collision among several (an adopter's own scratch,
+    # a vendored tree, a second checkout). So the plant puts the worktree back
+    # where it used to be AND unscopes, which is the historical recipe verbatim,
+    # and the exit-code check must still catch it.
     started = time.time()
-    unscoped = script.replace("-m pytest tests/ ", "-m pytest ")
-    planted = unscoped != script
-    prune = "rm -rf tmp/pre-upgrade; git worktree prune\n"
+    unscoped = script.replace("/tmp/pre-upgrade", "tmp/pre-upgrade").replace("-m pytest tests/ ", "-m pytest ")
+    planted = unscoped != script and "tmp/pre-upgrade" in unscoped and "-m pytest tests/ " not in unscoped
+    prune = "rm -rf tmp/pre-upgrade /tmp/pre-upgrade; git worktree prune\n"
     plant_code, plant_ran = run(["bash", "-c", prune + unscoped], cwd=tree)
     results.append(
         Result(
@@ -3997,7 +4016,7 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
             f"--- output ---\n{plant_ran}",
         )
     )
-    run(["bash", "-c", "rm -rf tmp/pre-upgrade; git worktree prune"], cwd=tree)
+    run(["bash", "-c", "rm -rf tmp/pre-upgrade /tmp/pre-upgrade; git worktree prune"], cwd=tree)
 
     # And the other direction, which is the one an unconditional footer passes.
     started = time.time()
