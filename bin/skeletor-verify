@@ -380,10 +380,30 @@ def pyright_entry(tree: Path) -> List[str]:
     Read, not repeated, for the same reason as `hook_args`: the pyright hook
     names its config with `entry:` rather than `args:`, and a copy here would
     verify the template against an invocation the template does not use.
+
+    **The entry is no longer `pyright` itself.** It is
+    `scripts/lint_pyright_gate.py`, the pre-flight wrapper, so the flags are
+    taken from `--project` onward rather than from after the command name. The
+    previous pattern required the literal `entry: pyright `, and when the hook
+    started naming the wrapper it matched nothing and fell through to a
+    hardcoded default that happened to be correct — a silent stop to reading
+    the tree at all, which is the whole thing this function exists to avoid.
+
+    So there is no default now. A hook this cannot parse is a hard failure,
+    because the alternative is a gate that verifies the template against an
+    invocation nobody ships and stays green while doing it.
     """
     config = (tree / ".pre-commit-config.yaml").read_text(encoding="utf-8")
-    match = re.search(r"- id: pyright\b[^\n]*\n(?:\s+[^\n]*\n)*?\s+entry: pyright ([^\n]*)", config)
-    return match.group(1).split() if match else ["--project", "pyrightconfig.json"]
+    match = re.search(r"- id: pyright\b[^\n]*\n(?:\s+[^\n]*\n)*?\s+entry: ([^\n]*)", config)
+    if not match:
+        raise SystemExit(f"❌ {tree}/.pre-commit-config.yaml has no `- id: pyright` hook with an `entry:`")
+    arguments = match.group(1).split()
+    if "--project" not in arguments:
+        raise SystemExit(
+            f"❌ the pyright hook's entry names no --project: {match.group(1)!r}\n"
+            "   This gate runs pyright directly and needs the config the tree's own hook uses."
+        )
+    return arguments[arguments.index("--project") :]
 
 
 #: A whole-line `//` comment in the rendered `pyrightconfig.json`. pyright parses
@@ -393,6 +413,18 @@ def pyright_entry(tree: Path) -> List[str]:
 #: `tests/test_pyright_scope.py`: a `//` inside a string would need a real JSONC
 #: parser, and adding one to read three keys is not worth it in either place.
 _CONFIG_COMMENT = re.compile(r"^\s*//")
+
+
+def _venv_identity(interpreter: Path) -> Path:
+    """An interpreter path with its DIRECTORY resolved and its own name left alone.
+
+    Every virtualenv's `bin/python` is a symlink to the base interpreter, so
+    `.resolve()` collapses two different venvs onto one system path and makes
+    any comparison between them vacuous. Resolving the directory keeps the
+    answer about *which environment*, which is the question being asked, while
+    still surviving a symlinked `.venv` or a temp directory behind one.
+    """
+    return interpreter.parent.resolve() / interpreter.name
 
 
 def pyright_pin(tree: Path) -> Tuple[Optional[Path], str]:
@@ -419,11 +451,28 @@ def pyright_pin(tree: Path) -> Tuple[Optional[Path], str]:
         return None, f"pyrightconfig.json does not parse as JSONC: {exc}"
 
     if explicit := parsed.get("pythonPath"):
-        return (config.parent / explicit).resolve(), "pythonPath"
+        # Same identity rule as the venv branch, so the two answers are
+        # comparable and a config that switches between them reads the same.
+        return _venv_identity(config.parent / explicit), "pythonPath"
     venv_path, venv = parsed.get("venvPath"), parsed.get("venv")
     if not (venv_path and venv):
         return None, "the config pins no interpreter (`pythonPath`, or `venvPath` + `venv`)"
-    interpreter = (config.parent / venv_path / venv / "bin" / "python").resolve()
+    # The VENV DIRECTORY is resolved; the interpreter inside it is not. That
+    # distinction is the whole strength of the comparison, and getting it wrong
+    # made this gate far weaker than its own docstring claimed.
+    #
+    # `.venv/bin/python` in any virtualenv is a symlink to the base interpreter,
+    # so a full `.resolve()` here answered `/usr/bin/python3.14` — and the gate
+    # was comparing BASE INTERPRETERS. It would have passed with the tree
+    # pinned at a completely different venv, provided that venv was built from
+    # the same python, which is every venv on the machine.
+    #
+    # Found by the pre-flight comparison below disagreeing with it: the tree's
+    # wrapper stops at the venv and this stopped at the system, so the chain's
+    # two ends reported different paths for the same interpreter. Neither was
+    # wrong about the interpreter; one was answering a weaker question, and the
+    # only reason anybody noticed is that a second reader existed.
+    interpreter = _venv_identity(config.parent / venv_path / venv / "bin" / "python")
     if not interpreter.exists():
         return None, f"`venvPath` + `venv` resolves to {interpreter}, which does not exist"
     return interpreter, "venvPath + venv"
@@ -530,7 +579,7 @@ def pyright_gate(tree: Path, venv_python: Path, available: bool) -> List[Result]
     # invisible here and arrives in an adopter's pre-commit hook, which has no
     # flag to fall through to.
     resolved, how = pyright_pin(tree)
-    pin_ok = resolved == venv_python.resolve()
+    pin_ok = resolved == _venv_identity(venv_python)
     if resolved is None:
         pin_detail = f"the tree's pyrightconfig.json pins no usable interpreter: {how}"
     elif not pin_ok:
@@ -538,6 +587,40 @@ def pyright_gate(tree: Path, venv_python: Path, available: bool) -> List[Result]
     else:
         pin_detail = f"{how} → {resolved}"
     results.append(Result("pyright pin resolves", pin_ok, 0.0, pin_detail))
+
+    # The third link in a chain, and the reason it is worth having: the grid
+    # BUILT an interpreter, `pyright_pin` says the config resolves to it, and
+    # this says the tree's own pre-flight agrees. Each link is established
+    # independently — two readers of one config plus the ground truth of what
+    # was installed — so a wrapper whose resolution order drifts from what the
+    # config means is caught here rather than by an adopter whose probe passes
+    # on an interpreter pyright then ignores.
+    #
+    # Its failure mode is quiet by construction: a wrong resolution still
+    # probes SOME interpreter, and if that one happens to have the packages the
+    # pre-flight reports success. Nothing in the tree can notice, because the
+    # tree has one interpreter and agrees with itself about it.
+    started = time.time()
+    wrapper = tree / "scripts" / "lint_pyright_gate.py"
+    if not wrapper.exists():
+        results.append(Result("pyright pre-flight agrees", False, 0.0, f"{wrapper.name} is not in the tree"))
+        return results
+    code, output = run(
+        [str(venv_python), str(wrapper), "--project", "pyrightconfig.json", "--preflight-only"],
+        cwd=tree,
+    )
+    reported = output.strip().splitlines()[-1] if output.strip() else ""
+    agrees = code == 0 and reported == str(_venv_identity(venv_python))
+    results.append(
+        Result(
+            "pyright pre-flight agrees",
+            agrees,
+            time.time() - started,
+            f"the tree's pre-flight resolved {reported!r}, the grid built {_venv_identity(venv_python)}"
+            if not agrees
+            else f"pre-flight → {reported}",
+        )
+    )
     return results
 
 

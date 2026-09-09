@@ -648,6 +648,34 @@ that are not defects. The grid built the checkout, so it is the one caller
 entitled to ask. Found by reading jam.sense's `86e1ff754`, which corrected the
 same sentence in their tree a day earlier.
 
+**The adopter's half of that is `scripts/lint_pyright_gate.py`**, a pre-flight
+the commit-time callers run instead of pyright. The pin fixes the checkout it
+sits in and gives nothing to one without a `.venv`, where the fallback to PATH
+is the original behaviour — and `reportMissingImports` is `none`, so pyright
+does not report the bare interpreter, it reports *consequences*. Losing `click`
+alone is 24 errors in a fresh scaffold, none of which name click. The wrapper
+resolves the interpreter pyright would use, proves it can import the project's
+packages, and **does not run pyright** when the probe fails, because two dozen
+diagnostics naming the wrong thing read as a broken tree. CI does not call it
+and should not: that job installs its dependency set onto the runner's
+interpreter with no `.venv` present, so it answers every interpreter question
+already.
+
+**The chain that gate makes possible caught a defect in the gate above it, and
+that is the part worth keeping.** `pyright pin resolves` compared
+`Path.resolve()` on both sides — and every virtualenv's `bin/python` is a
+symlink to the base interpreter, so both collapsed to `/usr/bin/python3.14` and
+the gate was comparing **base interpreters**. It would have passed with the tree
+pinned at a completely different venv, provided that venv was built from the
+same python, which is every venv on the machine. Nothing in the tree could see
+it and neither could the gate: it agreed with itself. What surfaced it was
+`pyright pre-flight agrees` reporting a *different* path for the same
+interpreter — the tree's wrapper stops at the venv, the gate went on to the
+system — so the disagreement was the finding. `_venv_identity()` resolves the
+directory and leaves the interpreter's own name alone, which is the question
+actually being asked. **A second reader is what makes a claim checkable; one
+reader is a claim about itself.**
+
 A toolchain that cannot be fetched is skipped **loudly**, never silently.
 
 **Never run `black` directly on `template/`.** It sees `{{PLACEHOLDER}}` rather

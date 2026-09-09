@@ -140,10 +140,17 @@ _EXTRA_CALLERS = (".pre-commit-config.yaml",)
 #: a narrower window cuts `pyright --project pyright|config.json` in half.
 _WINDOW = 400
 
-#: Above 1 because the scan feeds a filter, and because the number is knowable:
-#: `core` ships exactly three callers — the pre-commit hook, the CI type-check
-#: step and `{{CLI}} check lint` — and higher tiers add `{{CLI}} commit`. A floor
-#: rather than an equality, so adding a caller stays an ordinary change.
+#: Above 1 because the scan feeds a filter, and a filter tested against one item
+#: cannot be shown to select anything.
+#:
+#: A FLOOR, never an equality, and the reason is on its second demonstration.
+#: This comment used to enumerate the callers — "core ships exactly three, and
+#: higher tiers add `{{CLI}} commit`" — and `scripts/lint_pyright_gate.py` made
+#: it four at `core` without touching this line. The count was never the
+#: load-bearing part, and a count copied into prose beside the constant it
+#: describes is the failure this template keeps recording. The shape is what
+#: holds: the pre-commit hook, CI, and every CLI command that type-checks, all
+#: of them discovered by `_CALLER_GLOBS` rather than named here.
 _MIN_CALLERS = 3
 
 

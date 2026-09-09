@@ -63,6 +63,41 @@ else — `pyright --venvpath <dir>`, or edit the config — rather than reaching
 checkout where the pin cannot resolve: CI, and any worktree without a `.venv` beside its
 copy of the config.
 
+### The pre-flight, and why the errors you see may not be yours
+
+**The pin fixes the checkout it sits in and gives nothing to a checkout without a `.venv`.**
+There the fallback to `PATH` is the original behaviour, unchanged, and a bare interpreter is
+one shell away — which matters because `reportMissingImports` is `none`, so pyright does not
+tell you the interpreter is bare. It degrades every name your packages define to `Unknown`
+and reports the *consequences*. In a fresh scaffold, losing `click` alone is **24 errors**:
+`click.group` resolves to `Unknown`, so it stops decorating, and every `@group.command()`
+becomes an attribute access on a plain function. Not one of those errors names click.
+
+So the commit-time callers run [`scripts/lint_pyright_gate.py`](../../scripts/lint_pyright_gate.py)
+rather than pyright directly — the `pyright` pre-commit hook, and `{{CLI}} check lint`. It
+resolves the interpreter pyright *would* use, proves it can import the project's packages,
+and only then runs pyright with that interpreter passed explicitly, so what was probed is
+what is checked:
+
+```
+❌ pyright's interpreter cannot import 'click' — this is an ENVIRONMENT fault,
+   not a defect in the tree, and pyright was NOT run.
+     interpreter : /usr/bin/python3
+     resolved by : PATH (python3)
+```
+
+**Not running pyright is the load-bearing half**: two dozen diagnostics naming the wrong
+thing are worse than none, because they read as a broken tree. It fails **closed** — an
+interpreter that cannot be resolved at all is an error, never a skip, since a gate that
+could not run is not a gate that passed.
+
+CI does not call it and should not: that job installs `.github/pyright-deps.txt` onto the
+runner's interpreter with no `.venv` in the checkout, so it answers every interpreter
+question already, and a wrapper there would add a moving part to the one caller that never
+had the problem. `tests/test_pyright_gate_preflight.py` holds the routing, the fail-closed
+behaviour, and that every sentinel stays reachable from `.github/pyright-deps.txt` — a
+sentinel outside it would block a commit on a correctly provisioned runner.
+
 ## Pin the Lint Tools in One Place
 
 Every tool version is pinned in `.pre-commit-config.yaml` (**the source of truth**) and

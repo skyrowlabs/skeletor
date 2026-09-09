@@ -89,7 +89,11 @@ def _lint() -> int:
         results.append(("isort", run(["isort", "--check-only", "--diff", "."]).returncode))
         results.append(("black", run(["black", "--check", "."]).returncode))
     if (PROJECT_ROOT / "pyrightconfig.json").exists():
-        results.append(("pyright", run(["pyright", "--project", "pyrightconfig.json"]).returncode))
+        # The wrapper, not pyright directly — the same entry the pre-commit hook
+        # runs. It pre-flights the interpreter pyright would resolve, because a
+        # bare one reports an environment fault as errors in files this run never
+        # touched (`reportMissingImports` is `none`). scripts/lint_pyright_gate.py.
+        results.append(("pyright", script("scripts/lint_pyright_gate.py", "--project", "pyrightconfig.json")))
     if (PROJECT_ROOT / "eslint.config.js").exists():
         results.append(("eslint", run(["npm", "run", "lint:check"]).returncode))
     if not results:
