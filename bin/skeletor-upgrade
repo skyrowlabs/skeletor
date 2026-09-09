@@ -518,6 +518,31 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def standing_divergence(target: Path, reference: Dict[str, str]) -> List[str]:
+    """Files skeletor wrote here that no longer match `reference`.
+
+    `reference` is `{repo-relative path: sha256 of what skeletor produces}` —
+    the *base in force*. Which base that is depends on the run, and is the
+    caller's decision rather than this function's: the recorded manifest for a
+    dry run or a run that holds it back, the head render for a run that
+    advances. Both callers ask the identical question of a different base,
+    which is why this is one function and not two blocks that drift.
+
+    A file absent from the tree is not divergence — that is a decline, reported
+    separately and for a different reason. Generated artifacts and the manifest
+    are excluded because their content is a function of the tree, so comparing
+    them to a render says nothing about what anybody edited.
+    """
+    return sorted(
+        rel
+        for rel, digest in reference.items()
+        if rel not in GENERATED
+        and rel != MANIFEST_NAME
+        and (target / rel).exists()
+        and sha256(target / rel) != digest
+    )
+
+
 def importers_of(needs_review: List[str], written: List[str], head_files: Dict[str, Path]) -> Dict[str, List[str]]:
     """Files that were written cleanly but import one that was not.
 
@@ -1415,24 +1440,29 @@ def main() -> int:
         stale = sidecars(patches) if args.dry_run else []
         cleared = 0 if args.dry_run else clear_sidecars(patches)
 
-        # Computed BEFORE anything is written, from the manifest and the disk.
-        # After the loop it would be wrong in the reassuring direction: a file
-        # this run just updated matches the head render and would drop out,
-        # so a report built afterwards would under-count exactly on the runs
-        # that changed the most.
+        # **Measured against the base that will be in force when this is read.**
         #
         # `sha256` of what is on disk against the hash of what skeletor
         # produced. An entry means skeletor wrote the file here, so a different
         # hash means somebody has edited it — the same comparison the fallback
         # path already makes, asked about the whole tree instead of one file.
-        diverged = sorted(
-            rel
-            for rel, recorded in (hashes or {}).items()
-            if rel not in GENERATED
-            and rel != MANIFEST_NAME
-            and (target / rel).exists()
-            and sha256(target / rel) != recorded
-        )
+        #
+        # Which render to compare against is the whole question, and getting it
+        # wrong is not a rounding error: it is a heading that says *you decided
+        # this* over files the tool itself wrote. Against the RECORDED base this
+        # is right for a dry run and for a run that holds the manifest back,
+        # because that base is still the tree's. It is wrong for a run that
+        # advances, and wrong in the worst direction for the flow this tool
+        # documents: run once, port the conflicts by hand, re-run `--ported`.
+        # Everything the first run applied still differs from the base the
+        # second run has not yet replaced, so it is listed as the reader's own
+        # divergence — node-zero measured 15 named, 11 of them the previous
+        # run's output; dream.doll saw the same list evaporate on the next dry
+        # run, which is the tell that it was never standing state.
+        #
+        # So it is computed twice, from one function, and the second call is
+        # made only where the answer changes. See `advanced` below.
+        diverged = standing_divergence(target, hashes or {})
 
         for rel in sorted(set(base_files) | set(head_files)):
             if rel in GENERATED or rel == MANIFEST_NAME:
@@ -1743,6 +1773,18 @@ def main() -> int:
                     detail("re-running.")
                 shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
                 advanced = True
+                # The manifest just written is the head render's, so the head
+                # render is what "skeletor wrote this" now means. Re-asking the
+                # same question of the new base is what stops this run's own
+                # output being reported back as the reader's edits: a file that
+                # was replaced wholesale matches it and drops out, correctly,
+                # because it was never edited; a file that was MERGED is neither
+                # render and stays, correctly, because the adopter's hunks are
+                # still in it. The old comment here argued the opposite — that a
+                # post-write reading "under-counts on the runs that changed the
+                # most" — which is true only if you take every applied file to
+                # be a divergence, and an applied file is the opposite of one.
+                diverged = standing_divergence(target, {rel: sha256(path) for rel, path in head_files.items()})
 
         # One call, two renderings. It was computed separately for the JSON and
         # for the human report — two call sites for one answer, which is the
@@ -1801,6 +1843,13 @@ def main() -> int:
                         "collided": collided,
                         "entangled": entangled,
                         "declined": declined,
+                        # The machine half of the `standing state` block. It was
+                        # human-only for a release, which is the asymmetry
+                        # `head_ref` was added here to close: a consumer that has
+                        # to infer a field the report already prints will infer
+                        # it differently, and this one is measured against a base
+                        # that depends on whether the run advanced.
+                        "diverged": diverged,
                         "dropped": dropped,
                     },
                     indent=2,

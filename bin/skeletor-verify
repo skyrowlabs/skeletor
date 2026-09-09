@@ -5066,9 +5066,44 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
                 "the pending files are resolved, and without it the base can never move past "
                 "a permanently diverged file"
             )
+        # **What the `--ported` run says the tree's standing divergences are.**
+        # This fixture edits exactly one file, so after the base advances there
+        # is exactly one: the conflicted plant, which is still holding a third
+        # value belonging to neither render. Everything else the first run wrote
+        # IS the head render, and a run that has just recorded the head render
+        # as this tree's base must not report its own output back as the
+        # reader's edits.
+        #
+        # It did, under a heading asserting each entry is a decision the reader
+        # made — node-zero measured 15 named with 11 of them the previous run's
+        # output, dream.doll watched the same list evaporate on the next dry
+        # run. The cause is that the list was measured against the base the run
+        # was about to replace, which is right for a dry run and wrong here.
+        #
+        # This gate reaches it and no other does: every other upgrade gate runs
+        # against a fresh scaffold, where nothing applies and nothing conflicts,
+        # so the two bases are the same map and the wrong one cannot be told
+        # from the right one. Same reason the manifest bug above lived.
+        standing = re.search(r"(\d+) file\(s\) skeletor wrote and you have edited", ported)
+        listed = standing and int(standing.group(1))
+        if listed != 1:
+            problems.append(
+                f"--ported reported {listed} standing divergence(s); this tree has exactly one, "
+                f"{rel}, which is the file it left alone. Anything more is this run's own output "
+                "measured against the base it just replaced."
+            )
+        elif rel not in ported.split("skeletor wrote and you have edited", 1)[1]:
+            # The count is the load-bearing half and it is asserted above; this
+            # only confirms the one name is the planted file. Matched on the bare
+            # path rather than on a rendered `item()` line, because the first
+            # draft spelled the bullet's indentation and failed on the prefix
+            # while the substantive claim passed — a gate red for its own
+            # formatting assumption, which reads as the tool being broken.
+            problems.append(f"--ported reported one standing divergence and it is not {rel}")
         return [
             Result(
-                f"pending ref: a conflict holds the manifest at {before}, --ported moves it to {ported_ref}",
+                f"pending ref: a conflict holds the manifest at {before}, --ported moves it to "
+                f"{ported_ref} and reports 1 standing divergence, not this run's output",
                 not problems,
                 time.time() - started,
                 "\n".join(problems) or f"tried: {'; '.join(attempts)}",
