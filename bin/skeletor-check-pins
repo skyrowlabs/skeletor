@@ -114,10 +114,26 @@ def discover() -> Dict[str, Pin]:
         lines = ["" if line.lstrip().startswith("#") else line for line in text.splitlines()]
 
         # pre-commit: `- repo: https://github.com/OWNER/REPO` … `rev: X`
+        #
+        # The line recorded is the one holding the VERSION, not the one the
+        # match starts on. This is the only pattern here that spans two lines,
+        # and it is the only one that had this wrong: everything else is a
+        # per-line loop where the two coincide, so the bug could not appear in
+        # the pins those find. `bin/skeletor-bump` reads this location and
+        # rewrites that exact line, refusing to guess when it holds no version
+        # — so an off-by-one made every pre-commit `rev:` pin unbumpable, while
+        # the npm and pypi keys in the same report bumped fine.
+        #
+        # Which is the failure `skeletor-bump` exists to prevent, one level up:
+        # black and pyright are each pinned under two ecosystem keys, and the
+        # tool that rewrites every location of a name could not reach the
+        # `github:` half of either. Bumping the reachable half is exactly the
+        # split pin that ships a tree whose own `test_lint_tool_parity.py` is
+        # red on arrival. Found by trying to bump isort, 2026-09-08.
         for match in re.finditer(
             r"-\s+repo:\s+https://github\.com/([\w.-]+/[\w.-]+)\s*\n\s*rev:\s*(\S+)", text
         ):
-            line = text[: match.start()].count("\n") + 1
+            line = text[: match.start(2)].count("\n") + 1
             add("github", match.group(1).removesuffix(".git"), match.group(2), path, line)
 
         # node hooks and package.json: `'pyright@1.1.409'`, `"eslint": "^9.0.0"`
