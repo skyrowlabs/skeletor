@@ -90,7 +90,7 @@ repos:
         types: [python]
 
   - repo: https://github.com/PyCQA/isort
-    rev: 8.0.1
+    rev: 9.0.1
     hooks:
       - id: isort
         args: ['--profile=black', '--line-length={{LINE_LENGTH}}']
