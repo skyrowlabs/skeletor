@@ -17,8 +17,14 @@ The third is the only one that looks outside this repository, and it is the only
 question here that no gate in this tree can ask: skeletor was extracted from a
 mature production repository, that repository kept going, and whether it has
 grown a mechanism worth taking is a fact about a checkout this one does not
-contain. `upstream.json` is the record — what was taken, from where, and how far
-along it has been read. Like `check-pins`, it reports and never adopts.
+contain. Like `check-pins`, it reports and never adopts.
+
+That question reads two files with one job each, and `declared_upstreams()` has
+the argument: `upstream.json` is the tracked, public RECORD — what was taken and
+what was declined, with reasons — while `upstream.local.json` is the gitignored
+CONFIGURATION naming the repository to watch and where it sits. A fresh clone
+has the second of those to write, and this says so rather than reporting an
+absence.
 
 None of the three needs a model. If all are clean this exits having spent
 nothing, and an agent is never invoked. If any is not, there is a specific thing to look at,
@@ -45,12 +51,13 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 SKELETOR = Path(__file__).resolve().parent.parent
 RELEASE_BRANCH = "main"
 PROCEDURE = "docs/MAINTENANCE.md"
 UPSTREAMS = SKELETOR / "upstream.json"
+LOCAL_UPSTREAMS = SKELETOR / "upstream.local.json"
 
 
 def run(cmd: List[str]) -> Tuple[int, str]:
@@ -132,8 +139,60 @@ def normalise_origin(raw: str) -> str:
     return "/".join(parts[-2:]).lower() if len(parts) >= 2 else ""
 
 
-def find_checkout(origin: str) -> Optional[Path]:
-    """A sibling checkout of `origin`, or None.
+def declared_upstreams() -> Tuple[Dict[str, dict], Path, str]:
+    """What to watch and where to look for it — the operator's file if there is one.
+
+    **Two files, one job each, and the split is the point.**
+
+    `upstream.json` is tracked and PUBLIC: the decision record. What was
+    harvested, what was declined, and why. Those rulings generalise, they are
+    the half a reader of this repository benefits from, and they belong in git
+    beside the code they justify.
+
+    `upstream.local.json` is gitignored and is the CONFIGURATION: which
+    repository, where to look for it, and how far it has been read. That half
+    does not generalise. It names a checkout that exists on one machine, and
+    here it names a *private* repository — so carrying it in a public repo was
+    a disclosure nobody decided to make, and tracking it meant a fork could not
+    change what it watches without diverging from our origin forever.
+
+    Both were one file until 2026-09-08, which was fine while this repository
+    was private and stopped being fine the day it was not. Same class as
+    everything else in this project's notes: a fact that was safe when written,
+    with the world moving underneath it.
+
+    **The local `upstreams` map REPLACES the tracked one; it never merges.** A
+    merge would be a second home for one fact, and — the reason that matters —
+    it would leave a fork no way to *stop* watching an upstream they cannot
+    see, which is the first thing a fork needs.
+
+    `search_root` is here for the same reason. `find_checkout` scans the
+    directory holding this checkout, which is this workspace's layout and not a
+    fact about anybody else's.
+    """
+    root, source = SKELETOR.parent, UPSTREAMS.name
+    declared: Dict[str, dict] = {}
+
+    for path in (UPSTREAMS, LOCAL_UPSTREAMS):
+        if not path.exists():
+            continue
+        try:
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise SystemExit(f"❌ {path.name} does not parse as JSON: {exc}")
+        # `_`-prefixed keys are commentary, here and in `sources_untracked`.
+        # It is a JSON file with nowhere else to put a sentence.
+        declared = {k: v for k, v in (parsed.get("upstreams") or {}).items() if not k.startswith("_")}
+        if path is LOCAL_UPSTREAMS:
+            source = path.name
+            if given := parsed.get("search_root"):
+                root = Path(given).expanduser().resolve()
+
+    return declared, root, source
+
+
+def find_checkout(origin: str, root: Path) -> Optional[Path]:
+    """A checkout of `origin` directly under `root`, or None.
 
     **Located by remote, never by a recorded path.** A path is correct on the
     machine it was written on and wrong on every other one, which is the class
@@ -141,9 +200,11 @@ def find_checkout(origin: str) -> Optional[Path]:
     would be worse here than in prose, because a stale path resolves to *some*
     directory and this would read that one's history instead of failing.
 
-    Siblings only. Walking further would make an unattended weekly pass a
-    filesystem crawl, and an upstream that is not beside this checkout is one
-    this machine is not positioned to harvest from anyway.
+    Immediate children of `root` only, never a recursive walk: that would make
+    an unattended weekly pass a filesystem crawl. `root` defaults to the
+    directory holding this checkout, which is one workspace's layout rather
+    than a fact about anybody else's — an operator whose repositories live
+    elsewhere sets `search_root` in `upstream.local.json`.
 
     **A linked worktree is skipped, and that is not a detail.** Every worktree
     of a repository reports the same `origin`, so the first alphabetical match
@@ -157,7 +218,7 @@ def find_checkout(origin: str) -> Optional[Path]:
     wanted = normalise_origin(origin)
     if not wanted:
         return None
-    for candidate in sorted(SKELETOR.parent.iterdir()):
+    for candidate in sorted(root.iterdir()):
         if not (candidate / ".git").is_dir():
             continue
         proc = subprocess.run(
@@ -184,23 +245,34 @@ def upstream_verdict() -> Tuple[bool, str]:
     most of what moves there is that product's own work, and the fraction that
     is a reusable mechanism is decided by reading it. What a machine can do is
     say *where to look* and *how far you have already read*, which is what
-    `upstream.json` records.
+    `declared_upstreams()` reads.
 
     Silence is never a pass. An upstream that cannot be located is reported as
     unreadable rather than as unchanged, since the two are the same output from
     here and only one of them means there is nothing to do.
     """
-    if not UPSTREAMS.exists():
-        return False, f"no {UPSTREAMS.name} — nothing is declared upstream of this template"
+    declared, root, source = declared_upstreams()
+    if not declared:
+        # Not a failure, and not silence either. A checkout with nothing
+        # declared is the ordinary state of a fresh clone — this repository
+        # ships the RECORD and not the configuration — so it says what to write
+        # rather than reporting an absence somebody has to go and interpret.
+        return False, (
+            f"   nothing declared. {UPSTREAMS.name} is the public record; the repositories to watch\n"
+            f"   go in {LOCAL_UPSTREAMS.name} (gitignored) — see the `upstreams` comment in\n"
+            f"   {UPSTREAMS.name} for the shape."
+        )
 
-    declared = json.loads(UPSTREAMS.read_text(encoding="utf-8")).get("upstreams", {})
     lines: List[str] = []
     work = False
 
     for name, record in sorted(declared.items()):
-        checkout = find_checkout(record.get("origin", ""))
+        checkout = find_checkout(record.get("origin", ""), root)
         if checkout is None:
-            lines.append(f"   {name}: no sibling checkout with that origin — cannot read it from here")
+            lines.append(
+                f"   {name}: no checkout with that origin under {root} — cannot read it from here "
+                f"(declared in {source}; set `search_root` there if the layout differs)"
+            )
             continue
 
         watermark = record.get("read_through", "")

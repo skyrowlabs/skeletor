@@ -6822,6 +6822,80 @@ def identity_gate() -> Result:
     )
 
 
+def upstream_record_gate() -> List[Result]:
+    """The public record carries no pointer into a private checkout.
+
+    `upstream.json` is tracked and this repository is public. It used to carry
+    the operator's configuration too — a resolvable origin URL for a *private*
+    repository, plus that repository's commit SHAs and a file-by-file
+    inventory. That was safe while both repositories were private, and it
+    stopped being safe on the day this one was published, which is this
+    project's own recurring failure arriving at its own provenance record: a
+    fact accurate when written, with the world moving underneath it.
+
+    The split is in `declared_upstreams()` in `bin/skeletor-maintain` — the
+    tracked file keeps the rulings, and `upstream.local.json` keeps the
+    configuration. This is the half that keeps the split true, because nothing
+    else would notice it quietly coming back: a URL added to the record is a
+    working change that passes every other gate here.
+
+    Both directions are asserted. The redaction has to hold, AND the local file
+    has to stay ignorable — an operator config that git can stage is one commit
+    away from being the same disclosure again, and `git check-ignore` is the
+    only thing that actually knows.
+    """
+    results = []
+    record = SKELETOR / "upstream.json"
+
+    if not record.exists():
+        return [Result("upstream record", True, 0.0, "no upstream.json — nothing to keep private")]
+
+    try:
+        parsed = json.loads(record.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        return [Result("upstream record parses", False, 0.0, f"upstream.json is not JSON: {exc}")]
+
+    # Every string anywhere in the document, so a URL cannot hide in a nested
+    # value or a key nobody thought to check. A shape, not a list of hosts:
+    # the point is that the public record names no repository at all.
+    def strings(node) -> List[str]:
+        if isinstance(node, str):
+            return [node]
+        if isinstance(node, dict):
+            return [s for k, v in node.items() for s in strings(k) + strings(v)]
+        if isinstance(node, list):
+            return [s for item in node for s in strings(item)]
+        return []
+
+    found = sorted({m.group(0) for s in strings(parsed) for m in re.finditer(r"[\w.-]+\.\w+/[\w.-]+/[\w.-]+", s)})
+    results.append(
+        Result(
+            "upstream record names no repository",
+            not found,
+            0.0,
+            "upstream.json carries what look like repository pointers:\n  "
+            + "\n  ".join(found)
+            + "\n\nThe operator's half belongs in upstream.local.json, which is gitignored. "
+            "This file is public and is the decision record only.",
+        )
+    )
+
+    local = SKELETOR / "upstream.local.json"
+    code, output = run(["git", "check-ignore", "-q", "upstream.local.json"], cwd=SKELETOR)
+    results.append(
+        Result(
+            "upstream.local.json is gitignored",
+            code == 0,
+            0.0,
+            "upstream.local.json is not ignored by git, so the operator configuration this file "
+            "exists to keep out of a public repository can be committed by accident."
+            + (f"\n{output.strip()}" if output.strip() else "")
+            + ("" if local.exists() else "\n(it does not exist here yet; the ignore rule must still be in place)"),
+        )
+    )
+    return results
+
+
 def checkout_path_literal_gate() -> List[Result]:
     """No file names the author's own path to this checkout.
 
@@ -7694,6 +7768,7 @@ def main() -> int:
         results += unlinted_source_gate(workdir)
         results.append(identity_gate())
         results += checkout_path_literal_gate()
+        results += upstream_record_gate()
         venv_python = make_venv(workdir, args.quiet)
         results.append(shadow_gate(workdir, venv_python))
         results.append(dirty_scope_gate(workdir))

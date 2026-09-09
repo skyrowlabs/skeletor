@@ -22,3 +22,8 @@ tmp/
 # name still reads as dirt to `skyrow-workspace/scripts/skeletor-currency.py`,
 # which counts it separately and correctly.
 notes.md
+
+# The operator half of the upstream record: which repositories this checkout
+# watches and where they are. Per-machine, and it names a PRIVATE repository
+# while this one is public — see `declared_upstreams()` in bin/skeletor-maintain.
+upstream.local.json

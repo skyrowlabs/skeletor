@@ -58,8 +58,14 @@ bin/skeletor-maintain              # includes the "from upstream" section
 skeletor was **extracted from a mature production repository, and that
 repository kept going.** So "am I current" has a second meaning here that no
 gate in this tree can answer, because the answer lives in a checkout this one
-does not contain. `upstream.json` is the record: what was taken, from where,
-why, and how far along that repository has been read.
+does not contain.
+
+**Two files, one job each.** `upstream.json` is tracked and public: the record
+of what was taken, what was declined, and why. `upstream.local.json` is
+gitignored and is yours: which repositories you watch, where they are
+(`search_root`, if they are not beside this checkout), and how far each has been
+read. A fresh clone has no local file and the report says so rather than naming
+a repository you cannot open — write one to start watching anything.
 
 The report names only the paths that have been harvested before *and* have moved
 since the watermark, plus a count of everything else. That split is deliberate —

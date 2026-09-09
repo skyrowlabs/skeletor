@@ -1072,7 +1072,35 @@ owes work, in a tree where nobody does. Deleted 2026-09-07, both there and the
 hold in `skyrow-workspace/scripts/skeletor-currency.py`, whose `HELD` map gained
 the staleness check it had been arguing for and lacked.
 
-`bin/skeletor-maintain` reads `upstream.json` as a third cheap question beside CI
+**That record is now two files, and the day this repository went public is what
+split them.** `upstream.json` was doing two jobs at once: it was the *decision
+record* — what was harvested, what was declined, and why — and it was the
+*operator's configuration*, naming a repository by resolvable origin URL along
+with its commit SHAs and a file-by-file inventory. The first generalises,
+belongs in git, and is the half a stranger reading this repository benefits
+from. The second does not: it describes a checkout on one machine, and here it
+described a **private** repository from a public one.
+
+Conflating them broke both halves. A fork could not change what it watches
+without diverging from our origin forever, and a public file carried a pointer
+into a private tree that nobody had decided to publish. Neither was a mistake
+when written — both repositories were private — which makes it this project's
+own recurring failure arriving at its own provenance record: *a fact accurate
+when written, with the world moving underneath it.*
+
+So `upstream.json` keeps the rulings, and `upstream.local.json` — gitignored —
+keeps the configuration: `upstreams`, plus an optional `search_root`, since
+scanning the directory beside this checkout is one workspace's layout rather
+than a fact about anyone else's. The local map **replaces** the tracked one and
+never merges with it: a merge would be a second home for one fact, and it would
+leave a fork no way to *stop* watching an upstream they cannot see, which is the
+first thing a fork needs. `declared_upstreams()` carries the argument;
+`upstream_record_gate` in `bin/skeletor-verify` keeps it true, because a URL
+added back to the record is a working change that every other gate here passes,
+and it asserts the ignore rule in the same breath — an operator config git can
+stage is one commit from being the same disclosure again.
+
+`bin/skeletor-maintain` reads them as a third cheap question beside CI
 and pins. Like `bin/skeletor-check-pins` it **reports and never adopts**: which of
 an upstream's changes generalises is a judgment every time, and the machine's job
 is to say where to look and how far you have already read. It itemises only the
