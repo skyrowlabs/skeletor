@@ -608,8 +608,9 @@ exists to prevent. It asserts `filesAnalyzed`, because pyright prints `0 errors`
 just as cheerfully when its `include` paths match nothing. It is the one gate
 that does not use `run()`: `--outputjson` writes its report to stdout and its
 complaints to stderr, so merging the streams makes the JSON unparseable at
-exactly the moment it carries the explanation. And it passes **`--pythonpath`**,
-which is the difference between a check and a coincidence.
+exactly the moment it carries the explanation. And it asserts that the tree's
+own **pin resolves to the interpreter this grid built**, which is the difference
+between a check and a coincidence.
 
 That last one shipped broken and CI caught it within the minute. pyright
 resolves imports against an interpreter it finds on PATH; it does **not** read
@@ -621,11 +622,31 @@ tiers were green; the CI runner's `setup-python` has no `click`, so
 `@group.command()` became an attribute access on an undecorated function, and
 `core`, `governed` and `agentic` came back with 24 errors apiece. Same tree,
 same pyright, opposite answers, decided by a package nobody installed on
-purpose — which is exactly what `pyrightconfig.json`'s own comment warns about,
-and it prescribes the remedy it does: *reproduce a CI result with
-`pyright --pythonpath <the CI interpreter>`*. Reproduce that condition locally
-by putting a click-free interpreter first on PATH; without `--pythonpath` it
-fails identically to CI, with it the two are indistinguishable.
+purpose — which is exactly what `pyrightconfig.json`'s own comment warns about.
+
+**That paragraph's remedy was measured true and then falsified by this
+repository, which is the more useful half.** `--pythonpath` was the whole fix
+until `eb23f34` added `venvPath` + `venv` to the template — and the pin
+*outranks the flag*. Measured on pyright 1.1.411, in a tree with a `.venv`: a
+deliberately click-free interpreter passed to `--pythonpath` still reports 0
+errors, and only breaking the pin brings the error back. `--pythonpath` and
+`--venvpath` are mutually exclusive, so there is no invocation that names an
+interpreter and overrides the config — while the pin resolves, the gate reads
+its interpreter *out of the artifact under test*, which is precisely the
+independence the comment beside it claimed the flag was preserving.
+
+Nothing was wrong with the answer; the grid symlinks `.venv` to the interpreter
+it built, so both routes name the same python. What was wrong was the reason,
+and a reason is what decides the next change. So the flag stays as the
+documented fallback for the no-`.venv` case, and `pyright_pin()` asserts the
+thing the flag was being credited with: the pin resolves, and resolves *here*.
+That assertion is the generator's by necessity —
+`tests/test_pyright_scope.py` declines it in as many words, because *pins* is
+not *resolves* and whether a `.venv` sits beside the config is a fact about the
+checkout, which is red in CI and red in an unprovisioned worktree for reasons
+that are not defects. The grid built the checkout, so it is the one caller
+entitled to ask. Found by reading jam.sense's `86e1ff754`, which corrected the
+same sentence in their tree a day earlier.
 
 A toolchain that cannot be fetched is skipped **loudly**, never silently.
 

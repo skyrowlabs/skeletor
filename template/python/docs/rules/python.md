@@ -47,9 +47,21 @@ Pyright resolves its interpreter from `PATH` and does **not** read a virtualenv 
 with `venvPath` + `venv`, which is the one place that reaches every caller — the pre-commit
 hook is `language: node` with `pass_filenames: false` and cannot pass a per-machine path.
 `tests/test_pyright_scope.py` holds that rule: the config pins, **or** every caller passes
-`--pythonpath`. Use the flag to check against a *different* interpreter than the pinned one,
-not to make an ordinary run correct. CI pins its dependency set in `.github/pyright-deps.txt`;
-keep that a superset of the unit-test job's installs.
+`--pythonpath`. CI pins its dependency set in `.github/pyright-deps.txt`; keep that a
+superset of the unit-test job's installs.
+
+**`--pythonpath` does not override the pin, and the two are not interchangeable.** Measured
+on pyright 1.1.411: with `venvPath` + `venv` resolving, passing a deliberately
+package-free interpreter to `--pythonpath` still reports **0 errors** — the config wins.
+Break the pin and the same flag reports the error, so it governs only where the pin falls
+through. `--pythonpath` and `--venvpath` are also mutually exclusive, so no single
+invocation both names an interpreter and overrides the config.
+
+So to check against a *different* interpreter than the pinned one, point the pin somewhere
+else — `pyright --venvpath <dir>`, or edit the config — rather than reaching for
+`--pythonpath` and reading an unchanged result as agreement. The flag's real job is the
+checkout where the pin cannot resolve: CI, and any worktree without a `.venv` beside its
+copy of the config.
 
 ## Pin the Lint Tools in One Place
 

@@ -386,6 +386,49 @@ def pyright_entry(tree: Path) -> List[str]:
     return match.group(1).split() if match else ["--project", "pyrightconfig.json"]
 
 
+#: A whole-line `//` comment in the rendered `pyrightconfig.json`. pyright parses
+#: that file as JSONC and it uses `//` rather than a `"//"` key deliberately —
+#: see the config's own comment. Only whole-line comments are stripped, which is
+#: the same reader and the same trade the tree makes in
+#: `tests/test_pyright_scope.py`: a `//` inside a string would need a real JSONC
+#: parser, and adding one to read three keys is not worth it in either place.
+_CONFIG_COMMENT = re.compile(r"^\s*//")
+
+
+def pyright_pin(tree: Path) -> Tuple[Optional[Path], str]:
+    """The interpreter the tree's own `pyrightconfig.json` resolves to, and how.
+
+    **This is the assertion the tree cannot make about itself**, and
+    `tests/test_pyright_scope.py` says so in as many words: *pins* is not
+    *resolves*, `venvPath` is relative to the config file, and whether a `.venv`
+    sits beside it is a fact about the checkout rather than the repository. That
+    test declines the question because it would be red in CI and red in every
+    unprovisioned worktree — both correct, neither a defect.
+
+    The generator has no such problem. It built this checkout and put the venv
+    there, so it knows the answer the tree is not entitled to assume, and
+    `pyright_gate` checks that answer rather than trusting it.
+    """
+    config = tree / "pyrightconfig.json"
+    if not config.exists():
+        return None, "pyrightconfig.json is missing"
+    kept = [line for line in config.read_text(encoding="utf-8").splitlines() if not _CONFIG_COMMENT.match(line)]
+    try:
+        parsed = json.loads("\n".join(kept))
+    except ValueError as exc:
+        return None, f"pyrightconfig.json does not parse as JSONC: {exc}"
+
+    if explicit := parsed.get("pythonPath"):
+        return (config.parent / explicit).resolve(), "pythonPath"
+    venv_path, venv = parsed.get("venvPath"), parsed.get("venv")
+    if not (venv_path and venv):
+        return None, "the config pins no interpreter (`pythonPath`, or `venvPath` + `venv`)"
+    interpreter = (config.parent / venv_path / venv / "bin" / "python").resolve()
+    if not interpreter.exists():
+        return None, f"`venvPath` + `venv` resolves to {interpreter}, which does not exist"
+    return interpreter, "venvPath + venv"
+
+
 def warm_pyright(venv_python: Path) -> Tuple[bool, str]:
     """Fetch pyright's node toolchain once, before any tree is gated.
 
@@ -420,20 +463,27 @@ def pyright_gate(tree: Path, venv_python: Path, available: bool) -> List[Result]
     # merging them makes the JSON unparseable exactly when it carries the
     # explanation. Keeping them apart is what lets a bad config report itself.
     proc = subprocess.run(
-        # `--pythonpath` is not optional here, and leaving it off is a green that
-        # means nothing. pyright resolves imports against an interpreter it picks
-        # off PATH; on its own it does NOT read the tree's `.venv`, symlinked or
-        # otherwise — so this gate silently checked whatever python the machine
-        # happened to offer.
+        # `--pythonpath` is the FALLBACK here, not the mechanism, and the
+        # difference was measured rather than reasoned. With `venvPath` + `venv`
+        # resolving — which is this grid's ordinary state, since the caller
+        # symlinks `.venv` into the tree before gating it — the config wins and
+        # this flag changes nothing: a deliberately click-free interpreter
+        # passed here still reports 0 errors under pyright 1.1.411. Break the
+        # pin and the flag governs again (1 error, same interpreter), so it is
+        # a real backstop for the tree that has no `.venv` and dead weight for
+        # the tree that has one. `--pythonpath` and `--venvpath` are mutually
+        # exclusive, so there is no invocation that names an interpreter AND
+        # overrides the config: while the pin resolves, this gate reads the
+        # artifact under test for its interpreter and cannot do otherwise.
         #
-        # The template now pins that too, with `venvPath` + `venv` in
-        # `pyrightconfig.json`, and this flag stays anyway. It is the generator
-        # checking a tree rather than the tree checking itself: taking the pin
-        # from the artifact under test would make this gate agree with whatever
-        # the template happens to ship, including nothing at all. What the pin
-        # is worth to an adopter is `tests/test_pyright_scope.py`'s question,
-        # asked inside the tree, where every caller can be seen. On a developer box with `click` installed system-wide that is
-        # every decorator resolved and a clean run; on a CI runner whose
+        # That is why `pyright_pin` exists beside this call. The independence
+        # this comment used to claim for the flag is unavailable, so it is
+        # asserted directly instead — the pin must resolve, and resolve to the
+        # interpreter this grid built.
+        #
+        # What both arrangements are guarding against is unchanged. On a
+        # developer box with `click` installed system-wide an unpinned run is
+        # every decorator resolved and a clean pass; on a CI runner whose
         # setup-python has no `click` it is 24 errors, because
         # `reportMissingImports` is `none`, so an unresolved `click.group` leaves
         # the function undecorated and `@group.command()` becomes an attribute
@@ -471,7 +521,24 @@ def pyright_gate(tree: Path, venv_python: Path, available: bool) -> List[Result]
         detail = f"{analyzed} files analyzed, no errors"
 
     ok = code == 0 and errors == 0 and analyzed > 20
-    return [Result(f"pyright ({analyzed} files)", ok, time.time() - started, detail)]
+    results = [Result(f"pyright ({analyzed} files)", ok, time.time() - started, detail)]
+
+    # Asserted rather than trusted, because the run above cannot tell you which
+    # interpreter it used. A pin that stopped resolving falls through to
+    # `--pythonpath` and reports the same clean 0 errors from this grid, where
+    # the flag happens to name the right interpreter — so the failure is
+    # invisible here and arrives in an adopter's pre-commit hook, which has no
+    # flag to fall through to.
+    resolved, how = pyright_pin(tree)
+    pin_ok = resolved == venv_python.resolve()
+    if resolved is None:
+        pin_detail = f"the tree's pyrightconfig.json pins no usable interpreter: {how}"
+    elif not pin_ok:
+        pin_detail = f"the pin ({how}) resolves to {resolved}, not the interpreter this grid built ({venv_python})"
+    else:
+        pin_detail = f"{how} → {resolved}"
+    results.append(Result("pyright pin resolves", pin_ok, 0.0, pin_detail))
+    return results
 
 
 def node_gates(tree: Path) -> List[Result]:
