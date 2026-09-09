@@ -116,7 +116,9 @@ Never commit directly to `{{RELEASE_BRANCH}}`.
 
 `gh pr create --draft`. Mark it ready only when you believe it is green.
 
-The expensive CI jobs are gated on draft status: a draft PR runs the cheap gate job alone.
+The expensive CI jobs are gated on draft status: a draft PR carrying code runs `node`,
+`unit-tests` and the gate, and skips `lint`, `integration` and `ui`. (A docs-only PR runs the
+gate alone whether it is draft or ready — that is the other rule, and it decides first.)
 Nothing is un-gated by this — GitHub blocks merging a draft regardless, and marking it ready
 fires `ready_for_review`, which runs the full set before it can merge.
 

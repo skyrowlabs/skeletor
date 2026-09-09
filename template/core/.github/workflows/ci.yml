@@ -33,6 +33,15 @@ name: CI
 # decision order is `.github/scripts/docs-only.cjs` and nowhere else — this
 # sentence said "draft PRs run the gate job alone" for five releases while the
 # script returned `docsOnly: false` for a draft, which runs two more.
+#
+# **Correcting it here corrected one of five homes.** The same claim was in
+# `AGENTS.md`, `.github/CONTRIBUTING.md`, the comment the draft-discipline
+# workflow posts onto contributors' pull requests — and, worst, in a summary
+# table inside `docs-only.cjs` itself, 119 lines from the code it summarised, in
+# the file this paragraph names as the single source. proto.pilot swept all five
+# from an adopted tree. A statement is not fixed when the authority is fixed: the
+# copies do not know they are copies, and the one in the authority's own comment
+# is the one a reader trusts most.
 
 on:
   pull_request:

@@ -8,7 +8,7 @@ git switch -c fix/<slug> {{BASE_BRANCH}}
 ./{{CLI}} check pre-push
 git commit                       # conventional; the hook enforces it
 gh pr create --draft --base {{BASE_BRANCH}}
-# ...iterate in draft; a draft runs the cheap gate job alone...
+# ...iterate in draft; a draft skips lint, integration and ui...
 gh pr ready <n>                  # once, when you believe it is green
 ```
 
@@ -31,9 +31,10 @@ hook enforces the format.
 ## Why drafts
 
 A `synchronize` event on a **ready** PR re-runs everything that PR earns. Open
-as a draft, push freely, flip to ready once. Nothing is un-gated by this —
-GitHub blocks merging a draft, and `ready_for_review` runs the full set before
-it can merge.
+as a draft, push freely, flip to ready once. A draft carrying code still runs
+`node`, `unit-tests` and the gate — what it skips is `lint`, `integration` and
+`ui`. Nothing is un-gated by this — GitHub blocks merging a draft, and
+`ready_for_review` runs the full set before it can merge.
 
 ## Docs are part of the change
 
