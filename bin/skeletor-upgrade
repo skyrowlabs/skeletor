@@ -508,6 +508,39 @@ def base_checkout(ref: str, workdir: Path, *, fatal: bool = True) -> Tuple[Optio
     return tree, tree, ref
 
 
+def head_checkout(ref: str, workdir: Path) -> Path:
+    """A detached worktree of skeletor at `ref`, to render *ours* from.
+
+    The mirror of `base_checkout`, and it exists for one reason: what an upgrade
+    records is `git describe` of whatever it rendered from, so an operator whose
+    checkout sits one commit past a tag hands every adopter a manifest stamped
+    `v0.24.0-1-g6f4a54e`. That is resolvable — while that commit is pushed and
+    unrewritten — and it is not a version anybody chose. node-zero, dream.doll
+    and stash.flow all recorded it in the same round, and none of them could pin
+    it: `.skeletor.json` says *do not hand-edit* on its first line, correctly.
+
+    Deliberately **not** validated against a tag list. The useful property is
+    that the ref is resolvable by the people who will read the manifest, and
+    that is a question about a remote rather than about this checkout — the
+    writing-path warning already asks it with `git ls-remote`, and asks it about
+    any ref. Refusing a non-tag here would be a rule enforced at the one place
+    it cannot be checked, which is this repository's own recurring failure.
+    """
+    tree = workdir / "head-checkout"
+    result = subprocess.run(
+        ["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(tree), ref],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        die(
+            f"cannot check out skeletor at '{ref}':\n   {result.stderr.strip()}\n"
+            "   --ref names a commit-ish in THIS skeletor checkout. `git -C "
+            f"{SKELETOR} tag --list` is the list."
+        )
+    return tree
+
+
 def files_under(root: Path) -> Dict[str, Path]:
     out: Dict[str, Path] = {}
     for path in sorted(root.rglob("*")):
@@ -1229,7 +1262,9 @@ def main() -> int:
             die(f"{MANIFEST_NAME} records no skeletor_ref — pass --from-dir or --no-base")
         else:
             scaffolded_dirty = ref.endswith("-dirty")
-            reachable, cleanup_worktree, ref = base_checkout(ref, workdir, fatal=not hashes)
+            reachable, base_cleanup, ref = base_checkout(ref, workdir, fatal=not hashes)
+            if base_cleanup is not None:
+                cleanup_worktrees.append(base_cleanup)
             if reachable is None:
                 # The history is gone, but the hashes can still say what is
                 # untouched. Degraded on purpose, and it says so.
@@ -1271,7 +1306,7 @@ def main() -> int:
             detail("template change: a file you never touched is replaced, one you edited merges or")
             detail("conflicts, one you declined stays declined. The new values are recorded only if")
             detail("this run applies everything — the same rule as the ref.")
-        render_with(SKELETOR, ours_args, head_tree)
+        render_with(head_src, ours_args, head_tree)
         head_files = files_under(head_tree)
         if set_args_applied:
             report_reach(SKELETOR, recorded, workdir, target, hashes, head_files, set_args_applied)
@@ -2276,7 +2311,7 @@ def main() -> int:
     finally:
         if cleanup_worktree is not None:
             subprocess.run(
-                ["git", "-C", str(SKELETOR), "worktree", "remove", "--force", str(cleanup_worktree)],
+                ["git", "-C", str(SKELETOR), "worktree", "remove", "--force", str(leftover)],
                 capture_output=True,
             )
         shutil.rmtree(workdir, ignore_errors=True)
