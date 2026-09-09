@@ -387,6 +387,12 @@ def refuse_a_dirty_tree(target: Path, ported: bool = False) -> None:
         detail("this tree is dirty before you port anything. Your hand-ports are safe: a")
         detail("conflicted file is never written by this tool, and --ported moves the record")
         detail("rather than the bytes. `git checkout -- .` still discards both at once.")
+        detail()
+        detail("What --ported does NOT protect is a file this upgrade ADDED and you then")
+        detail("deleted. The base has not advanced yet, so the manifest has never heard of")
+        detail("it, and a file the manifest does not name is a new file rather than a")
+        detail("decline — so this run renders it again. Delete it AFTER the base advances,")
+        detail("when the entry exists for your deletion to be read against.")
         return
     say("❌", f"{len(dirty)} tracked file(s) have uncommitted changes:")
     _list_dirty(dirty)
@@ -1144,6 +1150,16 @@ def main() -> int:
         "cleanly, exactly like any other upgrade.",
     )
     parser.add_argument(
+        "--ref",
+        metavar="REF",
+        help="render the template from this commit-ish in the skeletor checkout instead of "
+        "from its working tree, and record that as the base. Pin an upgrade to a released "
+        "tag: without it the version stamped into your manifest is whatever `git describe` "
+        "says where skeletor happens to be sitting, which is a value nobody chose and that "
+        "you cannot correct afterwards without hand-editing a file that says not to. "
+        "Affects only the head render; --from-dir still overrides the base.",
+    )
+    parser.add_argument(
         "--ported",
         action="store_true",
         help="assert every conflict and collision is resolved as you want it, and advance "
@@ -1175,7 +1191,11 @@ def main() -> int:
     hashes: Dict[str, str] = manifest.get("files") or {}
 
     workdir = Path(tempfile.mkdtemp(prefix="skeletor-upgrade-"))
-    cleanup_worktree: Optional[Path] = None
+    # A list, because `--ref` adds a second one. It was a single Optional while
+    # only the base could be a worktree, and a second assignment to that name
+    # would have leaked the first — silently, since `git worktree remove` on a
+    # deleted temp directory is somebody else's problem later.
+    cleanup_worktrees: List[Path] = []
     try:
         base_src: Optional[Path] = None
         scaffolded_dirty = False
@@ -2064,19 +2084,29 @@ def main() -> int:
             detail()
             commit = pre_upgrade or "<the commit you were on before this run>"
             detail("  PY=$(pwd)/.venv/bin/python          # the worktree gets none of its own")
-            detail(f"  git worktree add tmp/pre-upgrade {commit}")
+            detail(f"  git worktree add /tmp/pre-upgrade {commit}")
             detail("  $PY -m pytest tests/ --collect-only -q > /tmp/after.raw || echo '!! after: collection FAILED'")
-            detail("  (cd tmp/pre-upgrade && $PY -m pytest tests/ --collect-only -q) > /tmp/before.raw \\")
+            detail("  (cd /tmp/pre-upgrade && $PY -m pytest tests/ --collect-only -q) > /tmp/before.raw \\")
             detail("     || echo '!! before: collection FAILED'")
-            detail("  git worktree remove tmp/pre-upgrade")
+            detail("  git worktree remove /tmp/pre-upgrade")
             detail("  grep :: /tmp/before.raw | sort > /tmp/before.txt")
             detail("  grep :: /tmp/after.raw | sort > /tmp/after.txt")
             detail("  diff /tmp/before.txt /tmp/after.txt")
             detail()
-            detail("Under `tmp/`, which this tree already gitignores, and not `../` — stash.flow")
-            detail("followed it into a workspace root holding every repo as a sibling, where a")
-            detail("leftover `pre-upgrade/` reads as one more project. The location says what it")
-            detail("is even if the removal line gets skipped.")
+            detail("Outside the repository, and not `../` — stash.flow followed an earlier")
+            detail("version of this into a workspace root holding every repo as a sibling, where")
+            detail("a leftover `pre-upgrade/` reads as one more project. `/tmp` is neither: the")
+            detail("machine clears it, and `git worktree prune` collects the registration if the")
+            detail("removal line gets skipped.")
+            detail()
+            detail("It was `tmp/` for two releases, on the argument that a gitignored directory")
+            detail("inside the tree names itself. It does — and it is inside the tree, which is")
+            detail("what the next two paragraphs are about: a recipe whose own scratch is a")
+            detail("member of the population it asks you to diff. proto.pilot's point, and the")
+            detail("reason they are now history rather than instructions. Both hazards below")
+            detail("were caused by the location and are closed by moving it; the *lessons* stay,")
+            detail("because a suite that walks the filesystem is still unstable under any other")
+            detail("scratch that lands in the tree.")
             detail()
             detail("The `tests/` scope and the exit-code check are one fix, not two. An unscoped")
             detail("`pytest` descends into tmp/pre-upgrade while the worktree is there, finds every")
