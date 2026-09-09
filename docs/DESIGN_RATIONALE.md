@@ -4397,6 +4397,158 @@ subject.* A fresh scaffold records the flag, so the population of fresh scaffold
 contains no tree whose default is ever consulted — and the gate was confident
 about exactly that population.
 
+### The reference of a comparison is a choice, and an inherited one is a claim
+
+`bin/skeletor-upgrade` prints a block headed *"file(s) skeletor wrote and you
+have edited — standing state"*. It is computed by hashing what is on disk
+against what skeletor produces, which is a sound comparison and was made against
+the wrong side of it.
+
+The list was measured against the **recorded** manifest, always, and the code
+carried a comment arguing for that: computing it after the write loop would
+"under-count exactly on the runs that changed the most". That is true if you
+take an applied file to be a divergence, and an applied file is the opposite of
+one — it was replaced *because* nobody had touched it.
+
+The cost lands on the flow this tool documents. Run once, port the conflicts by
+hand, re-run with `--ported`: on that second run every file the first run wrote
+still differs from the base the second run has not yet replaced, so all of it is
+listed under a heading asserting each entry is a decision the reader made.
+node-zero measured 15 names with 11 of them the previous run's own output;
+dream.doll watched the same list vanish on the next dry run, which is the tell —
+standing state does not evaporate.
+
+Both were separate trees, and neither reported a data bug: both verified the
+manifest afterwards and it was correct. **The bytes were right and the sentence
+over them was wrong**, which is this repository's most common defect and the one
+no test of the mechanism reaches.
+
+The fix names the rule: *measured against the base that will be in force when
+this is read.* One function, `standing_divergence(target, reference)`, called
+with the recorded manifest for a dry run or a held-back one, and with the head
+render for a run that advances. `diverged` also joins the `--json` envelope,
+because a consumer left to infer a field the report prints will infer the
+version the report used to have.
+
+Reaching it needed the fixture `pending_ref_gate` already builds — a real
+version gap plus a real conflicting edit — and no other gate could. Every other
+upgrade gate runs against a fresh scaffold, where nothing applies and nothing
+conflicts, so the two candidate bases are the same map and the wrong one is
+indistinguishable from the right one. The same fixture, for the same reason, is
+why the manifest-advance bug lived to be reported from outside.
+
+### A summary table inside the file it summarises
+
+`ci.yml`'s header says the CI decision order is `.github/scripts/docs-only.cjs`
+"and nowhere else", and it says so in a paragraph correcting an earlier sentence
+that had claimed draft PRs run the gate job alone for five releases. Correcting
+it corrected one of five homes. The claim survived in `AGENTS.md`, in
+`.github/CONTRIBUTING.md`, in the comment the draft-discipline workflow posts
+onto contributors' pull requests — and in a summary table inside `docs-only.cjs`
+itself, 119 lines from the code it summarises, disagreeing with it.
+
+That last one is the interesting one. It is in the file the surrounding prose
+names as the single source, so it inherits that file's authority while being
+prose like any other copy. A reader who follows the instruction — *go read the
+script* — lands on the table before the code and has no reason to keep reading.
+
+proto.pilot found all four survivors from an adopted tree and declined to fix
+them locally, on the grounds that a prose divergence in a file the template is
+actively revising is a permanent conflict. That is the right call and it is also
+the general lesson stated backwards: **a statement is not fixed when its
+authority is fixed, because the copies do not know they are copies.** The
+partition gate `tests/test_pre_push_covers_ci.py` was built for exactly this
+shape at a different artifact, and its own write-up records that fixing the
+command's docstring left four restatements standing. This is that, again, with
+one of the restatements living inside the authority.
+
+No gate was added. A prose gate over five sentences in four languages has the
+false-positive profile this repository has twice declined, and the honest move
+is to record the drift where the next reader will meet it — which is now a
+paragraph in `ci.yml`'s own header, beside the correction that missed.
+
+### Zero of something can be a configuration, and sizing a scan says otherwise
+
+`tests/test_pyright_deps.py` asserts that the environment pyright sees in CI is
+declared in one file and is a superset of what the test jobs install. Both ends
+of the scan were sized with `scanned()`, on the rule this repository states
+everywhere: a negative assertion over an empty set is a tautology, and a green
+one looks identical whether the thing did not happen or nobody looked.
+
+The rule is right and it was applied to a set where zero is a legitimate answer.
+A tree whose CI does not type-check has no jobs running pyright, and `least=1`
+reports that as *the scan broke* — a sentence with the opposite remedy to the
+truth. sky.boss hit it, and the escape as shipped was deleting the file, which
+takes with it the superset rule that had **fired with a true finding
+underneath**.
+
+The discriminator is a fact the tree states rather than one the scan infers:
+`.github/pyright-deps.txt` existing is the declaration. That gives a 2x2 whose
+diagonal is the failure —
+
+| | no pyright job | a pyright job |
+|---|---|---|
+| **no `pyright-deps.txt`** | this tree does not type-check in CI | a job checks an environment nothing declares |
+| **`pyright-deps.txt` present** | a dead declaration | everything applies |
+
+— and both non-failing corners carry a real assertion rather than a skip, since
+`skip_budget.json` ships at 0 and a suite that goes quiet by emitting skips is a
+ratchet failure wearing a configuration's clothes.
+
+This is the `scheduled=False` split one registry over: one flag meaning both
+*cannot run* and *nothing to run yet*, which expire differently and only one of
+them silently. The tell is the same both times — **the only escape offered was
+deletion**, and a rule you can only satisfy by removing it is describing the
+wrong set.
+
+### A gate that enforces a ruling can become the ruling's second home
+
+`scripts/paths.py` argues at length that `docs/business-planning/` is
+deliberately not narrative, and tells an adopter who keeps code-shaped proposals
+there to append it to `NARRATIVE` — with a whole block on *why an append and not
+an edit*, measured against `git merge-file`.
+
+The gate written to hold that partition, `test_narrative_covers_lifecycle_folders.py`,
+shipped its own `PRESENT_TENSE` dict carrying the same ruling with the same
+reason. So the invitation was answerable only by editing a template-owned literal
+inside a shipped test — the exact divergence the append seam exists to prevent,
+one file over — and the test said so, in a failure message reading *delete the
+entry*. dream.doll hit the classification half and stash.flow the staleness half,
+independently, from real runs, on the same day.
+
+Both halves of the partition now live beside each other in `scripts/paths.py`,
+and the test reads them. Nothing about the checking changed.
+
+What generalises is the direction of the mistake. The dict was not a careless
+copy; it was written *by the work of building the gate*, because a gate needs its
+exemptions in hand and the nearest place to put them is the gate. **A rule and
+its enforcement are different artifacts, and the enforcement is where a second
+copy of the rule gets created by people who know better** — the same reason
+`.skeletor.json` records what the scaffolder did rather than what a second reader
+of the format could reconstruct.
+
+### Two absences with opposite remedies
+
+`scripts/gen_vscode_queries.py --check` failed a missing `.vscode/settings.json`
+with *"Create it with: python3 scripts/gen_vscode_queries.py"*. For an adopter
+whose `.gitignore` predates the flag, that instruction is wrong in the
+reassuring direction: creating the file makes the check pass, and the next fresh
+clone is red again, because the file was never committable. mind.head reported
+it; the gate's verdict otherwise turns on whether the machine running it has
+opened the repository in an editor.
+
+This template ships `.idea/` in `.gitignore` and deliberately not `.vscode/`, so
+the collision cannot occur here — which is why the probe is a `git check-ignore`
+question rather than a rule about our own ignore file. One subprocess separates
+*the file has not been generated* from *this repository cannot keep it*, and
+names two remedies instead of the wrong one.
+
+Third instance of a shape this file already carries twice: the frontmatter
+parser tolerating what it could not represent alongside what it could not find,
+and `bin/skeletor-maintain` printing a green line for questions no registry
+answered. **"It is not here" and "it cannot be here" are different answers, and
+only one of them can be acted on.**
+
 ## Honest assessment: what is over-built
 
 Not everything here is worth copying, and the shell reflects that.

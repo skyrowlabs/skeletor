@@ -89,6 +89,7 @@ bin/skeletor-components report ../target            # what moved upstream since 
 bin/skeletor-upgrade ../target --dry-run
 bin/skeletor-upgrade ../target
 bin/skeletor-upgrade ../target --ported   # I resolved the conflicts; advance the base
+bin/skeletor-upgrade ../target --ref v0.24.0   # pin the head render to a released tag
 ```
 
 There is no test suite for skeletor itself. **The scaffold IS the test**: a
@@ -1039,9 +1040,10 @@ a workflow can run the same procedure instead of three copies of it.
 
 
 
-**What an upgrade renders from is the live checkout, and the report now says
-where that stands.** There is no `--ref`; `--from-dir` overrides the *base*. The
-only question ever asked about the rendering checkout was *is it dirty*, so
+**What an upgrade renders from is the live checkout by default, and the report
+says where that stands.** `--from-dir` overrides the *base*; `--ref` overrides
+the *head*. The only question ever asked about the rendering checkout was *is it
+dirty*, so
 committing unreleased work silenced the caveat while changing nothing about
 whether an adopter could reach it — stash.flow was blocked twice by the same 52
 lines and got a warning only the first time, on identical plans. `head_standing()`
@@ -1051,6 +1053,60 @@ needs `git worktree add`), while **untagged is an adopter's policy** and this
 tool holds no opinion about it. The `⚠️` is on the writing path only, because an
 unpushed HEAD is the normal state between a commit and a push here and a warning
 that fires through every grid run is one nobody reads.
+
+**`--ref` is the adopter's answer to the rung above, and it arrived because
+three trees hit the same thing in one round.** What gets stamped is `git
+describe` of whatever was rendered, so an operator sitting one commit past a
+release hands every adopter `v0.24.0-1-g6f4a54e` — resolvable while that commit
+is pushed and unrewritten, and a version nobody chose. node-zero, dream.doll and
+stash.flow each recorded one, and none of them could pin it: `.skeletor.json`
+says *do not hand-edit* on its first line, correctly. `--ref v0.24.0` renders
+`ours` from a detached worktree at that ref, so the stamp is the tag exactly,
+and a committed ref makes both the dirty warning and the dirty refusal
+inapplicable by construction.
+
+Deliberately **not** validated against a tag list, which is what was asked for.
+The useful property is that the ref resolves for the people who will read the
+manifest, and that is a question about a remote rather than about this checkout
+— the writing path already asks it with `git ls-remote`, about any ref. A
+tags-only rule would be enforced at the one place that cannot check the thing it
+is standing in for.
+
+`pinned_ref_gate` asserts the stamp is the tag with no `-N-gsha` suffix, read
+out of the run's own standing line rather than echoed from the flag, so a flag
+accepted and ignored fails. Its other half is that no worktree is left
+registered: `--ref` is the second `git worktree add` this tool can make, the
+cleanup slot was a single `Optional[Path]`, and a second assignment to that name
+drops the first in silence. The reader who pays is `bin/skeletor-maintain`,
+whose own first lesson was a linked worktree it mistook for the repository.
+
+**The `standing state` block is measured against the base that will be in force
+when it is read**, which is a choice the code was making by inheritance. It
+compared disk to the *recorded* manifest always — right for a dry run and for a
+run that holds the base back, wrong for one that advances, and wrong hardest in
+the flow this tool documents: run, port by hand, re-run `--ported`. On that
+second run everything the first run wrote still differs from a base not yet
+replaced, so it is all listed under a heading asserting each entry is a decision
+the reader made. node-zero measured 15 names with 11 of them the previous run's
+output; dream.doll watched the list evaporate on the next dry run, which is the
+tell. Neither was a data bug — both verified the manifest and it was correct.
+The bytes were right and the sentence over them was wrong.
+
+The comment that had been there argued for the recorded base on the grounds that
+a post-write reading "under-counts on the runs that changed the most" — true only
+if an applied file is a divergence, and an applied file is the opposite of one,
+having been replaced *because* nobody touched it. `standing_divergence()` is one
+function taking the reference as a parameter, and `diverged` joins the `--json`
+envelope for the reason `head_ref` did. `pending_ref_gate` grew the assertion,
+and no other gate could carry it: every other upgrade gate runs against a fresh
+scaffold, where the two candidate bases are the same map.
+
+**`--ported` does not protect an addition**, which the help text claimed by
+omission. A conflicted file is never written, so the flag moves the record and
+not your bytes — for conflicts. It is a *re-run*, so a file the upgrade added
+and you deleted in between is still absent from the manifest, still reads as
+new, and is written again. Port, then `--ported`, then delete what you did not
+want. mind.head found it by doing it in the other order.
 
 **`upstream.json` is provenance in the other direction, and it exists because
 that direction had been recorded backwards.** skeletor was extracted from one
