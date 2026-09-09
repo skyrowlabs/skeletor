@@ -50,9 +50,9 @@ from typing import Dict, List
 # every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.lanes import LANES, drain_note, labels  # noqa: E402
+from scripts.lanes import LANES, drain_note, job_registry, labels  # noqa: E402
 from scripts.output import detail, emit, fail, item, ok  # noqa: E402
-from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
+from scripts.paths import PROJECT_ROOT  # noqa: E402
 
 SETTINGS = PROJECT_ROOT / ".vscode" / "settings.json"
 
@@ -134,12 +134,14 @@ def _has_unattended_committer() -> bool:
     False at every tier that ships no job registry, which is the honest answer
     rather than a degraded one: a tree with no scheduler has nothing running
     overnight, so the drafts in it are the ones a person left open.
-    """
-    if not (SCRIPTS_DIR / "reporting" / "jobs.py").exists():
-        return False
-    from scripts.reporting import jobs  # noqa: PLC0415
 
-    return any(getattr(job, "commits", False) for job in jobs.JOBS)
+    The optional import lives in `scripts/lanes.py::job_registry`, which carries
+    the reason and the static-checker limit. This used to be a second copy of
+    that construct — and mind.head reported the limit from the copy rather than
+    the original, which is what two homes buys you.
+    """
+    registry = job_registry()
+    return registry is not None and any(getattr(job, "commits", False) for job in registry.JOBS)
 
 
 #: These keys sit INSIDE the settings object, so every line after the first
