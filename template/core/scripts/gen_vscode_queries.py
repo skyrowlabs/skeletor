@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, List
@@ -296,6 +297,28 @@ def splice(text: str, generated: str) -> str:
     return text[:start] + generated + text[end + len(END) :]
 
 
+def _is_ignored(path: Path) -> bool:
+    """Does git ignore this path *and* not track it? ``False`` when git cannot say.
+
+    `check-ignore` exits 0 for ignored, 1 for not, and non-zero-not-1 for "this
+    is not a repository" — which is a scaffold before its first commit, and not
+    a diagnosis worth printing. Silence is the right answer there: the caller
+    falls through to the ordinary instruction, which is correct in that tree.
+
+    **It consults the index, and that is the load-bearing half.** A tracked path
+    reports *not ignored* even when a rule matches it, because tracking wins — so
+    a file that is tracked and merely deleted from the working tree falls through
+    to `create it`, correctly, and only a path that is ignored *and* untracked
+    gets the other message. That conjunction is exactly the claim being made, and
+    it comes free rather than being assembled here. Measured in both states.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(PROJECT_ROOT), "check-ignore", "-q", str(path)],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail if the file is not current; write nothing")
@@ -304,7 +327,25 @@ def main() -> int:
 
     if not SETTINGS.exists():
         if args.check:
-            fail(f"{SETTINGS.relative_to(PROJECT_ROOT)} is missing")
+            rel = SETTINGS.relative_to(PROJECT_ROOT)
+            fail(f"{rel} is missing")
+            if _is_ignored(SETTINGS):
+                # The two ways this file can be absent look identical from the
+                # filesystem and have opposite remedies, and the wrong one is
+                # the reassuring one: `create it` succeeds, this check passes,
+                # and the next fresh clone is red again because the file was
+                # never committed. mind.head reported it from a tree whose
+                # `.gitignore` predated this generator. This template does NOT
+                # ignore `.vscode/` — it ignores `.idea/` and stops — so the
+                # collision is invisible here by construction, which is why the
+                # probe is a `git` question rather than a rule about our own
+                # ignore file.
+                detail("...and your .gitignore ignores it, which is why a clean checkout has none.")
+                detail("Generating it again will not change that. Decide which you want:")
+                detail("  * tracked — un-ignore the path, generate, and commit it; or")
+                detail("  * untracked — drop this check from `{{CLI}} check docs`, and every")
+                detail("    reader generates their own.")
+                return 1
             detail("Create it with: python3 scripts/gen_vscode_queries.py")
             return 1
         SETTINGS.parent.mkdir(parents=True, exist_ok=True)
