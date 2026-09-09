@@ -27,7 +27,15 @@ has the second of those to write, and this says so rather than reporting an
 absence.
 
 None of the three needs a model. If all are clean this exits having spent
-nothing, and an agent is never invoked. If any is not, there is a specific thing to look at,
+nothing, and an agent is never invoked.
+
+**Two of them can also fail to be ASKED**, and that is not the same as clean.
+CI may be unreachable and a registry may not answer; a fresh clone declares no
+upstream at all. None of those is work — none wakes an agent — and none is a
+pass either, so each prints a `⚠️` and drops its clause from the green line.
+The summary names the questions that were answered, never the ones that were
+asked. It used to be a fixed string naming all three, which made every
+unanswerable question report the reassuring answer. If any is not, there is a specific thing to look at,
 and `--agent` hands over with that context rather than asking a model to go
 looking for work — which is how a maintenance bot becomes a thing people mute.
 
@@ -45,6 +53,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib.machinery
+import importlib.util
 import json
 import os
 import shutil
@@ -112,10 +122,55 @@ def ci_verdict() -> Tuple[str, str]:
     return conclusion, f"{conclusion}: {last.get('displayTitle', '')}\n   {last.get('url', '')}"
 
 
-def pin_verdict() -> Tuple[bool, str]:
-    """Whether any pin is behind or disagreeing, via check-pins' own exit code."""
-    code, output = run([sys.executable, str(SKELETOR / "bin" / "skeletor-check-pins"), "--fail-on-stale"])
-    return code != 0, output.strip()
+def load_tool(path: Path, name: str):
+    """Import one of the sibling `bin/skeletor-*` tools for what it computes.
+
+    They have no `.py` suffix, so the import is by path; everything at their
+    module level is a definition and `main()` is guarded. `bin/skeletor-verify`
+    is built on this habit for the same reason — reading a tool's own answer
+    beats a second copy of how to derive it.
+    """
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(name, loader))
+    sys.modules[name] = module
+    loader.exec_module(module)
+    return module
+
+
+def pin_verdict() -> Tuple[bool, str, bool]:
+    """Whether any pin is behind or disagreeing — and whether every pin was reachable.
+
+    **In-process, and the third return value is why.** This ran `check-pins
+    --fail-on-stale` as a subprocess and read its exit code, which is a sound
+    answer to *is there work* and no answer at all to *did we find out*.
+    `--fail-on-stale` deliberately does not fail on `unknown`, and its reason is
+    right there and is correct: an unreachable registry is not evidence of
+    staleness, and a gate that goes red on a network blip is one people learn to
+    ignore. **Not blocking on a question is not the same as answering it** — the
+    summary went on to say every pin is current or allowlisted, having been told
+    only that nothing it could reach was behind.
+
+    That is the third instance of one defect in one sentence, after CI and
+    upstream. All three had the argument written down somewhere in this file
+    before any of them was applied to the line where the claim is actually made.
+
+    Reading `evaluate()` directly costs the same single registry sweep the exit
+    code did, and returns findings instead of a number — so the human table
+    below and the verdict above it come from one call rather than two, and there
+    is no second copy of how a status is classified.
+    """
+    pins = load_tool(SKELETOR / "bin" / "skeletor-check-pins", "skeletor_check_pins")
+    findings = pins.evaluate()
+    stale = pins.stale_exemptions(findings)
+    blocking = [f for f in findings if f.status in ("behind", "disagrees")]
+
+    report = pins.render(findings, False)
+    if stale:
+        report += "\n\n🅰️  " + f"{len(stale)} allowlist entry/entries no longer exempt anything:\n"
+        report += "\n".join(f"   · {line}" for line in stale)
+
+    unreachable = [f.pin.key for f in findings if f.status == "unknown"]
+    return bool(blocking or stale), report.strip(), not unreachable
 
 
 def normalise_origin(raw: str) -> str:
@@ -231,7 +286,7 @@ def find_checkout(origin: str, root: Path) -> Optional[Path]:
     return None
 
 
-def upstream_verdict() -> Tuple[bool, str]:
+def upstream_verdict() -> Tuple[bool, str, bool]:
     """Has anything moved in a repository this template harvests mechanisms from?
 
     The third cheap question, and the only one that looks outside this
@@ -250,18 +305,27 @@ def upstream_verdict() -> Tuple[bool, str]:
     Silence is never a pass. An upstream that cannot be located is reported as
     unreadable rather than as unchanged, since the two are the same output from
     here and only one of them means there is nothing to do.
+
+    **The third return value is whether that question was ANSWERED at all**, and
+    it exists because the paragraph above was true of one case and the code was
+    not. A declared upstream that cannot be found is reported as unreadable,
+    correctly. *Nothing declared* fell straight past it into the summary, which
+    then said `nothing has moved in a harvested path upstream` — a positive
+    claim about a question this run never asked. The rule was written one screen
+    above the code that broke it.
+
+    A fresh clone having no configuration is the ordinary state and not a
+    failure, so this is not work and wakes nobody. It is simply not a pass
+    either, and the caller has to be able to tell those apart.
     """
     declared, root, source = declared_upstreams()
     if not declared:
-        # Not a failure, and not silence either. A checkout with nothing
-        # declared is the ordinary state of a fresh clone — this repository
-        # ships the RECORD and not the configuration — so it says what to write
-        # rather than reporting an absence somebody has to go and interpret.
         return False, (
-            f"   nothing declared. {UPSTREAMS.name} is the public record; the repositories to watch\n"
-            f"   go in {LOCAL_UPSTREAMS.name} (gitignored) — see the `upstreams` comment in\n"
-            f"   {UPSTREAMS.name} for the shape."
-        )
+            f"   nothing declared — this checkout watches no upstream, so \"nothing has moved\"\n"
+            f"   is not a claim this run can make. {UPSTREAMS.name} is the public record; the\n"
+            f"   repositories to watch go in {LOCAL_UPSTREAMS.name} (gitignored) — see the\n"
+            f"   `upstreams` comment in {UPSTREAMS.name} for the shape."
+        ), False
 
     lines: List[str] = []
     work = False
@@ -341,7 +405,7 @@ def upstream_verdict() -> Tuple[bool, str]:
         if touched:
             work = True
 
-    return work, "\n".join(lines)
+    return work, "\n".join(lines), True
 
 
 AGENT_PROMPT = f"""\
@@ -382,12 +446,13 @@ def main() -> int:
     unpulled = behind.strip() if code == 0 else "0"
 
     conclusion, ci_detail = ci_verdict()
-    stale, pins_detail = pin_verdict()
-    upstream_moved, upstream_detail = upstream_verdict()
+    stale, pins_detail, pins_measured = pin_verdict()
+    upstream_moved, upstream_detail, upstream_measured = upstream_verdict()
 
     print(f"skeletor maintenance — {RELEASE_BRANCH}")
     print(f"   CI:   {ci_detail}")
-    print(f"   pins: {'something is behind or disagrees' if stale else 'all current or allowlisted'}")
+    pins_line = "something is behind or disagrees" if stale else "all current or allowlisted"
+    print(f"   pins: {pins_line if pins_measured else pins_line + ' (of the ones a registry answered for)'}")
     print("   from upstream:")
     print(upstream_detail)
     if unpulled not in ("0", ""):
@@ -402,6 +467,16 @@ def main() -> int:
         # pass that quietly treats it as green is indistinguishable from one that
         # checked. It is not by itself work, so it does not wake an agent.
         print(f"⚠️  CI verdict unavailable — {ci_detail}")
+    if not pins_measured:
+        # Third instance, same rule. `--fail-on-stale` is right not to block on
+        # an unreachable registry; that is not a licence to report the pin as
+        # current, which is what the summary below did.
+        print("⚠️  a registry could not be reached — some pins were not checked at all")
+    if not upstream_measured:
+        # The same rule for the same reason, and it was missing here while the
+        # line above had it. Not work — a fresh clone legitimately watches
+        # nothing — but not an answer either.
+        print(f"⚠️  no upstream is being watched from this checkout — write {LOCAL_UPSTREAMS.name} to start")
     if stale:
         work.append(f"`bin/skeletor-check-pins` reports work:\n\n```\n{pins_detail}\n```")
     if upstream_moved:
@@ -414,8 +489,34 @@ def main() -> int:
         )
 
     if not work:
-        print("✅ nothing to do — CI is green, every pin is current or allowlisted, "
-              "and nothing has moved in a harvested path upstream")
+        # **Composed from the questions that were ANSWERED, never from the ones
+        # that were asked.** This line used to be a fixed string naming all
+        # three, so a run that could not read CI still reported "CI is green"
+        # and a checkout watching nothing still reported "nothing has moved
+        # upstream" — each a positive claim about something never established,
+        # printed under a ✅ and returning 0.
+        #
+        # Both halves of that were already written down and neither was applied
+        # here: `upstream_verdict`'s own docstring says silence is never a pass,
+        # and the `⚠️` above says an unreadable verdict is not a green one. The
+        # summary is where those claims are actually made, so it is where the
+        # distinction has to survive.
+        established = []
+        if conclusion == "success":
+            established.append("CI is green")
+        if pins_measured:
+            established.append("every pin is current or allowlisted")
+        if upstream_measured:
+            established.append("nothing has moved in a harvested path upstream")
+        # Every clause can now be absent, which the first version of this could
+        # not express — it seeded the list with the pin claim, on the assumption
+        # that one question is always answered. Nothing is: a run with no
+        # network and no local config establishes none of the three and must
+        # say so rather than printing a ✅ with an empty sentence after it.
+        if established:
+            print("✅ nothing to do — " + ", ".join(established))
+        else:
+            print("✅ no work found — and nothing above was actually established; see the warnings")
         return 0
 
     print("── work ──")

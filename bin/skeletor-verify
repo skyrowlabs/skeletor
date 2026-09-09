@@ -35,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -6822,6 +6823,154 @@ def identity_gate() -> Result:
     )
 
 
+def maintain_summary_gate() -> List[Result]:
+    """`skeletor-maintain`'s green line names only the questions it answered.
+
+    That summary is the whole output of a run on the ~50 weeks a year when there
+    is nothing to do, so it is the sentence anybody actually reads — and it was
+    a fixed string naming all three questions, every one of which could be
+    false. A run that could not reach CI still reported *CI is green*; a
+    checkout watching no upstream still reported *nothing has moved in a
+    harvested path upstream*; a sweep no registry answered still reported *every
+    pin is current or allowlisted*. Each is a positive claim about something the
+    run never established, printed under a ✅ and returning 0.
+
+    **The argument was written down beside all three and applied to none.**
+    `upstream_verdict`'s own docstring says silence is never a pass; the `⚠️`
+    for an unreadable CI verdict says in a comment that quietly treating unknown
+    as green is indistinguishable from having checked; and `check-pins`'
+    `--fail-on-stale` explains, correctly, that an unreachable registry is no
+    evidence of staleness. That last one is the sharpest because it is right:
+    **not blocking on a question is not the same as answering it**, and the
+    reason not to go red was reused as a reason to go green. Naming a failure
+    mode does not immunise you against it.
+
+    Two layers, because one was measurably not enough.
+
+    **Reporting.** Each question is planted as unanswered and its clause must
+    disappear; the all-answered case must name all three, which is what stops
+    the over-correction, since a summary that dropped every clause is equally
+    green and less useful; and the case where *nothing* was established is
+    planted too, because the first fix seeded the list with the pin claim on the
+    assumption that one question is always answered. None is.
+
+    **Derivation.** Those stub the verdict functions, so they say how an answer
+    is reported and nothing about how one is reached — not a guess: putting a
+    hardcoded `True` back into `pin_verdict` left the layer above green. So the
+    second layer replaces the tool `pin_verdict` reads with one whose every
+    finding is `unknown`, and `declared_upstreams` with one that declares
+    nothing. The CI half needs no equivalent, since `main` reads the conclusion
+    directly and the reporting layer covers it.
+
+    A real run is deliberately never made here — that would make this a test of
+    the network — and every plant above was executed against this gate before it
+    was believed.
+    """
+    started = time.time()
+    maintain = SKELETOR / "bin" / "skeletor-maintain"
+    if not maintain.exists():
+        return [Result("maintain summary", False, 0.0, "bin/skeletor-maintain is missing")]
+
+    CI_CLAUSE, PIN_CLAUSE, UPSTREAM_CLAUSE = "CI is green", "every pin is", "harvested path upstream"
+
+    def summary_for(conclusion: str, pins_measured: bool, measured: bool) -> str:
+        loader = importlib.machinery.SourceFileLoader("_maintain_under_test", str(maintain))
+        module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+        sys.modules[loader.name] = module
+        try:
+            loader.exec_module(module)
+            module.refuse_if_unsafe = lambda: None
+            module.run = lambda _cmd: (0, "")  # no fetch, no rev-list: this is not a git test
+            module.ci_verdict = lambda: (conclusion, "stubbed")
+            module.pin_verdict = lambda: (False, "", pins_measured)
+            module.upstream_verdict = lambda: (False, "   stubbed", measured)
+            buffer = io.StringIO()
+            argv, stdout = sys.argv, sys.stdout
+            try:
+                sys.argv, sys.stdout = ["skeletor-maintain"], buffer
+                module.main()
+            finally:
+                sys.argv, sys.stdout = argv, stdout
+            return next((line for line in buffer.getvalue().splitlines() if line.startswith("✅")), "")
+        finally:
+            sys.modules.pop(loader.name, None)
+
+    findings = []
+    everything = summary_for("success", True, True)
+    absent = [c for c in (CI_CLAUSE, PIN_CLAUSE, UPSTREAM_CLAUSE) if c not in everything]
+    if absent:
+        findings.append(f"with every question answered the summary omitted {absent}: {everything!r}")
+
+    # One question unanswered at a time, so a finding names which clause
+    # survived a question nobody asked rather than reporting three at once.
+    for label, unanswered, clause in (
+        ("an unreadable CI verdict", summary_for("unknown", True, True), CI_CLAUSE),
+        ("an unreachable registry", summary_for("success", False, True), PIN_CLAUSE),
+        ("a checkout watching no upstream", summary_for("success", True, False), UPSTREAM_CLAUSE),
+    ):
+        if clause in unanswered:
+            findings.append(f"{label} still reported {clause!r}: {unanswered!r}")
+
+    # The degenerate case the first draft could not express: nothing answered.
+    # A ✅ with an empty sentence after it is the same false reassurance in a
+    # shorter form, and seeding the list with any one claim is what produces it.
+    nothing = summary_for("unknown", False, False)
+    still_claimed = [c for c in (CI_CLAUSE, PIN_CLAUSE, UPSTREAM_CLAUSE) if c in nothing]
+    if still_claimed or nothing.rstrip().endswith("—"):
+        findings.append(f"with nothing established the summary still claimed {still_claimed or 'nothing at all'}: {nothing!r}")
+
+    # The block above stubs the verdicts, so it establishes how an answer is
+    # REPORTED and nothing about how one is DERIVED. Planting `pin_verdict`
+    # returning a hardcoded `True` left it green — the defect recurring at its
+    # source rather than at the sentence. So the derivation gets its own plant,
+    # one layer down: the tool `pin_verdict` reads is replaced with one whose
+    # every finding is `unknown`, and the verdict must come back unmeasured.
+    #
+    # `upstream_verdict` takes the same treatment through `declared_upstreams`.
+    # The CI half needs none: `main` reads `conclusion == "success"` directly,
+    # which the report assertions above already cover.
+    loader = importlib.machinery.SourceFileLoader("_maintain_derivation", str(maintain))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    sys.modules[loader.name] = module
+    try:
+        loader.exec_module(module)
+
+        class _Unreachable:
+            """Every pin looked up and no registry answered — the network case."""
+
+            @staticmethod
+            def evaluate():
+                return [types.SimpleNamespace(status="unknown", pin=types.SimpleNamespace(key="npm:nothing"))]
+
+            @staticmethod
+            def stale_exemptions(_findings):
+                return []
+
+            @staticmethod
+            def render(_findings, _markdown):
+                return "❔ npm:nothing"
+
+        module.load_tool = lambda _path, _name: _Unreachable
+        if module.pin_verdict()[2]:
+            findings.append("pin_verdict reported every pin measured while every finding was 'unknown'")
+
+        module.declared_upstreams = lambda: ({}, Path("/nonexistent"), "stub")
+        if module.upstream_verdict()[2]:
+            findings.append("upstream_verdict reported the question answered with nothing declared")
+    finally:
+        sys.modules.pop(loader.name, None)
+
+    return [
+        Result(
+            "maintain summary claims only what it measured",
+            not findings,
+            time.time() - started,
+            "\n".join(findings) + "\n\nThe ✅ line is composed from the questions that were answered. "
+            "A clause for one that was not is a green run asserting something nobody checked.",
+        )
+    ]
+
+
 def upstream_record_gate() -> List[Result]:
     """The public record carries no pointer into a private checkout.
 
@@ -7769,6 +7918,7 @@ def main() -> int:
         results.append(identity_gate())
         results += checkout_path_literal_gate()
         results += upstream_record_gate()
+        results += maintain_summary_gate()
         venv_python = make_venv(workdir, args.quiet)
         results.append(shadow_gate(workdir, venv_python))
         results.append(dirty_scope_gate(workdir))

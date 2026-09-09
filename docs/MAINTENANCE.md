@@ -42,6 +42,13 @@ already made and wrote down in `.github/pin-allowlist.yaml` — read the reason
 before disturbing it. `unknown` means the registry lookup failed, which is a
 network problem and not a finding. `behind` and `disagrees` are the work.
 
+**`unknown` is not a finding and it is not a pass either.** `--fail-on-stale`
+deliberately does not go red on it: an unreachable registry is no evidence of
+staleness, and a gate that fails on a network blip is one people learn to
+ignore. But that pin has not been checked, so `bin/skeletor-maintain` says so
+rather than folding it into *every pin is current or allowlisted* — the summary
+names the questions it answered, never the ones it asked.
+
 `disagrees` is the more urgent of the two: it means one tool is pinned to two
 different versions in two files, and the copy that is wrong is the one nobody is
 reading.
@@ -66,6 +73,14 @@ gitignored and is yours: which repositories you watch, where they are
 (`search_root`, if they are not beside this checkout), and how far each has been
 read. A fresh clone has no local file and the report says so rather than naming
 a repository you cannot open — write one to start watching anything.
+
+**Being per-machine is the cost of that split, and the report carries it.** A
+second checkout of skeletor has no `upstream.local.json` and therefore watches
+nothing, which is correct and is not silent: the run prints a `⚠️` naming the
+file to write, and the green line drops the upstream clause entirely. It used to
+keep it, so a checkout watching nothing reported *nothing has moved in a
+harvested path upstream* — the reassuring answer to a question it had never
+asked.
 
 The report names only the paths that have been harvested before *and* have moved
 since the watermark, plus a count of everything else. That split is deliberate —
@@ -185,10 +200,17 @@ outcome in this repository or in the project it was extracted from.
 ## Scheduling it
 
 `bin/skeletor-maintain` is this pass with the deterministic half already done. It
-asks two questions no model is needed for — is `verify.yml` still green on
-`main`, and is any pin behind or disagreeing — and only if one of them is a
-problem does it wake an agent. On the roughly fifty weeks a year when the answer
-is "nothing", a run costs one API call and one registry sweep.
+asks the questions no model is needed for — the ones numbered in its own module
+docstring, which is where the list is kept rather than here — and only if one of
+them is a problem does it wake an agent. On the roughly fifty weeks a year when
+the answer is "nothing", a run costs one API call, one registry sweep and one
+`git rev-list`.
+
+**Two of those questions can fail to be answered**, and neither counts as work:
+a CI verdict nobody could read, and a registry nobody could reach. Each prints a
+`⚠️` and drops its clause from the green line. Exit 0 with a warning above it
+means *nothing to do that I could see*, which is a different claim from *nothing
+to do*.
 
 ```bash
 bin/skeletor-maintain              # report; exit 1 if there is work

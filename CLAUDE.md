@@ -1117,6 +1117,58 @@ one sorts first, sitting on some feature branch — the first run found a
 dependency-bump worktree and reported 11 commits of a Dependabot branch as
 upstream movement.
 
+**Its green line is composed from the questions that were answered**, and that is
+the third thing it learned by being wrong. The summary was a fixed string naming
+all three, and **all three of them could be false**: a run that could not reach
+CI still reported *CI is green*, a checkout with no `upstream.local.json` still
+reported *nothing has moved in a harvested path upstream*, and a sweep that no
+registry answered still reported *every pin is current or allowlisted*. Each is
+the answer to a question nobody asked, printed under a ✅ and returning 0. On the
+fifty weeks a year when there is nothing to do that sentence is the entire
+output, so it is the only part anybody reads.
+
+**The argument was written down beside every one of them and applied to none.**
+`upstream_verdict`'s docstring says silence is never a pass, one screen above the
+code that broke it; the `⚠️` for an unreadable CI verdict says in a comment that
+treating unknown as green is indistinguishable from having checked; and
+`check-pins`' `--fail-on-stale` explains, correctly, that an unreachable registry
+is not evidence of staleness. That last one is the sharpest, because it is right:
+**not blocking on a question is not the same as answering it**, and the reason
+not to go red was silently reused as a reason to go green. It is the
+`check_skip_budget.py` rule at a third artifact — *there is no case where "I
+could not measure" is the same answer as "the budget is respected"* — and
+*naming a failure mode does not immunise you against it* at the shortest possible
+distance.
+
+The pin half is why `pin_verdict` reads `check-pins` **in process** rather than
+through its exit code. An exit code is a sound answer to *is there work* and no
+answer at all to *did we find out*; `evaluate()` costs the same single registry
+sweep and returns findings, so the verdict and the human table below it come from
+one call and there is no second copy of how a status is classified.
+
+`maintain_summary_gate` is the guard, and it has two layers because the first one
+alone was not enough. It plants each question as unanswered and requires that
+clause to disappear; it plants the all-answered case and requires all three, which
+is what stops the over-correction, since a summary that dropped every clause is
+equally green and less useful; and it plants the case where **nothing** was
+established, because the first fix seeded the list with the pin claim on the
+assumption that one question is always answered — none is, and a ✅ with an empty
+sentence after it is the same false reassurance in a shorter form.
+
+Those all stub the verdict functions, so they establish how an answer is
+*reported* and nothing about how one is *derived* — which was not a guess: a
+plant putting a hardcoded `True` back into `pin_verdict` left the gate green. So
+there is a second layer one level down, replacing the tool `pin_verdict` reads
+with one whose every finding is `unknown`, and `declared_upstreams` with one that
+declares nothing. Every plant lands. The CI half needs no such layer, since
+`main` reads the conclusion directly.
+
+**One of those plants passed first, and the reason was the plant.** A patch
+whose anchor string did not match wrote nothing and the gate came back green — *a
+plant that did not land is indistinguishable from a gate that works*, met head-on
+while building a gate. The plants assert their own edit before believing the
+result.
+
 The `_not_taken` section is the half that pays. Without it the next pass re-reads
 the same 2500-line module and reaches the same conclusion, and **a decision that
 has to be re-made on a schedule is not a decision** — the argument that stopped
