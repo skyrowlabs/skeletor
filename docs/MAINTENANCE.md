@@ -141,6 +141,24 @@ errors a fresh scaffold ships with; a hook `rev` bump changes what a user's firs
 `pre-commit run --all-files` does. Only a full scaffold-and-gate run can answer
 that, which is why the bump tool prints this command instead of running it.
 
+**And say what green means, because for a formatter it means less than it
+reads.** The grid scaffolds fresh trees, so the only source it can format is the
+template's own — and a formatter release is interesting for exactly the
+constructs the template does not contain. sky.boss took `isort 8.0.1 → 9.0.1`
+here (`e246e7f`, whose message says the grid ran isort against every tier with
+nothing to reformat) and hit the behaviour change immediately, in
+`typings/rich_click/__init__.pyi`: 9.0.1 sorts a star import ahead of `X as X`
+re-export aliases where 8.0.1 sorted it after. No scaffold has a `typings/`
+directory or a single `.pyi` file, so the population the grid measured contained
+none of the subject.
+
+Their sentence, and it is this repository's own rule pointed at its own release
+procedure: **a formatter bump can only break source the grid does not contain,
+so a green grid is close to no evidence for it.** Green still means the template
+is self-consistent under the new pin, which is worth having and is all it is.
+Write the bump commit to claim that and no more, and expect the adopter's tree
+to be where the real answer comes from.
+
 **Green:** commit each tool's bump on its own, `chore: bump <tool> to <version>`,
 and open a PR. **Red:** stop. Do not patch the template to accommodate the new
 version in the same change — revert the bump, open an issue with the failure
