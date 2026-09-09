@@ -4898,6 +4898,92 @@ def manifest_args_gate() -> Result:
     )
 
 
+def pinned_ref_gate(workdir: Path) -> List[Result]:
+    """`--ref` renders the head from a named ref, and stamps that ref exactly.
+
+    What an upgrade records is `git describe` of whatever it rendered from, and
+    an upgrade renders from the operator's working checkout. So an operator one
+    commit past a release hands every adopter a manifest stamped
+    `v0.24.0-1-g6f4a54e` — resolvable while that commit is pushed and
+    unrewritten, and a version nobody chose. node-zero, dream.doll and
+    stash.flow each recorded one in the same round and none could pin it:
+    `.skeletor.json` says *do not hand-edit* on its first line, correctly.
+
+    Two assertions, and the second is the one this gate is really for.
+
+    The stamped ref must be the tag **exactly** — no `-N-gsha` suffix — which is
+    the whole claim, and it is read out of the run's own standing line rather
+    than out of the flag, so a flag that was accepted and ignored fails here.
+
+    And the worktree must be gone afterwards. `--ref` is the second `git
+    worktree add` this tool can make, and the cleanup was a single
+    `Optional[Path]`: a second assignment to that name drops the first
+    silently, leaving a registered worktree pointing into a deleted temporary
+    directory. Nothing in the upgrade's own output would say so, and the cost
+    lands on the next person to read `git worktree list` in this checkout —
+    which is `bin/skeletor-maintain`, whose whole first lesson was a linked
+    worktree it mistook for the repository.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    tier = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
+
+    clean = clean_skeletor(workdir)
+    # Asked of the clone, because that is where `--ref` will resolve it. Same
+    # tags today; a tag this checkout has and the clone does not would fail as
+    # "cannot check out", which reads as a broken flag rather than a broken
+    # fixture.
+    tags = run(["git", "-C", str(clean), "tag", "--sort=-creatordate"], cwd=clean)[1].split()
+    if not tags:
+        return [Result("pinned ref: no tags are visible at all — a shallow clone?", False, time.time() - started, "")]
+    tag = tags[0]
+
+    target = workdir / "pinned-ref" / "probe"
+    if not target.exists():
+        run(
+            [sys.executable, str(clean / "bin" / "skeletor-new"), str(target),
+             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--force"],
+            cwd=SKELETOR,
+        )
+    _, output = run(
+        [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--dry-run", "--ref", tag],
+        cwd=target,
+    )
+
+    problems = []
+    standing = re.search(r"head: skeletor @ (\S+)", output)
+    stamped = standing.group(1) if standing else None
+    if stamped != tag:
+        problems.append(
+            f"--ref {tag} rendered a head stamped {stamped!r}. The point of the flag is that "
+            "the adopter's manifest records the ref they named, not `git describe` of wherever "
+            "this checkout is sitting."
+        )
+    if "pinned with --ref" not in output:
+        problems.append("the standing line does not say the head was pinned, so a reader cannot tell it was")
+
+    # `clean`, not SKELETOR: the upgrade was invoked as `clean/bin/skeletor-upgrade`,
+    # so the worktrees it adds are that clone's. Asking this checkout would be a
+    # negative assertion over a set the run never touched — green whatever the
+    # cleanup does, which is the tautology this repository refuses everywhere.
+    worktrees = run(["git", "-C", str(clean), "worktree", "list"], cwd=clean)[1]
+    if "head-checkout" in worktrees:
+        problems.append(
+            "a `head-checkout` worktree is still registered after the run. Both the base and "
+            "the head can be worktrees now, and a single cleanup slot loses whichever was "
+            "assigned first."
+        )
+
+    return [
+        Result(
+            f"pinned ref: --ref {tag} stamps {tag} and leaves no worktree behind",
+            not problems,
+            time.time() - started,
+            "\n".join(problems) or output[-400:],
+        )
+    ]
+
+
 def pending_ref_gate(workdir: Path) -> List[Result]:
     """A run that leaves a conflict does not advance the manifest past it.
 
@@ -8062,6 +8148,9 @@ def main() -> int:
             results.append(gate)
 
         for gate in pending_ref_gate(workdir):
+            results.append(gate)
+
+        for gate in pinned_ref_gate(workdir):
             results.append(gate)
 
         leak = author_leak_gate(fullest, workdir)

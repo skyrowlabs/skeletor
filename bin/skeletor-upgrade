@@ -1198,8 +1198,11 @@ def main() -> int:
         help="assert every conflict and collision is resolved as you want it, and advance "
         "the recorded base to this skeletor. Without it, a run that leaves anything "
         "pending holds the base where it is. Safe on the dirty tree hand-porting leaves, "
-        "and not refused on one: a conflicted file is never written, so this moves the "
-        "record and not your bytes.",
+        "and not refused on one: a CONFLICTED file is never written, so this moves the "
+        "record and not your bytes. That holds for conflicts and not for additions — "
+        "this is a re-run, so a file the upgrade added and you deleted in between is "
+        "still absent from the manifest, still reads as new, and is written again. "
+        "Port, then --ported, then delete what you did not want.",
     )
     args = parser.parse_args(join_set_arg(sys.argv[1:]))
 
@@ -1289,7 +1292,19 @@ def main() -> int:
         # Found by the gate written to pin a *different* corrected claim: it
         # scaffolded dirty, upgraded, and got `-dirty` back — refreshed, and
         # still unresolvable, because verify runs from a working checkout.
-        if args.dry_run:
+        #
+        # `--ref` is the exception, and it is the whole reason that flag exists:
+        # a named ref is committed by definition, so neither the warning nor the
+        # refusal has anything to say about it.
+        head_src = SKELETOR
+        if args.ref:
+            head_src = head_checkout(args.ref, workdir)
+            cleanup_worktrees.append(head_src)
+            # No line here: the standing line below already names the render's
+            # ref, read out of the render's own manifest rather than echoed from
+            # the flag — which is the stronger statement and was already being
+            # printed two lines later.
+        elif args.dry_run:
             warn_a_dirty_base(SKELETOR, "checkout this renders from")
         else:
             refuse_a_dirty_base(SKELETOR, "The upgrade", "checkout this renders from")
@@ -1309,7 +1324,7 @@ def main() -> int:
         render_with(head_src, ours_args, head_tree)
         head_files = files_under(head_tree)
         if set_args_applied:
-            report_reach(SKELETOR, recorded, workdir, target, hashes, head_files, set_args_applied)
+            report_reach(head_src, recorded, workdir, target, hashes, head_files, set_args_applied)
         # The version this run is comparing the tree against, read out of the
         # render rather than asked of git a second time — it is the value that
         # would be recorded if this run applied anything, so there is one source
@@ -1325,7 +1340,13 @@ def main() -> int:
         # about whether an adopter can reach what they are being handed.
         # stash.flow's two runs had identical plans, row for row, and only the
         # first carried a caveat.
-        past_tag, unpushed, tracking = head_standing(SKELETOR)
+        # Asked of `head_src`, not of `SKELETOR`, because it is a question about
+        # the render: a detached worktree at a tag has no tracking branch and no
+        # commits past a tag, which is exactly the standing `--ref` exists to
+        # give the adopter, and asking the live checkout would report the
+        # operator's unpushed work as a caveat on a render that does not contain
+        # it.
+        past_tag, unpushed, tracking = head_standing(head_src)
         # BOTH facts on this line, and the split is the one drawn a paragraph
         # below: the `⚠️` is a judgement and belongs where the act is, the
         # facts are not and belong where the decision is made. A dry run is
@@ -1337,7 +1358,14 @@ def main() -> int:
         notes = []
         if past_tag:
             notes.append(f"{past_tag} past the last release tag")
-        if tracking is None:
+        if args.ref:
+            # A `--ref` render is a detached worktree, so `no upstream` is true
+            # and says nothing — it is a property of the instrument rather than
+            # of the ref. What the reader needs is whether the ref itself is
+            # published, which the writing-path warning below asks with
+            # `git ls-remote` and is the right question for a tag.
+            notes.append("pinned with --ref")
+        elif tracking is None:
             notes.append("no upstream")
         elif unpushed:
             notes.append(f"{unpushed} not on {tracking}")
@@ -2083,6 +2111,23 @@ def main() -> int:
             detail("If one of these is a file you edited to change a value skeletor RENDERS, the")
             detail("record still says the old one and that hunk will conflict on every upgrade.")
             detail("Move the record instead: skeletor-upgrade . --set-arg <flag>=<value> --dry-run")
+            # The subset the template ALSO moved, which is the one question a
+            # standing list cannot answer by being printed every run: has the
+            # reason for this divergence expired? An upstream that adopts an
+            # adopter's idea is the ordinary way it does — several of this
+            # template's mechanisms arrived exactly that way — and the adopter
+            # then keeps a local fix for something already fixed, forever,
+            # because nothing ever re-asks. stash.flow's own earlier finding
+            # came back to them in a release and they connected the two only
+            # because it was in their notes. Both halves are already computed
+            # here; the intersection is the whole feature.
+            adopted = [rel for rel in diverged if rel in head_files and sha256(head_files[rel]) != hashes.get(rel)]
+            if adopted:
+                detail()
+                detail(f"{len(adopted)} of these the template ALSO changed in this release — worth")
+                detail("re-asking whether your version is still needed, or was the thing we took:")
+                for rel in adopted:
+                    item(rel)
 
         # After the two blocks that name files needing a decision, because this
         # is about those files — and before `dropped`, which is unrelated.
@@ -2144,7 +2189,7 @@ def main() -> int:
             detail("scratch that lands in the tree.")
             detail()
             detail("The `tests/` scope and the exit-code check are one fix, not two. An unscoped")
-            detail("`pytest` descends into tmp/pre-upgrade while the worktree is there, finds every")
+            detail("`pytest` descended into `tmp/pre-upgrade` while the worktree was there, found every")
             detail("module basename twice, and Interrupts — after writing the right IDs. `grep |")
             detail("sort` then discards the exit code, so both files are correct, non-empty, and")
             detail("one of them came out of a run that failed. `diff` reports no change and is")
@@ -2154,7 +2199,8 @@ def main() -> int:
             detail("And the same collision one layer up, which `tests/` scoping does NOT prevent:")
             detail("if any suite here PARAMETRISES over a filesystem walk — a `check every file")
             detail("for X` gate, which is an ordinary way to write one — its skip set must exclude")
-            detail("`tmp/` before this comparison means anything. sky.boss ran it and got 210")
+            detail("whatever scratch is on disk before this comparison means anything. sky.boss")
+            detail("ran the `tmp/` version and got 210")
             detail("additions of which 205 were spurious: their walk had `.git`, `.venv`, `vendor`,")
             detail("`node_modules`, `__pycache__` and `dist`, so it collected `tmp/pre-upgrade/**`")
             detail("— the worktree THIS RECIPE creates — plus `.pytest_cache/README.md`, read for")
@@ -2309,7 +2355,7 @@ def main() -> int:
             say("✅", "nothing was committed. Read the diff, then commit as one `chore(skeletor):` change")
         return 1 if (conflicted or collided) else 0
     finally:
-        if cleanup_worktree is not None:
+        for leftover in cleanup_worktrees:
             subprocess.run(
                 ["git", "-C", str(SKELETOR), "worktree", "remove", "--force", str(leftover)],
                 capture_output=True,
