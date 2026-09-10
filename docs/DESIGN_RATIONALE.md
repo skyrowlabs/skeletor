@@ -4549,6 +4549,162 @@ and `bin/skeletor-maintain` printing a green line for questions no registry
 answered. **"It is not here" and "it cannot be here" are different answers, and
 only one of them can be acted on.**
 
+### The release that fixed a claim, and shipped a fabricated one
+
+v0.25.0 corrected a sentence that had been wrong in five places. Its own commit
+and the paragraph it added to `ci.yml` said *"proto.pilot swept all five from an
+adopted tree."* proto.pilot swept none. Their report says, in as many words, that
+they **declined** to fix them locally — a prose divergence in a file the template
+is actively revising is a permanent conflict — and asked for the sweep to happen
+upstream. The sweep happened here.
+
+So a release whose subject was *a false statement with five homes* shipped a false
+statement, in template prose, to every adopter, crediting an act to the tree that
+had found the bug. They reported it back the next round.
+
+Three things are worth separating out.
+
+**It is a worse failure than the drift it was fixing.** A copy of a true sentence
+starts out true and rots; this was never true. And it is unfalsifiable from
+inside the repository — no gate can know what somebody else did in their own
+checkout, so this is squarely a fact about the account rather than the tree, the
+class this file already carries four instances of.
+
+**The mechanism is that a synthesis got written as a quotation.** The workspace's
+relay was scrupulous about the distinction, and the error is entirely downstream
+of it: their report said proto.pilot *found* four survivors, *declined* to fix
+them, and *left a note naming them*. Compressing that to "swept" is a plausible
+reading of a helpful act, and it converted a decision the reporter had made and
+explained into its opposite.
+
+**The remedy is not care.** It is a rule with a test in it: *do not attribute an
+act to a reporter without the sentence in their report that says they performed
+it.* An attribution is a claim about somebody else's tree, so the evidence for it
+has to be a quotation, not an inference — which is the workspace's own
+attribute-quotes-label-syntheses rule, applied one step further out than they
+applied it.
+
+#### And the sweep made one tree strictly worse
+
+The same commit replaced *"a draft PR runs the cheap gate job alone"* with a
+sentence naming five jobs: `node`, `unit-tests`, `lint`, `integration`, `ui`.
+That is accurate about this template and it is a claim about the **adopter's**
+workflow — and sky.boss had already renamed theirs. They went from a sentence
+that was merely wrong to one that was more precise and less true, in a file they
+had diverged from and would now have to re-resolve.
+
+> **Specificity is not a free improvement when the subject is somebody else's
+> tree.** A vague sentence survives a rename; a precise one is a hostage to every
+> identifier it names.
+
+The fixed version names the *rule* — cheap jobs run, expensive ones do not — and
+points at the one file that decides, because that file's path is the template's
+own and its content is what an adopter would have to change on purpose.
+
+### Two gates in one release, disagreeing about one file
+
+`test_pyright_deps.py` was rewritten in v0.25.0 to stop treating "this tree does
+not type-check in CI" as a broken scan. The new 2x2's remedy for a declared file
+that no CI job installs was *delete `.github/pyright-deps.txt`* — and
+`scripts/lint_pyright_gate.py`, the commit-time pre-flight shipped in the same
+tree, requires every one of its sentinels to be reachable from that exact file.
+Following the remedy turns a different gate red. sky.boss reported it; executing
+it reproduces it in one run.
+
+Neither gate is unreasonable alone, which is what makes the pair instructive:
+each is right about its own consumer and neither knows the other exists. **The
+reader is the only place two gates meet**, so a remedy is an assertion about the
+whole tree even when the check that prints it is scoped to one file.
+
+The repair was to ask a better question. Not *does CI run pyright* but *does
+anything consume this declaration* — a workflow job or the commit-time hook —
+which makes a tree that type-checks only at commit time a legitimate
+configuration that keeps its file and keeps the superset rule governing it.
+
+#### The same defect, one function down, in the edit that fixed it
+
+The pyright side of that file had `least=1` and the test side had `least=2`.
+v0.25.0 replaced the first with a partition, wrote a docstring about why sizing a
+set whose zero is a configuration says the wrong thing, and left the second
+alone. `least=2` made the whole file unsatisfiable for a tree with a single
+pytest job, which is an ordinary layout. sky.boss had one.
+
+The floor's stated reason was the fixture rule — with one job, *every test job*
+and *this test job* are the same set, so a filter over them is unobservable. That
+argument is about a **filter**, and this file has none: the rule loops over every
+test job and exempts nothing. So the 2 was defending a discrimination the file
+does not make, and it was inherited from a sibling rule where it was correct.
+
+> **A number copied from a rule that needed it, into a rule that does not, is
+> invisible precisely because it has a written reason.** Reading the reason is
+> what stops you checking whether it applies.
+
+### The reachability advice that was wrong about the ref it was handed
+
+`--ref` exists so an adopter's manifest records a version somebody chose. Its
+first release printed, on a real run, *"this checkout tracks no branch — whether
+v0.25.0 is reachable cannot be determined"*, followed by a command grepping the
+sha of the operator's own HEAD — a commit **past** the tag, which no pushed ref
+identifies.
+
+Both halves are the same mistake asked of the wrong subject. `tracks no branch`
+is true of the detached worktree the flag itself creates: a fact about the
+instrument, printed as a caveat about the tree. And the sha came from the live
+checkout while the sentence named the pinned ref, so the sentence and the
+actionable command described different commits — a reader following the command
+concludes their pin is unreachable, which is the opposite of what pinning bought
+them. **The flag's advice was most wrong exactly where the flag is most useful.**
+
+node-zero and stash.flow each found one half. The line above the sha had been
+moved to the render's checkout in the same commit and this one had not.
+
+What this repository had already written down, one paragraph from the code:
+*a predicate right about what it measures, wired to prose that claims more.* The
+ruling that shipped it said the warning was "the right question for a tag" — true
+of the question, and never checked against the sentence.
+
+#### The gate for it was green with both defects planted back
+
+Worse, and the useful part. `pinned_ref_gate` grew two assertions for exactly
+these, and both plants left it green: the advice is on the **writing path**,
+withheld from a dry run on purpose, and the gate's fixture was `--dry-run`. Two
+negative checks over output that could not contain the string either way.
+
+That is *a negative assertion over a set nobody proved non-empty* — this file's
+own rule, stated for `filesAnalyzed` and for the lint gates — arriving inside the
+gate written to catch a defect of the same shape. The fixture is a real run now,
+and a **positive** assertion that the advice was printed at all is what keeps the
+negatives honest.
+
+One of the three plants still passes, and the gate says so rather than pretending
+otherwise: reverting the sha to the live checkout changes nothing observable,
+because under `--ref` that sha is no longer printed. The branch is what repairs
+the finding, the branch's removal is caught, and a check that cannot fail was
+deleted rather than kept for the look of coverage.
+
+### A predicate that could not mean what its sentence promised
+
+The v0.25.0 upgrade began naming *"divergences this release also changed"* under
+the label *worth re-asking whether your version is still needed, or was the thing
+we took*. Six trees split two-and-two, and they were not disagreeing about the
+same thing: proto.pilot named five with two genuine adoptions and asked for it not
+to be tightened, dream.doll saw four of fourteen with no false positives, and
+sky.boss saw four with zero adoptions and read it as noise.
+
+All four are one predicate behaving correctly. It computes *file you diverged on
+∩ file this release changed*; the label promises *adoption*, and *because of your
+divergence* is intent, which is not in the bytes. The two coincide when the
+release touched the file because of the divergence and come apart otherwise —
+which is why the trees with real adoptions found it useful and the tree with none
+found it noise.
+
+The predicate stays and the sentence shrank. Tightening would miss real
+adoptions and fail in the reassuring direction, since fewer rows read as nothing
+to re-ask. **When a computable set is a proxy for an uncomputable one, the honest
+move is to name the set and let the reader do the inference** — the same reason
+`blocked_on` and `queue_order` are read only from explicit lines and never
+guessed.
+
 ## Honest assessment: what is over-built
 
 Not everything here is worth copying, and the shell reflects that.
