@@ -2144,12 +2144,30 @@ def main() -> int:
             # came back to them in a release and they connected the two only
             # because it was in their notes. Both halves are already computed
             # here; the intersection is the whole feature.
-            adopted = [rel for rel in diverged if rel in head_files and sha256(head_files[rel]) != hashes.get(rel)]
-            if adopted:
+            # **The sentence says what the predicate computes, and nothing more.**
+            # It shipped as "worth re-asking whether your version is still
+            # needed, or was the thing we took" — which promises *adoption*, and
+            # no predicate over two renders can see intent: whether the template
+            # changed this file BECAUSE of your divergence is not in the bytes.
+            #
+            # Six trees split exactly along that seam. proto.pilot named five
+            # with two genuine adoptions and asked for it not to be tightened;
+            # dream.doll named four of fourteen with no false positives; sky.boss
+            # named four with zero adoptions and read it as noise. All four are
+            # the same predicate behaving correctly and one label being wrong for
+            # two of them.
+            #
+            # So the predicate stays — tightening it would miss real adoptions and
+            # fail in the reassuring direction, since fewer rows read as nothing
+            # to re-ask — and the claim shrinks to the one that is always true.
+            overlap = [rel for rel in diverged if rel in head_files and sha256(head_files[rel]) != hashes.get(rel)]
+            if overlap:
                 detail()
-                detail(f"{len(adopted)} of these the template ALSO changed in this release — worth")
-                detail("re-asking whether your version is still needed, or was the thing we took:")
-                for rel in adopted:
+                detail(f"{len(overlap)} of these the template also changed in this release. That is an")
+                detail("overlap, not a verdict: it cannot tell a change we made BECAUSE of your")
+                detail("divergence from one that merely landed in the same file. Re-read the merge")
+                detail("in each and decide whether you still need yours:")
+                for rel in overlap:
                     item(rel)
 
         # After the two blocks that name files needing a decision, because this
