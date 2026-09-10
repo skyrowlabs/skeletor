@@ -116,9 +116,14 @@ Never commit directly to `{{RELEASE_BRANCH}}`.
 
 `gh pr create --draft`. Mark it ready only when you believe it is green.
 
-The expensive CI jobs are gated on draft status: a draft PR carrying code runs `node`,
-`unit-tests` and the gate, and skips `lint`, `integration` and `ui`. (A docs-only PR runs the
-gate alone whether it is draft or ready — that is the other rule, and it decides first.)
+CI jobs are gated by cost: a draft PR carrying code runs the cheap ones and skips the
+expensive ones, and a docs-only PR runs the gate alone whether it is draft or ready — that
+is the other rule, and it decides first. `.github/scripts/docs-only.cjs` decides both, and
+is the only place that does; `ci.yml` says which job is in which class.
+
+This named the five jobs by name for one release, which is a claim about *your* workflow
+rather than about the rule — a tree that had renamed or dropped one got a sentence that was
+more precise and less true than the vague one it replaced.
 Nothing is un-gated by this — GitHub blocks merging a draft regardless, and marking it ready
 fires `ready_for_review`, which runs the full set before it can merge.
 

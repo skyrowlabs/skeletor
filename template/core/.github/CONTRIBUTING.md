@@ -8,7 +8,7 @@ git switch -c fix/<slug> {{BASE_BRANCH}}
 ./{{CLI}} check pre-push
 git commit                       # conventional; the hook enforces it
 gh pr create --draft --base {{BASE_BRANCH}}
-# ...iterate in draft; a draft skips lint, integration and ui...
+# ...iterate in draft; a draft carrying code skips the expensive jobs...
 gh pr ready <n>                  # once, when you believe it is green
 ```
 
@@ -32,8 +32,9 @@ hook enforces the format.
 
 A `synchronize` event on a **ready** PR re-runs everything that PR earns. Open
 as a draft, push freely, flip to ready once. A draft carrying code still runs
-`node`, `unit-tests` and the gate — what it skips is `lint`, `integration` and
-`ui`. Nothing is un-gated by this — GitHub blocks merging a draft, and
+the cheap jobs; what it skips is the expensive ones, and
+[`.github/scripts/docs-only.cjs`](scripts/docs-only.cjs) is where that is
+decided. Nothing is un-gated by this — GitHub blocks merging a draft, and
 `ready_for_review` runs the full set before it can merge.
 
 ## Docs are part of the change
