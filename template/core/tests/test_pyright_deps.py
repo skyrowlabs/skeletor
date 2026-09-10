@@ -193,10 +193,23 @@ def test_the_declaration_and_the_jobs_are_the_same_decision():
 def test_the_scan_finds_the_test_jobs():
     """The test side going empty passes the superset rule while looking at nothing.
 
-    `least=2` is the fixture rule: with one, *every test job* and *this test
-    job* are the same set, so a filter over them is unobservable.
+    **`least=1`, and the 2 it replaced is the same defect as the pyright side of
+    this file — one function down, in the same edit that fixed it.** The reason
+    given for 2 was the fixture rule: with one job, *every test job* and *this
+    test job* are the same set, so a filter over them is unobservable. That
+    argument is about a *filter*, and there is none here — the rule below loops
+    over every test job and exempts nothing. So 2 was defending a discrimination
+    this file does not make, and it made the whole file unsatisfiable for a tree
+    with a single pytest job, which is an ordinary CI layout and not a defect.
+
+    sky.boss found it by having one. The 2x2 above landed and the file still
+    could not run there — a fix that corrected one axis of a rule and left the
+    other, having just written the docstring explaining why the first was wrong.
+
+    One job still proves the claim: the superset must reach that job's
+    requirements. Zero is the vacuous case this guards.
     """
-    scanned(_test_jobs(), "workflow jobs running pytest", least=2)
+    scanned(_test_jobs(), "workflow jobs running pytest")
 
 
 def test_a_type_check_job_installs_from_the_declared_set():
