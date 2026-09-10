@@ -38,10 +38,21 @@ name: CI
 # `AGENTS.md`, `.github/CONTRIBUTING.md`, the comment the draft-discipline
 # workflow posts onto contributors' pull requests — and, worst, in a summary
 # table inside `docs-only.cjs` itself, 119 lines from the code it summarised, in
-# the file this paragraph names as the single source. proto.pilot swept all five
-# from an adopted tree. A statement is not fixed when the authority is fixed: the
-# copies do not know they are copies, and the one in the authority's own comment
-# is the one a reader trusts most.
+# the file this paragraph names as the single source. proto.pilot found all four
+# survivors from an adopted tree and deliberately did NOT fix them there — a
+# prose divergence in a file the template is actively revising is a permanent
+# conflict — so they reported them and the sweep was made upstream, here.
+#
+# That sentence read "proto.pilot swept all five from an adopted tree" for one
+# release. They swept none; their report says so in as many words. It is a
+# fabricated credit, in template prose, about the tree that found the bug, and
+# it shipped to every adopter — which is worse than the drift this paragraph is
+# about, because a copy at least started out true. Do not attribute an act to a
+# reporter without the sentence in their report that says they performed it.
+#
+# A statement is not fixed when the authority is fixed: the copies do not know
+# they are copies, and the one in the authority's own comment is the one a
+# reader trusts most.
 
 on:
   pull_request:
