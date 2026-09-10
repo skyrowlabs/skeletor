@@ -1411,15 +1411,38 @@ def main() -> int:
                 # middle of a pushed branch is reachable and appears in no row.
                 # A false negative here is the safe direction — it under-claims,
                 # which is the failure mode this whole block exists to correct.
+                # **Both of these are asked of `head_src`, which is the render.**
+                # Under `--ref` that is a detached worktree at the named ref, and
+                # asking `SKELETOR` instead produced a sentence and a command
+                # that disagreed with each other: the sentence named the pinned
+                # tag, the command grepped for the operator's own HEAD — a
+                # commit past it, which no row identifies. A reader following the
+                # actionable half was told their pinned tag was unreachable.
+                # node-zero measured it. The line above had already been moved to
+                # `head_src` in the same commit and this one was not.
                 sha = subprocess.run(
-                    ["git", "-C", str(SKELETOR), "rev-parse", "HEAD"],
+                    ["git", "-C", str(head_src), "rev-parse", "HEAD"],
                     capture_output=True,
                     text=True,
                 ).stdout.strip()
-                say("⚠️ ", f"this checkout tracks no branch — whether {head_ref} is reachable")
-                detail("elsewhere cannot be determined from here. If it is a pushed tag, it is fine;")
-                detail(f"`git ls-remote origin | grep {sha[:12] or head_ref}` is the check this")
-                detail("declines to make for you — a row means some pushed ref identifies it.")
+                if args.ref:
+                    # `tracks no branch` is TRUE of a detached worktree and is a
+                    # fact about the instrument this flag created, not about the
+                    # tree or the ref — so it read as a warning about the tag the
+                    # operator had just supplied to make the render pinnable.
+                    # stash.flow's, and the flag is most useful exactly where the
+                    # sentence was most wrong. Naming the ref also buys a better
+                    # check than grepping a sha: `ls-remote` takes a refspec.
+                    say("⚠️ ", f"whether {args.ref} is pushed cannot be determined from here")
+                    detail("The render is pinned, so the manifest will record a name rather than a")
+                    detail("description of this checkout — but a name only resolves for somebody")
+                    detail(f"else once it is pushed. `git ls-remote origin {args.ref}` is the check")
+                    detail("this declines to make for you; a row means an adopter can reach it.")
+                else:
+                    say("⚠️ ", f"this checkout tracks no branch — whether {head_ref} is reachable")
+                    detail("elsewhere cannot be determined from here. If it is a pushed tag, it is fine;")
+                    detail(f"`git ls-remote origin | grep {sha[:12] or head_ref}` is the check this")
+                    detail("declines to make for you — a row means some pushed ref identifies it.")
             elif unpushed:
                 say("⚠️ ", f"{unpushed} commit(s) here are not on {tracking} — stamping {head_ref} anyway")
                 detail("`base_checkout()` resolves a recorded ref with `git worktree add`, so until")

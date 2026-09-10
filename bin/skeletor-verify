@@ -4964,8 +4964,20 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
              "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--force"],
             cwd=SKELETOR,
         )
+    # **A REAL run, not a dry one, and that is the whole reason these assertions
+    # mean anything.** The reachability advice is on the writing path — the `⚠️`
+    # is deliberately withheld from a dry run, because an unpushed HEAD is the
+    # ordinary state between a commit and a push and a warning that fires through
+    # every grid run is one nobody reads. So a `--dry-run` fixture never produces
+    # the sentences below, and the two negative checks were green against output
+    # that could not contain them either way: both defects planted back, both
+    # gates still green. A negative assertion over a set nobody proved non-empty,
+    # inside the gate written to catch a defect of that exact shape.
+    #
+    # `assert_advice` is the positive half and is what keeps the negatives
+    # honest — it fails if the block did not run at all.
     _, output = run(
-        [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--dry-run", "--ref", tag],
+        [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--ref", tag],
         cwd=target,
     )
 
@@ -4985,6 +4997,42 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
     # so the worktrees it adds are that clone's. Asking this checkout would be a
     # negative assertion over a set the run never touched — green whatever the
     # cleanup does, which is the tautology this repository refuses everywhere.
+    # **The reachability advice must be about the ref, not about the instrument.**
+    # Two defects shipped together in v0.25.0 and both are visible in one run.
+    # The sentence said `this checkout tracks no branch`, which is true of the
+    # detached worktree `--ref` creates and says nothing about the operator's
+    # checkout or the ref; and the command it offered grepped `rev-parse HEAD` of
+    # the LIVE checkout, so a reader pinned to a tag was handed the sha of a
+    # commit past it and told to look for that. The sentence named one thing and
+    # the actionable half named another.
+    #
+    # Reproducing it needs a checkout whose HEAD is not the tag, which the grid's
+    # own clone supplies by construction: `clean_skeletor` commits the working
+    # tree on top, so HEAD is always at least one commit past the newest tag.
+    # That is why this can be asked here and nowhere else.
+    if f"whether {tag} is pushed" not in output:
+        problems.append(
+            f"the run printed no reachability advice naming {tag}. Every check below is a "
+            "negative over output that cannot contain the string it looks for, which is the "
+            "shape this gate exists to refuse."
+        )
+    # There is deliberately no assertion here about the sha the old line offered.
+    # Planting it back — `rev-parse HEAD` of the live checkout instead of the
+    # render — leaves this gate green, and correctly: under `--ref` that sha is
+    # no longer printed at all, so the check would be a negative over output that
+    # cannot contain it. The branch below is what actually repairs node-zero's
+    # finding, and the `branch` plant catches its removal. Keeping a check that
+    # cannot fail would claim coverage the gate does not have, which is the thing
+    # this file refuses everywhere else. `head_src` stays in the tool because it
+    # is correct, not because anything here can tell.
+    if "tracks no branch" in output:
+        problems.append(
+            "the reachability warning says `tracks no branch`, which is a fact about the "
+            "detached worktree --ref creates rather than about the ref or the tree. Under "
+            "--ref the question is whether the named ref is pushed, and `git ls-remote "
+            "origin <ref>` asks it directly."
+        )
+
     worktrees = run(["git", "-C", str(clean), "worktree", "list"], cwd=clean)[1]
     if "head-checkout" in worktrees:
         problems.append(
@@ -4995,7 +5043,7 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
 
     return [
         Result(
-            f"pinned ref: --ref {tag} stamps {tag} and leaves no worktree behind",
+            f"pinned ref: --ref {tag} stamps {tag}, advises about {tag}, and leaves no worktree behind",
             not problems,
             time.time() - started,
             "\n".join(problems) or output[-400:],
