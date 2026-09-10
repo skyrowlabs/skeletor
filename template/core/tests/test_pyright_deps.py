@@ -50,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scanning import scanned  # noqa: E402
 from scripts.paths import GITHUB_DIR, PROJECT_ROOT  # noqa: E402
+from scripts.yaml_text import read_uncommented  # noqa: E402
 from tests.workflows import jobs  # noqa: E402
 
 WORKFLOWS = GITHUB_DIR / "workflows"
@@ -82,6 +83,27 @@ def _test_jobs() -> dict:
             if "pytest" in body:
                 found[(path.name, job)] = body
     return found
+
+
+def _commit_time_pyright() -> bool:
+    """Does a pre-commit hook run pyright?
+
+    The second consumer of `.github/pyright-deps.txt`, and the one CI cannot see.
+    `scripts/lint_pyright_gate.py` resolves its sentinels through that file, so a
+    tree that type-checks at commit time needs it whatever its workflows do.
+
+    A hook **id**, not a substring. `"pyright" in <the config>` is true of every
+    tree that has never had the hook, because `check-json` excludes
+    `pyrightconfig.json` two dozen lines above — so the loose form made the
+    "nothing consumes this declaration" corner unable to fire at all. Caught by
+    planting the hook's removal and watching the suite stay green: the same
+    tautology this file's other half was rewritten to remove, in the predicate
+    written to remove it.
+    """
+    config = PROJECT_ROOT / ".pre-commit-config.yaml"
+    if not config.is_file():
+        return False
+    return bool(re.search(r"^\s*-?\s*id:\s*pyright\b", read_uncommented(config), re.MULTILINE))
 
 
 def _requirements(body: str) -> set:
@@ -124,18 +146,30 @@ def test_the_declaration_and_the_jobs_are_the_same_decision():
     So the discriminator is the declaration, which is a fact the tree states
     rather than one this scan infers:
 
-    * declared, and jobs run it — everything below applies.
-    * declared, no job runs it — a dead declaration. Fails, and *delete this
-      file* is one of the two remedies named.
-    * not declared, no job runs it — this tree does not type-check in CI. Every
-      rule below is vacuous, and the assertion here is what keeps that from
-      being a silent pass: no job may run pyright.
-    * not declared, and a job runs it — the expensive one. A job type-checks
-      against an environment nothing writes down, so it checks *less* than the
-      tests do and reports a clean run for the gap.
+    * a job runs pyright and nothing is declared — the expensive corner. The job
+      type-checks against an environment nothing writes down, so it checks
+      *less* than the tests do and reports a clean run for the gap.
+    * declared, and something consumes it — everything below applies.
+    * nothing declared and nothing consuming it — this tree does not type-check.
+      Vacuous, and the assertion here is what keeps that from being a silent
+      pass: no job may run pyright.
 
-    An empty declaration is the degenerate first corner: a superset of nothing,
-    passing silently.
+    **The consumer is not only CI, and the first version of this got that wrong
+    in a way that shipped.** It failed a declared file that no CI job installs
+    and named *delete it* as a remedy — while `scripts/lint_pyright_gate.py`,
+    the commit-time pre-flight, requires every one of its sentinels to be
+    reachable from this same file. Following the remedy turned a different gate
+    red in the same tree. sky.boss reported it; executing it here reproduces it
+    in one run.
+
+    Two gates shipped in one release disagreeing about one file is worse than
+    either being wrong alone, because each is locally reasonable and the reader
+    is the only place they meet. So the question is *does anything consume this
+    declaration* — a CI job or the commit-time hook — rather than *does CI run
+    pyright*, and a tree that type-checks only at commit time keeps its file and
+    keeps the superset rule that governs it.
+
+    An empty declaration is degenerate: a superset of nothing, passing silently.
     """
     jobs_ = _type_check_jobs()
     named = ", ".join(f"{workflow}:{job}" for workflow, job in sorted(jobs_))
@@ -147,11 +181,11 @@ def test_the_declaration_and_the_jobs_are_the_same_decision():
             f"one. Restore the file, or stop running pyright in CI."
         )
         return
-    assert jobs_, (
-        f"{DEPS.name} declares the environment pyright sees in CI and no job here runs "
-        f"pyright. Either the job was lost — the rules in this file have been enforcing "
-        f"nothing since — or this tree stopped type-checking in CI, in which case delete "
-        f"{DEPS.name} and this file goes quiet without taking the superset rule with it."
+    assert jobs_ or _commit_time_pyright(), (
+        f"{DEPS.name} declares the environment pyright sees, and nothing in this tree "
+        f"consumes it: no workflow job runs pyright and no pre-commit hook does either. "
+        f"Restore whichever you meant to keep. Deleting {DEPS.name} is NOT the remedy "
+        f"while the commit-time pre-flight resolves its sentinels through it."
     )
     scanned(_INCLUDE.findall(DEPS.read_text(encoding="utf-8")), f"requirement includes in {DEPS.name}")
 
