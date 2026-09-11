@@ -5132,7 +5132,16 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
         # the bug as unfixed. `bin/skeletor-new` is deliberately left at the tag,
         # since `--ref` renders through the scaffolder at that ref and a mixed
         # pair would differ for a reason that is not the subject.
-        git_in(stamped_scratch, "checkout", tip, "--", "bin/skeletor-upgrade")
+        # **And the module it imports, or the tip's tool runs against the tag's
+        # library.** Taking the binary alone left `bin/render_guard.py` at the
+        # tag, so a tip that had grown one import died at module load with
+        # `ImportError` — and the fixture's own guards then reported *"not
+        # already current"* and *"no standing line"*, which are true statements
+        # about a process that never started. A fixture that pins a tool has to
+        # pin the tool's own imports with it. `bin/skeletor-new` is still the
+        # tag's, and safe: it reads one name from this module and that name is
+        # older than the tag.
+        git_in(stamped_scratch, "checkout", tip, "--", "bin/skeletor-upgrade", "bin/render_guard.py")
         # **The marker is what makes the commit exist at all, and its absence is
         # how this gate failed on CI at the one moment it matters.** Taking a
         # file from the tip is a no-op when the tip IS the tag — which is exactly
@@ -5199,6 +5208,73 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
             not stamped_problems,
             0.0,
             "\n".join(stamped_problems) or f"{born} → {after_real}, files untouched",
+        )
+    )
+
+    # ## The advice for the rung above, which used to hand over the trap
+    #
+    # The same tree, one run later and WITHOUT the flag: it now records `tag`
+    # exactly while this rendering checkout is a commit past it, so the branch
+    # that fires is *behind by a ref and by nothing else* — the one place this
+    # tool suggests `--ref`. It interpolated `head_ref` unconditionally, and
+    # `head_ref` there is `git describe` of a commit past a release. The sentence
+    # telling an adopter how to leave the trap handed them the value that puts
+    # them back in it. node-zero's finding.
+    #
+    # **This fixture reaches it deterministically**, which nothing else here
+    # does: `stamped_scratch` is one commit past the tag by construction, so its
+    # describe string always carries a suffix regardless of where the real
+    # checkout is sitting — and the arm to assert is READ from the run's own
+    # standing line rather than assumed, because on a release commit the other
+    # arm is the correct one and asserting the wrong one is a gate that is red
+    # for a reason that is not a defect.
+    _, advice = run(
+        [sys.executable, str(stamped_scratch / "bin" / "skeletor-upgrade"), str(stamped), "--dry-run"],
+        cwd=stamped,
+    )
+    standing_head = re.search(r"head: skeletor @ (\S+)", advice)
+    head_ref = standing_head.group(1) if standing_head else None
+    guard = load_tool(SKELETOR / "bin" / "render_guard.py", "render_guard_probe")
+    advice_problems = []
+    if head_ref is None:
+        advice_problems.append(f"no standing line in the run, so the arm under test is unknown:\n{advice[-500:]}")
+    elif "still records" not in advice:
+        advice_problems.append(
+            f"the run does not reach the behind-by-a-ref branch (records {recorded()}, head {head_ref}), "
+            f"so this assertion is about nothing:\n{advice[-500:]}"
+        )
+    elif guard.bare_tag(head_ref):
+        # A release commit renders its own tag, and then offering the value IS
+        # the right advice. Asserted rather than skipped, so the gate still says
+        # something on the one run nobody gets to skip.
+        if f"--ref {head_ref}" not in advice:
+            advice_problems.append(
+                f"head is the tag {head_ref} exactly, so the advice should offer it as a value and does "
+                f"not:\n{advice[-500:]}"
+            )
+    else:
+        if f"--ref {head_ref}" in advice:
+            advice_problems.append(
+                f"the advice offers `--ref {head_ref}`, which is `git describe` of a commit past a "
+                f"release — the unresolvable stamp the flag exists to replace, handed over by the "
+                f"sentence explaining how to replace it."
+            )
+        if "--ref <tag>" not in advice:
+            advice_problems.append(
+                f"head is {head_ref}, not a tag, so the advice must name the shape `--ref <tag>` rather "
+                f"than a value, and it names neither:\n{advice[-500:]}"
+            )
+        if head_ref not in advice:
+            advice_problems.append(
+                f"the advice never says what this checkout's head is, so a reader cannot tell why no "
+                f"value was offered:\n{advice[-500:]}"
+            )
+    results.append(
+        Result(
+            f"pinned ref: the behind-by-a-ref advice offers a tag, never a describe string ({head_ref})",
+            not advice_problems,
+            0.0,
+            "\n".join(advice_problems),
         )
     )
     return results

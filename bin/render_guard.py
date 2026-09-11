@@ -33,6 +33,7 @@ refuses.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -166,6 +167,33 @@ def head_standing(checkout: Path) -> Tuple[Optional[int], Optional[int], Optiona
         count("@{u}..HEAD") if tracking else None,
         tracking,
     )
+
+
+def bare_tag(ref: Optional[str]) -> bool:
+    """True when `ref` is a release tag and not a `git describe` of a commit past one.
+
+    `git describe --tags --always --dirty` yields `v0.26.0` at a tag and
+    `v0.26.0-1-gdd27dc4` one commit later. The second is resolvable on the
+    machine that produced it and is the value `--ref` exists to let an operator
+    replace — so it must never be *offered* as one. node-zero found the advice
+    line interpolating it, which hands the adopter the trap in the sentence
+    telling them how to leave it.
+
+    Shape rather than a tag-list lookup, deliberately: whether a ref resolves for
+    the people who will read the manifest is a question about a remote, and this
+    is a question about what the string is.
+
+    **Two conditions, and each alone gets a real case wrong.** Rejecting the
+    `-N-gsha` suffix alone calls a bare sha a tag — `describe --always` in a
+    checkout with no tag, which is the original unresolvable case: unreadable to
+    a reader and strippable by a rebase. Requiring `v<digit>...` alone rejects
+    `v1.0.0-rc1`, a real tag, because a hyphen is legal in one and structural in
+    the other. `v[0-9]*` is the pattern `head_standing` already matches on, and
+    `-<count>-g<hex>` is the only suffix `git describe` appends.
+    """
+    if not ref or not re.match(r"v\d", ref):
+        return False
+    return not re.search(r"(-\d+-g[0-9a-f]{4,})?(-dirty)$|-\d+-g[0-9a-f]{4,}$", ref)
 
 
 def render_dirt(checkout: Path) -> List[str]:

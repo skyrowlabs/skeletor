@@ -89,7 +89,7 @@ from typing import Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from render_guard import head_standing, render_dirt, uncommitted  # noqa: E402
+from render_guard import bare_tag, head_standing, render_dirt, uncommitted  # noqa: E402
 
 SKELETOR = Path(__file__).resolve().parents[1]
 MANIFEST_NAME = ".skeletor.json"
@@ -2742,7 +2742,27 @@ def main() -> int:
                 detail(f"{MANIFEST_NAME} still records {ref}, and will keep doing so: it is")
                 detail("re-copied only by a run that applies something. Being behind by a ref and")
                 detail("being behind by a file are different, and only the second is work —")
-                detail(f"except a ref you CHOSE, which `--ref {head_ref}` records here and now.")
+                # **The value is only offered when it is a tag.** This
+                # interpolated `head_ref` unconditionally, and `head_ref` is
+                # `git describe` of the rendering checkout — so an operator one
+                # commit past a release had this line hand the adopter
+                # `--ref v0.26.0-1-gdd27dc4`, which is exactly the unresolvable
+                # stamp the flag exists to replace. The sentence explaining how
+                # to leave the trap was the sentence putting them in it.
+                # node-zero's finding.
+                if bare_tag(head_ref):
+                    detail(f"except a ref you CHOSE, which `--ref {head_ref}` records here and now.")
+                else:
+                    detail("except a ref you CHOSE, which `--ref <tag>` records here and now.")
+                    # **The rejected value is named and never spelled as a flag.**
+                    # Writing "not `--ref <describe string>`" would put the trap
+                    # value in the output in the exact form a reader copies, and
+                    # would leave no predicate able to tell an offer from a
+                    # warning — the distinction the whole branch turns on.
+                    detail(f"This checkout's head is {head_ref}, which is `git describe` of a commit")
+                    detail("past a release: resolvable on the machine that produced it and nowhere a")
+                    detail("reader of your manifest can reach, so it is not offered as a value here.")
+                    detail("Name the released tag you mean.")
             if args.dry_run and stale:
                 # The dry-run footer below is unreachable from here, and this is
                 # the case that needed it most. That warning is conditioned on
