@@ -7932,6 +7932,143 @@ def upstream_record_gate() -> List[Result]:
     return results
 
 
+def released_helper_names(text: str) -> set:
+    """Every top-level name a module binds that an importer could reach.
+
+    Imports count. `from scripts.paths import PROJECT_ROOT` makes
+    `repo_files.PROJECT_ROOT` resolvable, and an adopter reaching for it is
+    reaching for a name this module publishes. The contract asserted below is
+    that the name still resolves, never where it came from, so a refactor that
+    moves an import around satisfies it and one that drops the name does not.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+    names = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                continue
+            names.update((alias.asname or alias.name).split(".")[0] for alias in node.names)
+    return {name for name in names if not name.startswith("_")}
+
+
+def shared_helper_api_gate() -> List[Result]:
+    """A name a release handed an adopter still resolves.
+
+    The template's `tests/` carries modules that are not tests — `repo_files`,
+    `scanning`, `shell`, `workflows`, `conftest` — and an adopter's own test
+    files import them. **Those callers are invisible from here, so no reading of
+    this repository can establish that withdrawing a name is safe.**
+
+    v0.26.0 renamed `repo_files.tracked` to `present` and moved every caller in
+    the same commit. Every caller it could see: sky.boss's `tests/test_naming.py`
+    was the last one that mattered, and it failed at *collection*, which takes
+    the whole suite rather than one test. `present`'s own docstring had reasoned
+    the hazard through one release earlier and concluded that an API change alone
+    was safe — correct about the template's callers and about nobody else's.
+
+    So the rule is that a public name in a shared helper is permanent, and the
+    remedy is an alias rather than a deprecation window: a window is a decision
+    to re-make later with no more information than there is now.
+
+    **The population is released tags, not this repository's history.** A name
+    that existed between two tags was never handed to anybody, so constraining it
+    would accumulate aliases nobody can have called. Modules that no longer ship
+    are out of scope for the reason the rename was safe on its own: the upgrade
+    never deletes, so the adopter's copy of a withdrawn module stays on disk and
+    keeps importing.
+
+    Both enumerations are asserted. A clone without tags, or one where the glob
+    stops matching, makes every assertion below vacuously true — and a negative
+    over an empty set is this repository's most-repeated failure.
+    """
+    results: List[Result] = []
+
+    code, output = run(["git", "tag", "--list", "v*"], cwd=SKELETOR)
+    tags = sorted(output.split(), key=lambda tag: [int(part) for part in tag[1:].split(".") if part.isdigit()])
+    results.append(
+        Result(
+            "shared helper API: released tags found",
+            len(tags) >= 5,
+            0.0,
+            f"only {len(tags)} tags match `v*` in this checkout, so the released-API population is "
+            f"empty or near it and every assertion below would pass without reading anything. A "
+            f"shallow or tagless clone cannot run this gate.",
+        )
+    )
+
+    code, output = run(["git", "ls-files", "template/*/tests/*.py"], cwd=SKELETOR)
+    modules = [rel for rel in output.splitlines() if rel and not Path(rel).name.startswith("test_")]
+    results.append(
+        Result(
+            "shared helper API: helper modules found",
+            len(modules) >= 3,
+            0.0,
+            f"found {len(modules)} non-test modules under `template/*/tests/`: {modules}. The glob "
+            f"is how this gate finds its subject; a rename of `tests/` disarms it in silence.",
+        )
+    )
+    if not tags or not modules:
+        return results
+
+    withdrawn: Dict[str, Dict[str, str]] = {}
+    released: Dict[str, set] = {}
+    for rel in modules:
+        current = released_helper_names(Path(SKELETOR / rel).read_text(encoding="utf-8"))
+        for tag in tags:
+            code, text = run(["git", "show", f"{tag}:{rel}"], cwd=SKELETOR)
+            if code != 0:
+                continue  # the module did not ship at that tag
+            names = released_helper_names(text)
+            released.setdefault(rel, set()).update(names)
+            for name in names - current:
+                withdrawn.setdefault(rel, {}).setdefault(name, tag)
+
+    # **The count is of names, not of readable pairs.** Counting pairs was the
+    # first draft and a plant walked straight through it: a `git show` that
+    # succeeds with no content, or a revision `released_helper_names` cannot
+    # parse, advances the pair count and contributes nothing to compare against.
+    # A gate whose subject is a set of names has to assert it found names.
+    found = sum(len(names) for names in released.values())
+    results.append(
+        Result(
+            "shared helper API: released names read",
+            found >= len(modules) and len(released) >= len(modules),
+            0.0,
+            f"read {found} released names across {len(released)} of {len(modules)} modules at "
+            f"{len(tags)} tags. `git show <tag>:<path>` is answering with nothing parseable, so the "
+            f"withdrawal check below is comparing against an empty set and cannot fail.",
+        )
+    )
+
+    lines = [
+        f"  {rel}.{name}  —  released at {tag}"
+        for rel, names in sorted(withdrawn.items())
+        for name, tag in sorted(names.items())
+    ]
+    results.append(
+        Result(
+            "shared helper API: no released name was withdrawn",
+            not withdrawn,
+            0.0,
+            "these names were public in a shipped module at a released tag and no longer resolve:\n"
+            + "\n".join(lines)
+            + "\n\nAdopter test files import these and cannot be enumerated from here, so the failure "
+            "lands at pytest COLLECTION in somebody else's tree. Add `old = new` beside the "
+            "definition with the reason, rather than a deprecation window.",
+        )
+    )
+    return results
+
+
 def checkout_path_literal_gate() -> List[Result]:
     """No file names the author's own path to this checkout.
 
@@ -8805,6 +8942,7 @@ def main() -> int:
         results.append(identity_gate())
         results += checkout_path_literal_gate()
         results += upstream_record_gate()
+        results += shared_helper_api_gate()
         results += maintain_summary_gate()
         venv_python = make_venv(workdir, args.quiet)
         results.append(shadow_gate(workdir, venv_python))
