@@ -5092,7 +5092,7 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
             "assigned first."
         )
 
-    return [
+    results = [
         Result(
             f"pinned ref: --ref {tag} stamps {tag}, advises about {tag}, and leaves no worktree behind",
             not problems,
@@ -5100,6 +5100,95 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
             "\n".join(problems) or output[-400:],
         )
     ]
+
+    # **The case the flag was built for and could not reach**, which needed a
+    # fixture the assertions above cannot supply: a tree ALREADY current with the
+    # tag, whose record says something else.
+    #
+    # The manifest is re-copied only by a run that applies something, so a tree
+    # scaffolded from a checkout sitting one commit past a release — with that
+    # commit touching nothing under `template/` — records `<tag>-1-gsha` for
+    # good. Nothing applies, so nothing rewrites the record, so `--ref` had
+    # nothing to record on; `--ported` is a re-run and a re-run of nothing
+    # applies nothing either. Two correct rules composing into a trap with no
+    # exit, landing exactly on the population that wanted the flag. Three trees
+    # recorded such a stamp in one round.
+    #
+    # The target above cannot be this fixture: it is scaffolded from HEAD, whose
+    # template differs from the tag's, so `--ref <tag>` has plenty to offer and
+    # the already-current branch is never reached. A separate clone, because
+    # committing into `clean` would move a checkout other gates share.
+    stamped_scratch = workdir / "pinned-ref-stamped"
+    if not stamped_scratch.exists():
+        run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(stamped_scratch)], cwd=workdir)
+        tip = run(["git", "-C", str(stamped_scratch), "rev-parse", "HEAD"], cwd=stamped_scratch)[1].strip()
+        git_in(stamped_scratch, "checkout", "--quiet", "-B", "past-the-tag", tag)
+        # **`bin/skeletor-upgrade` alone, and the narrowness is the fixture.**
+        # The commit past the tag has to leave `template/` byte-identical to the
+        # tag, or the tree is not already current and this reaches the ordinary
+        # path instead. It also has to carry the tool under test: a branch cut at
+        # the tag ships the TAG's upgrade binary, so the first version of this
+        # gate ran a release that predates the behaviour it asserts and reported
+        # the bug as unfixed. `bin/skeletor-new` is deliberately left at the tag,
+        # since `--ref` renders through the scaffolder at that ref and a mixed
+        # pair would differ for a reason that is not the subject.
+        git_in(stamped_scratch, "checkout", tip, "--", "bin/skeletor-upgrade")
+        git_in(stamped_scratch, "add", "-A")
+        git_in(stamped_scratch, "commit", "--quiet", "-m", "past the tag, touching no template file")
+
+    manifest_name = scaffolder.MANIFEST_NAME
+    stamped = workdir / "pinned-ref-stamped-tree" / "probe"
+    if stamped.exists():
+        shutil.rmtree(stamped.parent)
+    run(
+        [sys.executable, str(stamped_scratch / "bin" / "skeletor-new"), str(stamped),
+         "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--force"],
+        cwd=SKELETOR,
+    )
+
+    def recorded() -> str:
+        return json.loads((stamped / manifest_name).read_text(encoding="utf-8"))["skeletor_ref"]
+
+    upgrade = [sys.executable, str(stamped_scratch / "bin" / "skeletor-upgrade"), str(stamped), "--ref", tag]
+    born = recorded()
+    _, dry = run(upgrade + ["--dry-run"], cwd=stamped)
+    after_dry = recorded()
+    _, real = run(upgrade, cwd=stamped)
+    after_real = recorded()
+    # A second run has to validate the map it just relabelled. `cross_check` is a
+    # bijection against the render at `skeletor_ref`, so a relabel that moved the
+    # ref without the hashes agreeing would be refused here — which is the whole
+    # reason this is only done when the two renders are identical.
+    _, again = run(upgrade + ["--dry-run"], cwd=stamped)
+
+    stamped_problems = []
+    if born == tag:
+        stamped_problems.append(
+            f"the fixture was born recording {born}, so it is not the trap: this needs a tree whose "
+            "record is a describe suffix while its template matches the tag exactly."
+        )
+    if "already current" not in dry:
+        stamped_problems.append(f"the fixture is not already current with {tag}, so the gap is not reached:\n{dry[-600:]}")
+    if after_dry != born:
+        stamped_problems.append(f"the DRY run rewrote the record {born} → {after_dry}; a dry run writes nothing")
+    if after_real != tag:
+        stamped_problems.append(
+            f"--ref {tag} on an already-current tree left the record at {after_real}. That is the case the "
+            "flag exists for: nothing applies, so nothing rewrites the manifest, so the stamp nobody chose "
+            "is permanent."
+        )
+    if "already current" not in again or "does not match" in again or "refus" in again.lower():
+        stamped_problems.append(f"the relabelled manifest no longer validates against its own ref:\n{again[-600:]}")
+
+    results.append(
+        Result(
+            f"pinned ref: --ref {tag} records the ref on an already-current tree, and a dry run does not",
+            not stamped_problems,
+            0.0,
+            "\n".join(stamped_problems) or f"{born} → {after_real}, files untouched",
+        )
+    )
+    return results
 
 
 def pending_ref_gate(workdir: Path) -> List[Result]:

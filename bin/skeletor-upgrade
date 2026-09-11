@@ -2573,10 +2573,48 @@ def main() -> int:
                 detail("Provisional: uncommitted content reaches this render, so the comparison")
                 detail("includes it. Commit it, or ask a clean clone at a tag, before treating")
                 detail("'nothing to carry over' as settled.")
-            if ref and ref != head_ref:
+            if ref and ref != head_ref and args.ref:
+                # **`--ref` on an already-current tree is the one case where
+                # relabelling the record IS the work**, and for one release it
+                # was the case the flag could not reach.
+                #
+                # The flag exists because `git describe` of an operator's
+                # checkout stamps `v0.24.0-1-g6f4a54e` into every adopter — a
+                # version nobody chose, resolvable only while that commit stays
+                # pushed and unrewritten. Three trees recorded one in a single
+                # round and none could pin it: `.skeletor.json` says *do not
+                # hand-edit* on its first line, correctly. But the manifest is
+                # re-copied only by a run that applies something, so a tree that
+                # was ALREADY current kept the stamp for good, and that is
+                # exactly the population the flag was built for. Two correct
+                # rules composing into a trap with no exit, and `--ported` does
+                # not reach it either — it is a re-run, and a re-run of nothing
+                # applies nothing.
+                #
+                # Recording it here is sound rather than merely convenient.
+                # Reaching this branch means no file was added, updated, merged,
+                # conflicted or collided, which is to say the head render equals
+                # the base render for every path — so the map this writes is the
+                # one already on disk and only `skeletor_ref` moves. That is why
+                # it is safe without applying anything, and why it is gated on
+                # the flag: without `--ref`, the same write would stamp whatever
+                # `git describe` said on a no-op run, every run, which is the
+                # churn the sentence below was right about.
+                if args.dry_run:
+                    detail(f"{MANIFEST_NAME} records {ref}; --ref would record {head_ref} instead.")
+                    detail("Nothing else is being carried over — the two renders are identical, so")
+                    detail("this is a relabel of the record and not a change to your files.")
+                else:
+                    shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
+                    say("📌", f"{MANIFEST_NAME}: {ref} → {head_ref}")
+                    detail("The two renders are identical, so only the recorded ref moved. Your")
+                    detail("files were not touched, and the next upgrade now renders its base from")
+                    detail("the ref you chose rather than the one this tree happened to be made at.")
+            elif ref and ref != head_ref:
                 detail(f"{MANIFEST_NAME} still records {ref}, and will keep doing so: it is")
                 detail("re-copied only by a run that applies something. Being behind by a ref and")
-                detail("being behind by a file are different, and only the second is work.")
+                detail("being behind by a file are different, and only the second is work —")
+                detail(f"except a ref you CHOSE, which `--ref {head_ref}` records here and now.")
             if args.dry_run and stale:
                 # The dry-run footer below is unreachable from here, and this is
                 # the case that needed it most. That warning is conditioned on

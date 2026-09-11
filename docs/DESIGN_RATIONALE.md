@@ -3239,6 +3239,64 @@ conclusion, and **a decision that has to be re-made on a schedule is not a
 decision** — the same argument that stopped `bin/skeletor-upgrade` restoring
 files a user had deleted.
 
+## Drift has a copy to delete. This has nothing to point at
+
+This repository's governing rule about stale facts presupposes a copy: *do not
+keep a copy of what a command will tell you.* The worktree list, the four-of-five
+count, the `5 of 5` row — every one of them had an instrument available and used
+a second home instead, and the remedy is always the same: delete the copy, run
+the command.
+
+**A release produced a false sentence with no copy behind it, and that is a
+different animal.** `bin/skeletor-upgrade` prints, on the most reassuring line
+it has:
+
+> being behind by a ref and being behind by a file are different, and only the
+> second is work
+
+True when written. Nothing was copied, nothing went stale, and the sentence
+still describes the mechanism it was written about — the manifest really is
+re-copied only by a run that applies something. Then `--ref` shipped two
+releases later, in a different file, and recording a ref the operator *chose*
+became work the tool can do. **What changed is the set the sentence quantifies
+over.**
+
+No gate can see that, and the reason is worth being exact about: **neither
+artifact is wrong.** The sentence is a correct description of the manifest rule.
+`--ref` is correct on its own terms. A checker comparing either against its
+subject finds nothing, because the defect is in the relationship between two
+things that never had to agree before one of them existed.
+
+So the class is:
+
+> **Drift is a copy that stopped matching its source. This is a claim whose
+> scope was narrowed by something else, and scope is not stored anywhere.**
+
+The remedies differ, which is why filing the two together would be a mistake.
+Drift is fixed structurally — delete the copy, derive the value. This one has
+nothing to delete and nothing to derive, so the only defence is the habit: **when
+you add a capability, re-read the sentences that describe what the tool cannot
+do.** A feature's blast radius includes every place the old limitation was
+offered as reassurance, and those places are the hardest to find precisely
+because they are not about the feature.
+
+The workspace declined to file this as drift and was right to. Two instances in
+one release, both found by running the tool rather than reading it:
+
+* the `--ref` gap itself — `--ref` could not correct an already-current tree,
+  because two correct rules composed into one. The flag records on any run that
+  applies something; the manifest is re-copied only by such a run; a tree that
+  is already current applies nothing. That is precisely the population the flag
+  was built for, and `--ported` does not reach it either, being a re-run.
+* five documents claiming `ready_for_review` "runs the full set before it can
+  merge", which the classifier's own verdict table denied on the line above.
+
+The second one has a companion lesson about instruments rather than sentences.
+That table had the two rows adjacent and identical for several releases, and the
+gate beside it asserted only that the transition never *loses* a job — so the
+measurement existed and the question did not. **A table that answers a question
+is not the same as anybody having asked it.** Both directions are asserted now.
+
 ## The shared-tree problem — the newest and least obvious lesson
 
 Multi-agent work introduced a failure class that single-developer repos do not
