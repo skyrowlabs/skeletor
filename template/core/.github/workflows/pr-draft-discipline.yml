@@ -29,12 +29,27 @@ jobs:
             const { docsOnly } = await decide({ github, context, core });
             if (docsOnly) return;
 
+            // **The headline below is a universal claim and must stay true in both
+            // branch shapes.** It read *"re-runs the full suite"*, which is the
+            // sentence `docs-only.cjs` corrects in itself: a ready pull request
+            // carrying code into the BASE branch of a two-branch tree runs the gate,
+            // the node job and the unit suite, not everything. The commit that fixed
+            // the conditional eleven lines below named "a bot comment that tells a
+            // contributor so on their own PR" as the worst place for that claim, and
+            // left this line — the opening sentence of the same string array.
+            //
+            // It cannot be split by `SCAFFOLD-IF`: those are HTML comments and would
+            // be a YAML syntax error, which is why prose in a workflow says the thing
+            // that is true everywhere and lets the substituted release branch below
+            // carry the narrower half. mind.head's finding.
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.pull_request.number,
               body: [
-                '👋 This PR was opened **ready**, which means every push to it re-runs the full suite.',
+                '👋 This PR was opened **ready**, which means every push to it re-runs every job it',
+                'earns — and it carries code, so that is strictly more than a draft would run.',
                 '',
                 'Cheaper loop:',
                 '',
