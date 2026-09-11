@@ -6590,7 +6590,45 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     # passes, and the whole fixture asserts nothing. That is how the first
     # version of this gate read: green on the append for a reason that had
     # nothing to do with appends.
+    def region_append(text: str) -> Optional[str]:
+        """The append in the marked region, which is what the seam now documents."""
+        marker = "# ── Your own lifecycle folders"
+        if marker not in text:
+            return None
+        head, rest = text.split(marker, 1)
+        end = rest.find("\n# ── ")
+        if end < 0:
+            return None
+        return head + marker + rest[:end] + "\n" + as_append + rest[end:]
+
+    def blank_line_append(text: str) -> Optional[str]:
+        """The append one blank line below the template's last line at the seam.
+
+        **The control, and it has to be this spelling rather than an adjacent
+        one.** An adjacent append conflicts on the FIRST merge — measured, and
+        correctly — so it never reaches a second and cannot be the control for a
+        re-run. The population dream.doll and proto.pilot found is the adopter who
+        followed the documented rule: one blank line, a clean first merge, and a
+        re-conflict on the next run because the two insertion points coincide once
+        the template's new lines are on disk beside the append.
+
+        So this is the spelling the region replaces, at its best rather than its
+        worst. A region append that survives a re-merge proves nothing unless the
+        rule it supersedes does not.
+        """
+        anchor = "#: the constant the template defined.\n"
+        if anchor not in text:
+            return None
+        return text.replace(anchor, anchor + "\n" + as_append.lstrip("\n"), 1)
+
+    #: The second shipped file both re-run trees also edit, so the first run
+    #: leaves something pending and holds the base back. Without that the run
+    #: advances the ref, the next run is `already current`, and the re-merge this
+    #: gate exists for never happens.
+    second_rel = "AGENTS.md"
+
     adopters = {}
+    rerun_trees = {}
     for label, mutate in (("append", None), ("in-block", in_block)):
         tree = build(label)
         if tree is None:
@@ -6610,6 +6648,32 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
         run(["git", "-C", str(tree), "commit", "-q", "-m", f"adopter: {label} removal"], cwd=tree)
         adopters[label] = tree
 
+    # **Scaffolded in the same pre-edit window, for the reason above.** Built
+    # after the upstream commit their base render already carries it, base and
+    # head agree, nothing is offered, and every assertion below passes having
+    # merged nothing.
+    for label, place in (("region", region_append), ("blank-line", blank_line_append)):
+        tree = build(f"rerun-{label}")
+        if tree is None:
+            return [Result(f"append seam: could not scaffold the rerun-{label} tree", False,
+                           time.time() - started, "")]
+        placed = place((tree / paths_rel).read_text(encoding="utf-8"))
+        if placed is None:
+            return [Result(f"append seam: could not place a {label} append in the scaffolded {paths_rel}",
+                           False, time.time() - started, "")]
+        (tree / paths_rel).write_text(placed, encoding="utf-8")
+        # The same local edit to the second file, so the first run conflicts
+        # there and the base is held back for both trees identically.
+        other = tree / second_rel
+        if other.exists():
+            other_text = other.read_text(encoding="utf-8")
+            line = next((l for l in other_text.splitlines() if l.strip() and not l.startswith(("#", "<!--"))), None)
+            if line:
+                other.write_text(other_text.replace(line, line + " (reworded locally)", 1), encoding="utf-8")
+        run(["git", "-C", str(tree), "add", "-A"], cwd=tree)
+        run(["git", "-C", str(tree), "commit", "-q", "-m", f"adopter: {label} append and a local edit"], cwd=tree)
+        rerun_trees[label] = tree
+
     # Only now does upstream edit the literal these adopters are extending. A
     # reworded reason is the smallest true version of what this repository does
     # to that block, and it is what the seam's claim is about.
@@ -6621,7 +6685,24 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
         return [Result("append seam: nothing inside PRESENT_TENSE to rewrite upstream", False,
                        time.time() - started, "")]
     source.write_text(template.replace(hit.group(0), hit.group(0) + "  # reworded upstream"), encoding="utf-8")
-    git_in(scratch, "commit", "--quiet", "-am", "scratch: reword inside the PRESENT_TENSE literal")
+
+    # **And upstream touches its own LAST line at the seam**, which is the change
+    # the re-run pair is actually about. The edit above lands inside the literal,
+    # some 35 lines from where an adopter appends — so it creates no adjacency
+    # with anybody's append, and the adjacent control merged clean, leaving the
+    # region's clean re-run proving nothing.
+    #
+    # Editing the final line of the seam's own comment block is what this
+    # repository really does there: v0.26.0 inserted a 28-line removal-idiom
+    # block into exactly that gap, which is how dream.doll's append ended up
+    # sharing an insertion point with the template's.
+    seam_tail = "#: the constant the template defined.\n"
+    text = source.read_text(encoding="utf-8")
+    if seam_tail not in text:
+        return [Result(f"append seam: no seam-tail line to edit upstream in {paths_rel}", False,
+                       time.time() - started, "")]
+    source.write_text(text.replace(seam_tail, seam_tail.rstrip("\n") + " Reworded upstream.\n", 1), encoding="utf-8")
+    git_in(scratch, "commit", "--quiet", "-am", "scratch: reword inside the literal and at the seam's last line")
 
     problems = []
     green = ""
@@ -6656,7 +6737,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
                 "proves nothing about appends."
             )
 
-    return [
+    results = [
         Result(
             f"append seam: removing {entry!r} as an append stays green and merges clean, in-block does not",
             not problems,
@@ -6664,6 +6745,170 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
             "\n".join(problems) or f"tree's own suite: {green}",
         )
     ]
+
+    # ## The re-run, which is the merge a round actually performs more than once
+    #
+    # Everything above asks the FIRST merge. dream.doll's finding is that the
+    # seam's guarantee was a first-merge guarantee: after one clean merge the
+    # tree holds the template's new lines *and* the adopter's append at one
+    # anchor, so the next merge sees two changes at one insertion point. Every
+    # round with a conflict anywhere forces that next merge, and proto.pilot
+    # narrowed the trigger from `--ported` to **any re-run before the base
+    # advances** — which is the sequence this repository's own upgrade advice
+    # instructs an adopter to perform.
+    #
+    # **Reproducing it needs the base genuinely held back**, so these two trees
+    # also edit a second shipped file that upstream edits, and that file
+    # conflicts. A run with nothing pending advances the ref, the next run is
+    # `already current`, and the re-merge never happens — which is why no gate
+    # here had seen this.
+    #
+    # The pair is the discriminator, as above: an append in the marked region
+    # must survive the re-run, and the same append sitting hard against the
+    # template's own last line must not. Without the second tree a clean re-run
+    # says nothing, since a first-merge-only fix is equally green on the subject.
+    # ## The promise the region makes, asserted against what ships
+    #
+    # The region's whole mechanism is that an upgrade has no change there to
+    # collide with, and that is only true while skeletor ships it empty. One
+    # template line in it and the region is just another shared insertion point —
+    # with prose above it telling adopters it is safe. This is the generator's
+    # question: a tree can see its own file and cannot see what the next release
+    # will put in it.
+    marker = "# ── Your own lifecycle folders"
+    shipped_text = (probe / paths_rel).read_text(encoding="utf-8")
+    region_problems = []
+    # **By line, not by substring.** Splitting on the marker text cuts its own
+    # line in half and leaves the trailing box rule as the first thing "inside"
+    # the region — which this reported as a line of template content, in the
+    # region, in the gate asserting there is none. A marker is a line.
+    shipped_lines = shipped_text.splitlines()
+    starts = [i for i, line in enumerate(shipped_lines) if line.startswith(marker)]
+    if len(starts) != 1:
+        region_problems.append(
+            f"the region marker appears {len(starts)} times in the rendered {paths_rel}; an adopter "
+            f"cannot be told to append below `the` marker if there is not exactly one."
+        )
+    else:
+        body, end = [], -1
+        for offset, line in enumerate(shipped_lines[starts[0] + 1 :]):
+            if line.startswith("# ── "):
+                end = offset
+                break
+            body.append(line)
+        # Comment lines are the marker's own explanation and belong to it; any
+        # line that is neither blank nor a comment is template CONTENT below the
+        # line that promises there is none.
+        content = [line for line in body if line.strip() and not line.lstrip().startswith("#")]
+        if content:
+            region_problems.append(
+                f"skeletor ships {len(content)} line(s) of content inside the region it promises never to "
+                f"add a line to: {content}. Every adopter append below them then shares an insertion "
+                f"point with the template again, under prose saying it does not."
+            )
+        if end < 0:
+            region_problems.append(
+                f"no section header closes the region in the rendered {paths_rel}, so it runs to end of "
+                f"file and this check cannot bound what is in it."
+            )
+    results = [
+        Result(
+            f"append seam: skeletor ships the adopter region empty in {paths_rel}",
+            not region_problems,
+            0.0,
+            "\n".join(region_problems),
+        )
+    ] + results
+
+    rerun_problems = []
+    second = scratch / "template" / "core" / second_rel
+    if not second.exists():
+        rerun_problems.append(f"{second_rel} does not ship from template/core, so nothing holds the base back")
+    else:
+        text = second.read_text(encoding="utf-8")
+        line = next((l for l in text.splitlines() if l.strip() and not l.startswith(("#", "<!--"))), None)
+        if line is None:
+            rerun_problems.append(f"no prose line in {second_rel} to make both sides edit")
+        else:
+            second.write_text(text.replace(line, line + " (reworded upstream)", 1), encoding="utf-8")
+            git_in(scratch, "commit", "--quiet", "-am", f"scratch: reword a line of {second_rel}")
+
+    def envelope(output: str) -> dict:
+        """The `--json` object, anchored on the line that is exactly `{`.
+
+        **Read rather than scraped, and the first draft of this block scraped.**
+        It asked whether `scripts/paths.py` appeared anywhere after the first
+        `LEFT ALONE` — which is true when a DIFFERENT file conflicts and this one
+        is merely listed in the standing-state block further down. The precondition
+        then reported "the first run did not merge it cleanly" about a run that
+        had merged it cleanly. A classification is a list and belongs read from
+        the envelope; the same too-broad-region mistake as asserting a branch name
+        appears "in the row".
+        """
+        lines = output.splitlines(keepends=True)
+        head = next((i for i, line in enumerate(lines) if line.rstrip() == "{"), None)
+        try:
+            if head is None:
+                raise ValueError("no envelope")
+            return json.JSONDecoder().raw_decode("".join(lines[head:]))[0]
+        except (ValueError, json.JSONDecodeError):
+            return {}
+
+    for label, tree in rerun_trees.items():
+        if rerun_problems:
+            break
+        upgrade = [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree)]
+        _, first_text = run(upgrade + ["--json"], cwd=tree)
+        first = envelope(first_text)
+        # The fixture's own preconditions, asserted rather than assumed. A first
+        # run that did not merge this file, or that advanced the base, makes the
+        # re-run below a different scenario reported under this label.
+        if not first:
+            rerun_problems.append(f"{label}: the first run printed no --json envelope:\n{first_text[-900:]}")
+            continue
+        if paths_rel not in (first.get("merged") or []):
+            rerun_problems.append(
+                f"{label}: the FIRST run did not merge {paths_rel} cleanly, so there is no "
+                f"cleanly-merged file for the re-run to re-conflict. merged={first.get('merged')} "
+                f"conflicted={first.get('conflicted')}"
+            )
+            continue
+        if not (first.get("conflicted") or first.get("collided")):
+            rerun_problems.append(
+                f"{label}: the first run left nothing pending, so the base advanced and the re-run is "
+                f"`already current` — the scenario is not reached. base_ref={first.get('base_ref')}"
+            )
+            continue
+        _, again_text = run(upgrade + ["--dry-run", "--json"], cwd=tree)
+        again = envelope(again_text)
+        if not again:
+            rerun_problems.append(f"{label}: the re-run printed no --json envelope:\n{again_text[-900:]}")
+            continue
+        reconflicted = paths_rel in (again.get("conflicted") or [])
+        if label == "region" and reconflicted:
+            rerun_problems.append(
+                f"an append in the marked region re-conflicted on the second merge. The region exists so "
+                f"the adopter's line is never at the template's insertion point, and the run before this "
+                f"one merged the same file cleanly. conflicted={again.get('conflicted')}"
+            )
+        if label == "blank-line" and not reconflicted:
+            rerun_problems.append(
+                f"the one-blank-line append did NOT re-conflict, so this pair does not discriminate: "
+                f"the "
+                f"region's clean re-run proves nothing when the spelling it replaces is also clean. "
+                f"Upstream's edit is not landing where the adopter's line sits. "
+                f"conflicted={again.get('conflicted')}"
+            )
+
+    results.append(
+        Result(
+            f"append seam: a region append survives a re-run before the base advances, a blank-line one does not",
+            not rerun_problems,
+            0.0,
+            "\n".join(rerun_problems),
+        )
+    )
+    return results
 
 
 def moved_symbol_gate(workdir: Path) -> List[Result]:
