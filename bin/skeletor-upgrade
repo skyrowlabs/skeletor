@@ -2010,6 +2010,19 @@ def main() -> int:
                     # claim about an empty set, printed as reassurance.
                     detail("Until then the files that DID apply read as edited, which is what they are.")
                 detail()
+                # **A gate whose population comes from the manifest is inert until
+                # the ref moves, and is green while it is inert.** mind.head wrote a
+                # newly over-length file, ran the suite immediately after this run,
+                # and the gate demanding its exemption said nothing — correctly: the
+                # manifest still describes the previous base, so the file is not yet
+                # vendored and the enumeration does not contain it. The flow this
+                # tool documents is right; what was missing is that the suite run
+                # sitting between the two runs is not evidence about those files.
+                detail("A check that derives its scope from this manifest is still reading the")
+                detail(f"{ref} base, so it cannot see the files above. Running the suite now is")
+                detail("green on them by construction rather than by measurement — the run that")
+                detail("advances the base is the first one whose verdict covers them.")
+                detail()
                 detail("If your version of these IS the resolution — an adopter's file the")
                 detail("template also ships, and you are not taking ours — say so with --ported")
                 detail("and the base advances. That is an assertion nothing can check for you.")
