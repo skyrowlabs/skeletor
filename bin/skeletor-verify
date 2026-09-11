@@ -5237,6 +5237,29 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
         # against a fresh scaffold, where nothing applies and nothing conflicts,
         # so the two bases are the same map and the wrong one cannot be told
         # from the right one. Same reason the manifest bug above lived.
+        # **The same question of the run BEFORE the base advances**, which is
+        # every dry run and the `--ported` preview this flow documents. The
+        # fixture already produced this output and nothing read it.
+        #
+        # The run above applied files and held the manifest back — correctly,
+        # since a partially-applied upgrade is not describable in a
+        # single-version snapshot. So everything it wrote now differs from a
+        # recorded base nobody has replaced, and a raw hash comparison reports
+        # this tool's own output under a heading that says the reader decided
+        # it. v0.25.0 fixed the advancing run and left this one; sky.boss found
+        # the residual. A file byte-identical to the head render is not a
+        # divergence at any point in that sequence.
+        preview = re.search(r"(\d+) file\(s\) skeletor wrote and you have edited", second)
+        previewed = preview and int(preview.group(1))
+        if previewed not in (None, 1):
+            problems.append(
+                f"the dry run between the applying run and --ported reported {previewed} standing "
+                f"divergence(s); this tree has exactly one, {rel}. The rest is the previous run's "
+                "own output, measured against a base that run deliberately did not advance."
+            )
+        elif previewed == 1 and rel not in second.split("skeletor wrote and you have edited", 1)[1]:
+            problems.append(f"the dry run named one standing divergence and it was not {rel}")
+
         standing = re.search(r"(\d+) file\(s\) skeletor wrote and you have edited", ported)
         listed = standing and int(standing.group(1))
         if listed != 1:
@@ -6169,6 +6192,40 @@ def normalise_gate(workdir: Path) -> List[Result]:
         problems.append(f"--normalise did not resolve a conflict its own formatter wrote:\n{normalised}")
     elif rel not in normalised:
         problems.append(f"--normalise resolved the conflict by not classifying {rel} at all:\n{normalised}")
+
+    # **The same path in both columns, which is mind.head's half of this.**
+    # With the flag the merge decides this file was never touched and applies
+    # it — and the standing-state list was still hashing raw bytes, so the one
+    # run reported `{rel}` as applied AND as "skeletor wrote this and you have
+    # edited it". Both sentences about one path, in one output, disagreeing.
+    #
+    # The fixture is exact about which divergence survives: dropping a name from
+    # `known_first_party` is an edit to `pyproject.toml` and stays standing,
+    # correctly, because a reader made it. What must not stand is the file their
+    # formatter then rewrote, which is the thing they did not decide.
+    def standing_names(output: str) -> List[str]:
+        """The paths listed under the standing-state heading, and nothing after it."""
+        if "skeletor wrote and you have edited" not in output:
+            return []
+        names = []
+        for line in output.split("skeletor wrote and you have edited", 1)[1].splitlines()[1:]:
+            if line.strip().startswith("\u00b7 "):
+                names.append(line.strip()[2:].strip())
+            elif names and not line.strip():
+                break
+        return names
+
+    if rel not in standing_names(plain):
+        # Asserted so the assertion below cannot pass by the block being absent
+        # for an unrelated reason. Without the flag this IS a raw-byte
+        # divergence and must be reported as one.
+        problems.append(f"without --normalise, {rel} is not reported as standing state:\n{plain}")
+    elif rel in standing_names(normalised):
+        problems.append(
+            f"--normalise applied {rel} and reported it as your standing edit in the same run. "
+            "The merge honoured the flag and the standing-state list hashed raw bytes, so one "
+            f"path printed in both columns. Listed: {standing_names(normalised)}"
+        )
 
     return [
         Result(

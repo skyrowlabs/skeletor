@@ -557,8 +557,14 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def standing_divergence(target: Path, reference: Dict[str, str]) -> List[str]:
-    """Files skeletor wrote here that no longer match `reference`.
+def standing_divergence(
+    target: Path,
+    reference: Dict[str, str],
+    head_files: Optional[Dict[str, Path]] = None,
+    render: Optional[Dict[str, Path]] = None,
+    normaliser: Optional["Normaliser"] = None,
+) -> List[str]:
+    """Files skeletor wrote here that no longer match `reference` — and are edits.
 
     `reference` is `{repo-relative path: sha256 of what skeletor produces}` —
     the *base in force*. Which base that is depends on the run, and is the
@@ -571,15 +577,59 @@ def standing_divergence(target: Path, reference: Dict[str, str]) -> List[str]:
     separately and for a different reason. Generated artifacts and the manifest
     are excluded because their content is a function of the tree, so comparing
     them to a render says nothing about what anybody edited.
+
+    ## A different hash is not an edit, and two ways it is not
+
+    The heading over this list says *yours by decision*, so every name under it
+    is a claim about something the reader did. A raw hash comparison cannot
+    make that claim on its own, and both of the ways it overstates were found
+    by adopters reading their own trees.
+
+    **Already-applied output, awaiting a base advance.** A run that leaves
+    anything pending holds the manifest back — deliberately, since a
+    partially-applied upgrade cannot be described in a single-version snapshot.
+    So everything that run *did* apply now differs from a recorded base nobody
+    has replaced. v0.25.0 fixed this for the run that advances by re-asking
+    against the head render; the residual is every run that does not, which
+    includes every dry run and the `--ported` preview the flow documents.
+    sky.boss's finding, and their predicate is exact: a file byte-identical to
+    the head render is **this tool's own output**, whoever wrote it there.
+    Nothing about it is standing and nothing about it is a decision.
+
+    **A formatting difference the merge already looked past.** `--normalise`
+    puts both rendered sides through the tree's own formatters before merging,
+    because a formatter is a second author — so a file whose only divergence is
+    its formatter's output merges clean and is reported as applied. This list
+    was still comparing raw bytes, so the same path printed under *updated* and
+    under *you have edited* in one run. mind.head's finding. The comparison
+    honours the flag the merge honoured: if the disk and the render normalise
+    to the same text, the difference is the formatter's and not the reader's.
+
+    Both are computed only for files that already differ by hash, so the common
+    path is unchanged and the formatter subprocesses are bounded by the size of
+    the list being corrected rather than by the tree.
     """
-    return sorted(
-        rel
-        for rel, digest in reference.items()
-        if rel not in GENERATED
-        and rel != MANIFEST_NAME
-        and (target / rel).exists()
-        and sha256(target / rel) != digest
-    )
+    out = []
+    for rel, digest in sorted(reference.items()):
+        if rel in GENERATED or rel == MANIFEST_NAME:
+            continue
+        live = target / rel
+        if not live.exists():
+            continue
+        disk = sha256(live)
+        if disk == digest:
+            continue
+        head = (head_files or {}).get(rel)
+        if head is not None and disk == sha256(head):
+            continue
+        source = (render or {}).get(rel)
+        if normaliser and source is not None and normaliser.applies(rel):
+            here, there = read(live), read(source)
+            if here is not None and there is not None:
+                if normaliser(here, rel) == normaliser(there, rel):
+                    continue
+        out.append(rel)
+    return out
 
 
 def importers_of(needs_review: List[str], written: List[str], head_files: Dict[str, Path]) -> Dict[str, List[str]]:
@@ -1568,7 +1618,13 @@ def main() -> int:
         #
         # So it is computed twice, from one function, and the second call is
         # made only where the answer changes. See `advanced` below.
-        diverged = standing_divergence(target, hashes or {})
+        #
+        # `head_files` and the base render go in as well, because a hash that
+        # differs is not yet an edit: this tool's own already-applied output and
+        # a formatter's reflow both differ from the recorded base and neither is
+        # a decision anybody made. The function carries the argument.
+        normalising = normaliser if args.normalise else None
+        diverged = standing_divergence(target, hashes or {}, head_files, base_files, normalising)
 
         for rel in sorted(set(base_files) | set(head_files)):
             if rel in GENERATED or rel == MANIFEST_NAME:
@@ -1890,7 +1946,13 @@ def main() -> int:
                 # post-write reading "under-counts on the runs that changed the
                 # most" — which is true only if you take every applied file to
                 # be a divergence, and an applied file is the opposite of one.
-                diverged = standing_divergence(target, {rel: sha256(path) for rel, path in head_files.items()})
+                diverged = standing_divergence(
+                    target,
+                    {rel: sha256(path) for rel, path in head_files.items()},
+                    head_files,
+                    head_files,
+                    normalising,
+                )
 
         # One call, two renderings. It was computed separately for the JSON and
         # for the human report — two call sites for one answer, which is the
