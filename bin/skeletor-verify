@@ -5676,10 +5676,26 @@ def adopted_repo_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     **untracked afterwards**. Two moments in one command, and the first one
     landing made the second look handled.
 
-    The plant is the second assertion and it is what makes the first mean
-    anything: unstage, and the same suites must go red. Otherwise this gate
-    passes on a tree that was green for some other reason and would keep passing
-    if the staging were deleted.
+    **The plant used to be "unstage and the same suites go red", and that
+    invariant has been deliberately retired.** It was a true statement about a
+    tree whose scanners enrolled by `git ls-files`, and it made staging
+    load-bearing for correctness rather than for the adopter's convenience —
+    which is the bug sky.boss then found one artifact over: `bin/skeletor-upgrade`
+    writes and never stages, so every file an upgrade delivered was invisible to
+    the gates meant to check it, and the failure surfaced on the adopter's commit
+    reading as their mistake. `tests/repo_files.present` enrols from the working
+    tree now, minus what `.gitignore` disclaims.
+
+    So the assertion is inverted, and it is the stronger one: unstage, and the
+    suites **stay green**, because the index is not what they are asking about.
+    It still discriminates, and that is not an accident of inversion — every one
+    of these scanners routes through `scanned()`, which fails an enumeration too
+    small to prove anything. A suite that saw nothing cannot come back green, so
+    green-while-unstaged means it enumerated the untracked render.
+
+    Staging keeps its own assertion above, where it belongs: the adopter wants
+    skeletor's output as one reviewable changeset, and that is a claim about
+    `bin/skeletor-new`, not about whether a test can see a file.
     """
     started = time.time()
     scaffolder = load_scaffolder()
@@ -5748,14 +5764,16 @@ def adopted_repo_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     )
 
     run(["git", "-C", str(target), "reset", "-q"], cwd=target)
-    red, red_out = run([str(venv_python), *suite], cwd=target)
+    loose_now = run(["git", "-C", str(target), "ls-files", "--others", "--exclude-standard"], cwd=target)[1].split()
+    unstaged, unstaged_out = run([str(venv_python), *suite], cwd=target)
     results.append(
         Result(
-            "adopted repo: unstaged, those same suites go red",
-            red != 0,
+            f"adopted repo: unstaged, those same {len(loose_now)} file(s) are still enumerated",
+            unstaged == 0,
             0.0,
-            "They passed with the render unstaged, so staging is not what makes them green and "
-            f"this gate proves nothing:\n{red_out[-1000:]}" if red == 0 else "",
+            "They went red with the render unstaged, so these scanners are still asking the index "
+            "rather than the tree — which is the state in which every file an upgrade delivers is "
+            f"invisible to them until somebody stages it:\n{unstaged_out[-1000:]}" if unstaged != 0 else "",
         )
     )
     return results
