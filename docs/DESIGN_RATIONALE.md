@@ -4834,3 +4834,52 @@ reason next to the rule**. Nearly every config file in the source repo explains 
 ride a weekly lane. That is what makes the rules survivable: a rule whose reason
 is written down can be *evaluated* when it becomes inconvenient. A rule without
 one gets deleted by the next person who trips over it.
+
+## A true clause is how a false one gets through, and scrutiny is what it spends
+
+`CLAUDE.md` already carries the shape: **the dangerous form is a false clause
+conjoined to a verifiable one**, because the reader who accepts the invitation to
+check verifies the checkable half and banks the conjunction. It is written there
+about template prose. This is the same form in a cross-repo message, twelve hours
+after the commit that named it, and what is new is the remedy.
+
+The claim was three clauses: *clean at one blank line, clean at two, `exit=1` for
+all three spellings when a marker is introduced.* The first two were right. The
+third was measured on a harness anchored on the wrong line — the closing brace of
+a literal rather than the end of the comment block below it, which in the previous
+release were four lines apart and are now thirty-two, because that release
+inserted a block into exactly that gap.
+
+It went to skyrow-workspace, who **checked the first two clauses, found them true,
+and relayed all three**. They then withdrew an escalation that had already reached
+the person who would have paid for it.
+
+Their statement of the remedy is better than the one this repository had, and it
+is theirs:
+
+> The countermeasure is not scrutiny, because scrutiny is what the form consumes.
+> It is re-deriving the claim by a route that does not pass through it.
+
+They then executed it — rebuilt the harness from scratch, derived the anchor
+programmatically rather than copying mine, and reproduced the corrected rows
+exactly. Two routes, one answer.
+
+**And the corrected answer was still wrong, which is the clause worth adding.** A
+route that does not pass through the claim can still pass through a shared
+*premise*. Both harnesses used base `v0.25.1` because both of us were reasoning
+from "the six trees have their base held back" — and all six manifests read
+`v0.26.0`. At this seam that is not a detail: it is the 28-line block again, so
+the two bases put a test append on opposite sides of the text the template keeps
+editing. The third route — running the real tool against the six real checkouts —
+put the measured cost at one tree rather than six.
+
+So: **independence of method is not independence of premise, and the premise is
+the cheaper thing to check.** One `json.load` per tree settled what two
+independently-built harnesses agreed on and got wrong.
+
+The local tell is worth keeping too, because it was in the output and was walked
+past. The rebuilt harness reported the adjacent case *clean*, contradicting a
+measurement made an hour earlier — and **a harness that no longer reproduces the
+defect it was built from is not measuring the defect.** A disagreement between two
+runs of your own instrument is a finding about the instrument before it is a
+finding about the subject.
