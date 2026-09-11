@@ -6237,6 +6237,188 @@ def normalise_gate(workdir: Path) -> List[Result]:
     ]
 
 
+def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """The append seam survives upstream editing its own block — in both directions.
+
+    `scripts/paths.py` invites an adopter to extend `NARRATIVE` and
+    `PRESENT_TENSE` **as an append**, on the measured grounds that an append is
+    a different line and a rewritten literal is not. That claim was established
+    once, by hand, with `git merge-file` against a pristine render, and then
+    nothing ever re-asked it. It is the kind of claim that needs re-asking: it
+    is a statement about what git does when *this repository* edits those
+    lines, so every release is a new opportunity for it to be false.
+
+    ## The half that was missing, and why a shipped entry makes it urgent
+
+    The seam was built for the adopter who **adds** a stage. Nobody walked the
+    one who **removes a shipped entry** — and both constants ship with content,
+    so that adopter exists by construction. `docs/business-planning`'s own
+    reason ends by telling the reader to move it to `NARRATIVE`, which means
+    dropping it from `PRESENT_TENSE`, and the only spelling on offer was
+    editing the template's literal. Two shipped assertions said `drop it` and
+    `delete the entry` in as many words.
+
+    So the seam's own documentation routed its reader into the divergence the
+    seam exists to prevent. dream.doll's `present-tense-ships-a-seeded-entry`
+    is the same defect approached from the fixture: a seeded entry is only
+    harmless once removal is append-shaped too.
+
+    ## What is asserted
+
+    The adopter's journey end to end, twice: the tree stays green under its own
+    suite, and the upgrade merges clean while the template rewrites the very
+    literal being extended. Then the counter-direction, which is what stops
+    this being decoration — the same intent spelled **inside** the literal must
+    conflict. A seam that is clean where the in-block edit is also clean has
+    demonstrated nothing about appends.
+
+    The shipped key is read out of the tree rather than written here. A gate
+    that spells `docs/business-planning` goes quietly vacuous the day that entry
+    is renamed, which is exactly the release where somebody needs this.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    tier = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
+
+    clean = clean_skeletor(workdir)
+    scratch = workdir / "append-seam-skeletor"
+    if not scratch.exists():
+        run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(scratch)], cwd=workdir)
+
+    paths_rel = "scripts/paths.py"
+    source = scratch / "template" / "core" / paths_rel
+    if not source.exists():
+        return [Result(f"append seam: {paths_rel} does not ship from template/core", False,
+                       time.time() - started, "")]
+
+    def build(name: str) -> Optional[Path]:
+        tree = workdir / f"append-seam-{name}" / "probe"
+        if tree.exists():
+            shutil.rmtree(tree.parent)
+        code, output = run(
+            [sys.executable, str(scratch / "bin" / "skeletor-new"), str(tree),
+             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
+             "--tier", tier, "--language", "python", "--force"],
+            cwd=SKELETOR,
+        )
+        return tree if code == 0 else None
+
+    probe = build("read")
+    if probe is None:
+        return [Result("append seam: could not scaffold the probe tree", False, time.time() - started, "")]
+
+    # The shipped entry, read from the tree. Spelling it here would make this
+    # gate vacuous on the release that renames it.
+    code, listed = run(
+        [sys.executable, "-c",
+         "import sys; sys.path.insert(0, '.'); from scripts.paths import PRESENT_TENSE; print('\\n'.join(PRESENT_TENSE))"],
+        cwd=probe,
+    )
+    shipped = [line.strip() for line in listed.splitlines() if line.strip()]
+    if code != 0 or not shipped:
+        return [Result("append seam: the tree ships no PRESENT_TENSE entry to remove", False,
+                       time.time() - started, listed)]
+    entry = shipped[0]
+
+    # The adopter's two spellings of one intent: move the shipped folder out of
+    # PRESENT_TENSE and into NARRATIVE. Identical outcome, different lines.
+    as_append = (
+        "\n\n# adopter: this folder is a lifecycle stage here\n"
+        f'NARRATIVE += (PROJECT_ROOT / "{entry}",)\n'
+        f'PRESENT_TENSE.pop("{entry}", None)\n'
+    )
+
+    def in_block(text: str) -> Optional[str]:
+        """The same removal, spelled inside the template's own literal."""
+        match = re.search(r"^PRESENT_TENSE = \{\n(?:.*?\n)*?^\}\n", text, re.MULTILINE)
+        if not match:
+            return None
+        rebuilt = text.replace(match.group(0), "PRESENT_TENSE = {}\n")
+        return rebuilt + f'\n\nNARRATIVE += (PROJECT_ROOT / "{entry}",)\n'
+
+    # **Both trees are scaffolded BEFORE the upstream edit is committed**, and
+    # the order is the gate. Built afterwards, their base render already
+    # contains the change, so base and head agree about this file, nothing is
+    # offered, and both spellings merge clean — the control passes, the subject
+    # passes, and the whole fixture asserts nothing. That is how the first
+    # version of this gate read: green on the append for a reason that had
+    # nothing to do with appends.
+    adopters = {}
+    for label, mutate in (("append", None), ("in-block", in_block)):
+        tree = build(label)
+        if tree is None:
+            return [Result(f"append seam: could not scaffold the {label} tree", False,
+                           time.time() - started, "")]
+        target = tree / paths_rel
+        text = target.read_text(encoding="utf-8")
+        if mutate is None:
+            target.write_text(text + as_append, encoding="utf-8")
+        else:
+            rewritten = mutate(text)
+            if rewritten is None:
+                return [Result("append seam: no PRESENT_TENSE literal in the scaffolded tree", False,
+                               time.time() - started, "")]
+            target.write_text(rewritten, encoding="utf-8")
+        run(["git", "-C", str(tree), "add", "-A"], cwd=tree)
+        run(["git", "-C", str(tree), "commit", "-q", "-m", f"adopter: {label} removal"], cwd=tree)
+        adopters[label] = tree
+
+    # Only now does upstream edit the literal these adopters are extending. A
+    # reworded reason is the smallest true version of what this repository does
+    # to that block, and it is what the seam's claim is about.
+    template = source.read_text(encoding="utf-8")
+    hit = re.search(r'^\s+"Not a stage of the document lifecycle.*$', template, re.MULTILINE)
+    if not hit:
+        hit = re.search(r"^PRESENT_TENSE = \{\n\s+\S.*$", template, re.MULTILINE)
+    if not hit:
+        return [Result("append seam: nothing inside PRESENT_TENSE to rewrite upstream", False,
+                       time.time() - started, "")]
+    source.write_text(template.replace(hit.group(0), hit.group(0) + "  # reworded upstream"), encoding="utf-8")
+    git_in(scratch, "commit", "--quiet", "-am", "scratch: reword inside the PRESENT_TENSE literal")
+
+    problems = []
+    green = ""
+    for label, tree in adopters.items():
+        if label == "append":
+            # The append has to leave a tree that passes its own suite, or the
+            # seam is clean and useless. The in-block spelling is not asked
+            # this: it is the control, and its outcome is the merge alone.
+            code, output = run(
+                [str(venv_python), "-m", "pytest", "-q", "tests/test_narrative_covers_lifecycle_folders.py"],
+                cwd=tree,
+            )
+            if code != 0:
+                problems.append(f"append: the tree's own classification suite went red:\n{output[-1200:]}")
+            else:
+                green = output.strip().splitlines()[-1] if output.strip() else "passed"
+
+        _, report = run(
+            [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree), "--dry-run"], cwd=tree
+        )
+        conflicted = "LEFT ALONE" in report and paths_rel in report.split("LEFT ALONE")[1]
+        if label == "append" and conflicted:
+            problems.append(
+                f"the documented append CONFLICTED with an upstream edit inside the literal. That is "
+                f"the whole claim of the seam, and it is what the shipped comment tells an adopter to "
+                f"rely on:\n{report}"
+            )
+        if label == "in-block" and not conflicted:
+            problems.append(
+                "the in-block removal merged clean, so this fixture does not discriminate: the upstream "
+                "edit is not landing on the lines the adopter rewrote, and the append's clean merge "
+                "proves nothing about appends."
+            )
+
+    return [
+        Result(
+            f"append seam: removing {entry!r} as an append stays green and merges clean, in-block does not",
+            not problems,
+            time.time() - started,
+            "\n".join(problems) or f"tree's own suite: {green}",
+        )
+    ]
+
+
 def ported_only_conflict_gate(workdir: Path) -> List[Result]:
     """`--ported` advances the base when a conflict is the ONLY pending work.
 
@@ -8291,6 +8473,9 @@ def main() -> int:
             results.append(gate)
 
         for gate in normalise_gate(workdir):
+            results.append(gate)
+
+        for gate in append_seam_gate(workdir, venv_python):
             results.append(gate)
 
         for gate in entangled_gate(workdir):
