@@ -3239,6 +3239,47 @@ conclusion, and **a decision that has to be re-made on a schedule is not a
 decision** — the same argument that stopped `bin/skeletor-upgrade` restoring
 files a user had deleted.
 
+## A release no adopter can observe
+
+`bin/skeletor-upgrade` records the ref it **rendered from**, so a release that
+changes `bin/` and no template file produces nothing an adopter can see. Their
+upgrade reports `already current`, `.skeletor.json` is correctly never
+rewritten, and the currency ledger keeps showing the older ref — on a tree that
+is byte-identical to the newer template and has run the newer binary.
+
+sky.boss reported the shape at v0.20.1 and their framing is the useful one:
+
+> This is not *the ledger is behind*. It is **the ledger has no expressible
+> answer.**
+
+It is a different animal from a stale copy. There is no second home to delete
+and no command to run instead, because the fact — *which version of the tool
+produced this state* — is not a property of the tree at all. The ref records a
+render, and a release that renders nothing new has no render to name.
+
+`dd27dc4` is the worked instance and it arrived four minutes after `v0.26.0` was
+tagged. `pinned_ref_gate`'s fixture cut a branch at the newest tag and took
+`bin/skeletor-upgrade` from the tip to get the tool under test — a no-op when
+the tip **is** the tag, which is exactly the release commit. Nothing staged, no
+commit, the branch stayed on the tag, `git describe` returned the bare tag, and
+the fixture's own guard correctly reported it was no longer the trap. Green
+through every development run, red on the one run nobody skips.
+
+Two things follow, and only the first is a rule about this file's subject.
+
+**A fixture whose shape depends on where HEAD sits relative to the newest tag
+has a release-shaped hole.** The remedy is to make the fixture unconditional —
+here, a marker file outside `template/`, so the extra commit always exists and
+the render stays the tag's byte for byte. And the grid is worth running once
+*after* tagging and before pushing the tag: local green before the tag does not
+cover the state being released.
+
+**The fix was correctly not tagged.** It touches `bin/` and no template file, so
+there is nothing to scaffold against, and tagging it would manufacture exactly
+the unobservable release described above. `v0.26.0` stands — its template was
+never affected — and a pushed ref is not moved to tidy a red run out of its
+history.
+
 ## Drift has a copy to delete. This has nothing to point at
 
 This repository's governing rule about stale facts presupposes a copy: *do not

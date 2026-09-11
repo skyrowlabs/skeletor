@@ -662,6 +662,7 @@ def importers_of(needs_review: List[str], written: List[str], head_files: Dict[s
     someday ship is how this would become wrong rather than incomplete.
     """
     review = set(needs_review)
+    by_spelling = spelling_index(review)
     out: Dict[str, List[str]] = {}
     for rel in written:
         source = head_files.get(rel)
@@ -680,14 +681,12 @@ def importers_of(needs_review: List[str], written: List[str], head_files: Dict[s
                 modules |= {f"{node.module}.{a.name}" for a in node.names}
             elif isinstance(node, ast.Import):
                 modules |= {a.name for a in node.names}
-        hits = sorted(
-            {
-                target
-                for module in modules
-                for target in (module.replace(".", "/") + ".py", module.replace(".", "/") + "/__init__.py")
-                if target in review
-            }
-        )
+        # `spelling_index` rather than one dotted path, for the reason written
+        # there: the template's own `tests/` imports `repo_files`, not
+        # `tests.repo_files`, so a single-spelling lookup was blind to the idiom
+        # this repository writes. It strips `.__init__`, which covers the
+        # package-name case the two candidates above used to spell by hand.
+        hits = sorted({candidate for module in modules for candidate in by_spelling.get(module, [])})
         if hits:
             out[rel] = hits
     return out
@@ -720,9 +719,86 @@ def top_level(path: Optional[Path]) -> Dict[str, str]:
     return out
 
 
-def module_of(rel: str) -> str:
-    """The dotted module a repo-relative python path is imported as."""
-    return rel[: -len(".py")].replace("/", ".").removesuffix(".__init__")
+def import_spellings(rel: str) -> List[str]:
+    """Every dotted name a repo-relative python path can be imported as.
+
+    **One spelling was the bug, and it was the spelling the template does not
+    use.** This returned `module_of(rel)` — the full path, dotted — so
+    `tests/repo_files.py` was `tests.repo_files`. Every file in the template's
+    own `tests/` imports it as bare `repo_files`, because `tests/` is the pytest
+    rootdir and is on `sys.path` there. So the key never matched, the lookup
+    returned `None`, and the scan skipped the import it was built to find.
+
+    sky.boss proved it with a positive control rather than inferring it: the
+    dotted spelling reports the finding, the bare spelling reports nothing, in
+    the tree where the failure actually happened.
+
+    So the spellings are every *suffix* of the dotted path, because `sys.path`
+    can name any ancestor directory and a package layout decides which. That is
+    deliberately broader than what any one tree can import — `docs.plans` for
+    `scripts/docs/plans.py` is in the list and resolves nowhere. It costs
+    nothing: every caller pairs a spelling with a symbol that the template
+    removed this release, so a spelling nobody imports matches nothing. The
+    asymmetry `scripts/yaml_text.py` states applies — a false name in a list is
+    ten seconds, and a missed import is a suite that dies at collection.
+    """
+    parts = rel[: -len(".py")].replace("/", ".").removesuffix(".__init__").split(".")
+    return [".".join(parts[index:]) for index in range(len(parts))]
+
+
+def spelling_index(rels) -> Dict[str, List[str]]:
+    """`{dotted name: [repo-relative paths it could mean]}`.
+
+    A list because the spellings are suffixes and two files can share one —
+    `tests/shell.py` and a `scripts/shell.py` are both `shell`. Callers here
+    report and never refuse, so an ambiguous spelling is resolved permissively
+    against every candidate rather than dropped.
+    """
+    index: Dict[str, List[str]] = {}
+    for rel in rels:
+        if not rel.endswith(".py"):
+            continue
+        for name in import_spellings(rel):
+            index.setdefault(name, []).append(rel)
+    return index
+
+
+def python_files(target: Path) -> List[str]:
+    """Every python file in the tree that git does not disclaim, adopter-owned included.
+
+    **The population `dangling` needs is the whole tree, not the files this run
+    handled.** Its first version scanned `conflicted + collided + dropped`, which
+    is every file the *template* ships and this run left behind — and the file
+    that dies is whoever imports the moved symbol, which is most likely a file
+    the template has never heard of. sky.boss's `tests/test_naming.py` is theirs
+    alone: not conflicted, not collided, not dropped, in none of those lists, and
+    the only caller left of a helper v0.26.0 renamed. Their suite stopped at
+    collection with all 1585 tests, and this scan reported clean.
+
+    `--exclude-standard` keeps `.venv` and `node_modules` out without a list of
+    directory names to maintain. A tree with no git falls back to a walk, since
+    reporting nothing would be the same silence this exists to break.
+    """
+    def ls(*flags: str) -> Optional[List[str]]:
+        result = subprocess.run(
+            ["git", "-C", str(target), "ls-files", *flags, "*.py"], capture_output=True, text=True
+        )
+        return result.stdout.split() if result.returncode == 0 else None
+
+    rels = ls()
+    if rels is not None:
+        # Untracked-but-not-ignored as well, for the reason `repo_files.present`
+        # documents: this tool writes and never stages, so a file it delivered
+        # moments ago is untracked, and enrolling by the index looks straight
+        # past everything the run just did.
+        rels += ls("--others", "--exclude-standard") or []
+        return sorted(dict.fromkeys(rels))
+    skip = {".git", ".venv", "node_modules", "__pycache__", "tmp"}
+    return sorted(
+        str(path.relative_to(target))
+        for path in target.rglob("*.py")
+        if not skip & set(path.relative_to(target).parts)
+    )
 
 
 def stale_against_head(
@@ -751,6 +827,23 @@ def stale_against_head(
       left behind importing a helper that moved takes **collection** down, so
       the whole suite goes with it rather than one test.
 
+    **The two halves scan different populations, and reading them as one was the
+    bug.** `shadowed` is about a file the tree kept, necessarily: a file has to
+    still define the old symbol to shadow the new one, so `kept` is its whole
+    universe. `dangling` is about whoever *imports* the moved symbol, and that is
+    most likely a file the template has never heard of. Scanning `kept` for it
+    meant scanning only files the template ships — so sky.boss's
+    `tests/test_naming.py`, theirs alone, not conflicted or collided or dropped,
+    the last caller of a helper v0.26.0 renamed, was in no list this function
+    reads. Their suite stopped at collection with all 1585 tests and this
+    reported `dangling: {}`. It walks `python_files(target)` now.
+
+    Three causes, each alone sufficient, and sky.boss proved the first with a
+    positive control: the single dotted spelling (see `import_spellings`), the
+    `kept`-only population, and `by_module` keyed off `written` rather than the
+    whole head render — a symbol's new home does not have to be a file that
+    applied cleanly for the old import to be dead.
+
     The dangling case is the reason a rename and an API change are safe apart
     and unsafe together. This tool never deletes — correctly — so a renamed
     module arrives beside the one it replaces, and the old one is reported as
@@ -769,7 +862,13 @@ def stale_against_head(
     shadows: Dict[str, List[str]] = {}
     dangling: Dict[str, List[str]] = {}
     head_symbols = {rel: top_level(head_files.get(rel)) for rel in written if rel.endswith(".py")}
-    by_module = {module_of(rel): symbols for rel, symbols in head_symbols.items()}
+
+    # Every path the template shipped this release, by every name it can be
+    # imported as. Built over the whole head render rather than over `written`:
+    # the symbol a `dangling` import names lives wherever the template put it,
+    # and whether *that* file applied cleanly is a different question from
+    # whether the import still resolves.
+    by_spelling = spelling_index(head_files)
 
     for rel in kept:
         if not rel.endswith(".py"):
@@ -790,6 +889,22 @@ def stale_against_head(
         if moved:
             shadows[rel] = moved
 
+    # **Minus what this run writes**, which is the half of the old `kept`-only
+    # population that was load-bearing. A file the run replaces holds the head
+    # render afterwards, and the head render is where the import was repointed —
+    # so its on-disk import being stale is a statement about right now and not
+    # about the tree this run produces. Under `--dry-run` nothing is written at
+    # all, so every one of them still reads stale and the finding would be a
+    # roll-call of files the template is about to fix.
+    #
+    # `merged` is excluded with them: a merge that kept the adopter's old import
+    # line instead of the template's new one is a conflict, and conflicts are in
+    # `kept`.
+    incoming = set(written)
+    for rel in python_files(target):
+        live = target / rel
+        if rel in incoming or not live.exists():
+            continue
         try:
             tree = ast.parse(live.read_text(encoding="utf-8"))
         except (SyntaxError, OSError, UnicodeDecodeError):
@@ -798,16 +913,16 @@ def stale_against_head(
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or node.level or not node.module:
                 continue
-            symbols = by_module.get(node.module)
-            if symbols is None:
-                continue
-            source = next((other for other in head_symbols if module_of(other) == node.module), node.module)
-            was = top_level(base_files.get(source))
-            gone += [
-                f"{alias.name} from {node.module}"
-                for alias in node.names
-                if alias.name not in symbols and alias.name in was
-            ]
+            for source in by_spelling.get(node.module, []):
+                if source == rel:
+                    continue
+                now = top_level(head_files.get(source))
+                was = top_level(base_files.get(source))
+                gone += [
+                    f"{alias.name} from {node.module} ({source})"
+                    for alias in node.names
+                    if alias.name in was and alias.name not in now
+                ]
         if gone:
             dangling[rel] = sorted(set(gone))
     return shadows, dangling
