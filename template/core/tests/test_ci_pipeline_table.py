@@ -103,11 +103,23 @@ def trigger_branches() -> set:
     return {name.strip().strip("'\"") for name in block.group("list").split(",") if name.strip()}
 
 
-def release_branch() -> str:
-    """The branch the Release Please job gates itself on."""
+def release_branch():
+    """The branch the Release Please job gates itself on, or `None` if no job does.
+
+    **Optional because the job is a supported deletion and the config is not the
+    predicate.** This asserted, and the assertion was red in the one tree that
+    had dropped the release job from its graph — a tree with no Release Please
+    row anywhere in the table, failing a test about job *labels*.
+
+    Gating on the release config's presence is the fix that suggests itself and
+    it is wrong. Measured across four `--versioning tag` trees: all four lack the
+    config and three still render the job, deliberately — `ci.yml` says why, a
+    required status context that never reports blocks a pull request forever. So
+    the config is absent in trees that have the job, and what this function reads
+    is the job. Return `None` and let each caller say what that means for it.
+    """
     ref = re.search(r"github\.ref\s*==\s*'refs/heads/(?P<branch>[^']+)'", ci_text())
-    assert ref, f"the release job in {CI.name} no longer gates on a `refs/heads/<branch>` ref"
-    return ref.group("branch")
+    return ref.group("branch") if ref else None
 
 
 def job_names() -> set:
@@ -157,17 +169,23 @@ def test_release_please_is_claimed_for_one_branch_and_only_when_configured():
         f"this tree has `{RELEASE_CONFIG.name}` and no push row mentions Release Please, so the table "
         f"omits the job that makes the release."
     )
+    released = release_branch()
+    assert released, (
+        f"this tree has `{RELEASE_CONFIG.name}` and the table claims Release Please, but no job in "
+        f"`{CI.name}` gates itself on a `refs/heads/<branch>` ref — so nothing decides which branch "
+        f"releases. Either the job was removed and the config should go with it, or its `if:` was."
+    )
     for event, runs in claims:
         pushed = set(_BACKTICKED.findall(event))
-        if pushed == {release_branch()}:
+        if pushed == {released}:
             # One long-lived branch, so the two predicates coincide and the row
             # cannot attribute the job to the wrong one. Nothing to separate.
             continue
-        assert release_branch() in set(_BACKTICKED.findall(runs)), (
+        assert released in set(_BACKTICKED.findall(runs)), (
             f"this row documents pushes to {sorted(pushed)} and claims Release Please for all of them: "
             f"{'|' + event + '|' + runs + '|'!r}. The job is gated on "
-            f"`github.ref == 'refs/heads/{release_branch()}'`, so it runs on that branch alone. Naming "
-            f"`{release_branch()}` in the branch list is not enough — the branch list is the *push* "
+            f"`github.ref == 'refs/heads/{released}'`, so it runs on that branch alone. Naming "
+            f"`{released}` in the branch list is not enough — the branch list is the *push* "
             f"predicate, which is broader. Say which branch releases, in the cell that makes the claim."
         )
 
@@ -183,8 +201,11 @@ def test_every_job_the_table_names_exists():
     exclusion is derived rather than written down. A job named exactly after a
     branch would be skipped here; nothing prevents that and a list would not
     help, since a list is the thing that goes stale when the job is renamed.
+
+    A tree shipping no Release Please job contributes nothing to the exclusion,
+    and that is not a failure of this test — see `release_branch`.
     """
-    branches = trigger_branches() | {release_branch()}
+    branches = trigger_branches() | {branch for branch in [release_branch()] if branch}
     labels = {label for _, runs in rows() for label in _BACKTICKED.findall(runs)} - branches
     unknown = sorted(label for label in labels if not any(name.startswith(label) for name in job_names()))
     assert not unknown, (
