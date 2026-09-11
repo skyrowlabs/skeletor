@@ -5133,6 +5133,19 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
         # since `--ref` renders through the scaffolder at that ref and a mixed
         # pair would differ for a reason that is not the subject.
         git_in(stamped_scratch, "checkout", tip, "--", "bin/skeletor-upgrade")
+        # **The marker is what makes the commit exist at all, and its absence is
+        # how this gate failed on CI at the one moment it matters.** Taking a
+        # file from the tip is a no-op when the tip IS the tag — which is exactly
+        # the release commit — so `git commit` found nothing staged, the branch
+        # stayed sitting on the tag, `git describe` returned the bare tag, and
+        # the fixture's own guard correctly reported that it was not the trap.
+        # A fixture whose shape depends on where HEAD sits relative to the newest
+        # tag is valid all through development and invalid on every release, and
+        # a release is the run nobody gets to skip. This file is outside
+        # `template/`, so the render is still the tag's byte for byte.
+        (stamped_scratch / "NOT-TEMPLATE.md").write_text(
+            "One commit past the tag, touching nothing the scaffolder renders.\n", encoding="utf-8"
+        )
         git_in(stamped_scratch, "add", "-A")
         git_in(stamped_scratch, "commit", "--quiet", "-m", "past the tag, touching no template file")
 
