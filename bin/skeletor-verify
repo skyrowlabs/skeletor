@@ -6437,6 +6437,295 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     ]
 
 
+def moved_symbol_gate(workdir: Path) -> List[Result]:
+    """A definition the template moved out of a file the tree kept.
+
+    `importers_of` faces one direction — a file written cleanly that imports a
+    conflicted one. dream.doll named the other, and it is the one with no red
+    anywhere: **the template moves a definition out of A and into B**, B applies
+    cleanly because nobody had touched it, and A is a file this run did not
+    take. Every line the tool prints is true, and none of them says the symbol
+    now exists in two places with the stale one winning.
+
+    The second finding arrived from this repository's own release rather than
+    from an adopter, which is why it is here and not only in the rationale. A
+    module rename plus a shared-helper API change are each safe and are not safe
+    together: this tool never deletes, so the old module arrives beside the new
+    one still importing a helper that moved, and the failure is at COLLECTION —
+    the whole suite, not one test. That was measured on a real tree before this
+    gate existed, and the rename was reverted because of it.
+
+    ## The fixture is derived and both halves come from one plant
+
+    A `(module, symbol, importer)` triple is read out of the scaffolded tree
+    rather than named here: the first `from X import Y` where `Y` is a top-level
+    definition of a shipped `X`. Upstream then MOVES `Y` — deleted from `X`,
+    appended to another shipped module — which is the release shape both
+    findings are about.
+
+    Two adopter edits make two kept files, and each reaches a different half:
+
+    * an edit on `X` conflicts, so the tree keeps a file that still defines `Y`
+      while the template now defines it elsewhere → **shadowed**
+    * an edit on the importer's import line conflicts, so the tree keeps a file
+      that still says `from X import Y` → **dangling**
+
+    The edits are on the lines the template touched, deliberately. An append
+    merges — measured, while building this — and a merged file is not a kept
+    file, so the whole fixture would assert nothing.
+
+    The control is that neither finding fires on the same upgrade run without
+    the adopter edits, which is what separates *the predicate works* from *the
+    predicate always fires*.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    tier = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
+
+    clean = clean_skeletor(workdir)
+    scratch = workdir / "moved-symbol-skeletor"
+    if not scratch.exists():
+        run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(scratch)], cwd=workdir)
+
+    def scaffold_from(base: Path, name: str) -> Optional[Path]:
+        tree = workdir / f"moved-symbol-{name}" / "probe"
+        if tree.exists():
+            shutil.rmtree(tree.parent)
+        code, _ = run(
+            [sys.executable, str(base / "bin" / "skeletor-new"), str(tree),
+             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
+             "--tier", tier, "--language", "python", "--force"],
+            cwd=SKELETOR,
+        )
+        return tree if code == 0 else None
+
+    probe = scaffold_from(scratch, "probe")
+    if probe is None:
+        return [Result("moved symbol: could not scaffold the probe tree", False, time.time() - started, "")]
+
+    # Derive the triple. `module_of` is the upgrade's own mapping, imported so
+    # the gate cannot disagree with the tool about what a dotted name means.
+    # The upgrade's own `module_of` and `top_level`, imported rather than
+    # reimplemented: a second copy of the dotted-name mapping would let this
+    # gate agree with itself while disagreeing with the tool under test.
+    upgrade = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade")
+    shipped = {
+        path.relative_to(probe).as_posix(): path
+        for path in probe.rglob("*.py")
+        if ".git/" not in path.relative_to(probe).as_posix()
+    }
+    by_module = {upgrade.module_of(rel): rel for rel in shipped}
+
+    NEWLINE = chr(10)
+
+    def overlay_path(rel: str) -> Optional[Path]:
+        """The one template file that renders `rel`, or None if it is ambiguous.
+
+        Overlays compose by overwriting, so a path shipped by two of them has
+        two sources and editing one is not the release this gate means to
+        simulate. Ambiguity disqualifies a candidate rather than picking a
+        winner — the derivation simply moves on to the next triple.
+        """
+        matches = [d / rel for d in sorted((scratch / "template").iterdir()) if (d / rel).exists()]
+        return matches[0] if len(matches) == 1 else None
+
+    triple = None
+    for rel in sorted(shipped):
+        try:
+            parsed = ast.parse(shipped[rel].read_text(encoding="utf-8"))
+        except (SyntaxError, OSError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(parsed):
+            if not isinstance(node, ast.ImportFrom) or node.level or not node.module:
+                continue
+            source = by_module.get(node.module)
+            if source is None or source == rel:
+                continue
+            if overlay_path(source) is None or overlay_path(rel) is None:
+                continue
+            defined = upgrade.top_level(shipped[source])
+            for alias in node.names:
+                if defined.get(alias.name) == "function":
+                    triple = (source, alias.name, rel, node)
+                    break
+            if triple:
+                break
+        if triple:
+            break
+    if triple is None:
+        return [Result("moved symbol: no shipped module imports a function from another", False,
+                       time.time() - started, f"{len(shipped)} python files scanned")]
+    source_rel, symbol, importer_rel, _ = triple
+
+    # Upstream moves it: deleted from its module, appended to a new one, and the
+    # importer repointed — which is the third step a real release takes and the
+    # one the first draft of this gate left out. Without it the importer is
+    # unchanged between base and head, so it is never offered, an adopter's edit
+    # to it merges, and the `dangling` half can never fire.
+    template_source = overlay_path(source_rel)
+    assert template_source is not None
+    text = template_source.read_text(encoding="utf-8")
+    parsed = ast.parse(text)
+    block = next((n for n in parsed.body if isinstance(n, ast.FunctionDef) and n.name == symbol), None)
+    if block is None or block.end_lineno is None:
+        return [Result(f"moved symbol: {symbol} is not a top-level def in the template's {source_rel}",
+                       False, time.time() - started, "")]
+    lines = text.splitlines(keepends=True)
+    moved_body = "".join(lines[block.lineno - 1 : block.end_lineno])
+    template_source.write_text("".join(lines[: block.lineno - 1] + lines[block.end_lineno :]), encoding="utf-8")
+
+    moved_rel = "tests/moved_home.py"
+    header = ['"""Where the template moved it to."""', "", "from __future__ import annotations", "", ""]
+    (scratch / "template" / "core" / moved_rel).write_text(NEWLINE.join(header) + moved_body, encoding="utf-8")
+
+    template_importer = overlay_path(importer_rel)
+    assert template_importer is not None
+    imports_text = template_importer.read_text(encoding="utf-8")
+    statement = next(
+        (
+            n
+            for n in ast.walk(ast.parse(imports_text))
+            if isinstance(n, ast.ImportFrom)
+            and n.module == upgrade.module_of(source_rel)
+            and any(a.name == symbol for a in n.names)
+            and n.end_lineno is not None
+        ),
+        None,
+    )
+    if statement is None:
+        return [Result(f"moved symbol: the template's {importer_rel} no longer imports {symbol}", False,
+                       time.time() - started, "")]
+    import_lines = imports_text.splitlines(keepends=True)
+    kept_names = [a.name for a in statement.names if a.name != symbol]
+    replacement = ""
+    if kept_names:
+        replacement += f"from {upgrade.module_of(source_rel)} import {', '.join(sorted(kept_names))}" + NEWLINE
+    replacement += f"from {upgrade.module_of(moved_rel)} import {symbol}" + NEWLINE
+    import_lines[statement.lineno - 1 : statement.end_lineno] = [replacement]
+    template_importer.write_text("".join(import_lines), encoding="utf-8")
+
+    git_in(scratch, "add", "-A")
+    git_in(scratch, "commit", "--quiet", "-m", f"scratch: move {symbol} out of {source_rel}")
+
+    results: List[Result] = []
+
+    def upgrade_json(tree: Path) -> dict:
+        code, output = run(
+            # head renders from `scratch`, which carries the move; the BASE is
+            # the clone the tree was scaffolded from.
+            [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree),
+             "--from-dir", str(clean), "--dry-run", "--json"],
+            cwd=tree,
+        )
+        # Anchored on the line that is exactly `{`, not on the first `{` in the
+        # stream: this tool prints human lines before the envelope and one of
+        # them contains a brace, so slicing at the first one fed json.loads a
+        # sentence and the whole gate went quietly unparseable.
+        # `run()` merges stderr into stdout and the human report is still
+        # printed after the envelope, so the stream is JSON followed by prose.
+        # `raw_decode` stops at the end of the object; `json.loads` refuses the
+        # whole thing for the trailing text and the gate goes silently empty.
+        lines = output.splitlines(keepends=True)
+        head = next((i for i, line in enumerate(lines) if line.rstrip() == "{"), None)
+        try:
+            if head is None:
+                raise ValueError("no envelope in the output")
+            return json.JSONDecoder().raw_decode("".join(lines[head:]))[0]
+        except (ValueError, json.JSONDecodeError):
+            return {"__unparseable__": output[-800:]}
+
+    def annotate(tree: Path, rel: str, finder) -> bool:
+        """Append a comment to the line upstream moved, so the merge conflicts."""
+        text = (tree / rel).read_text(encoding="utf-8")
+        lineno = finder(text)
+        if lineno is None:
+            return False
+        lines = text.splitlines(keepends=True)
+        lines[lineno - 1] = lines[lineno - 1].rstrip(NEWLINE) + "  # adopter: ours" + NEWLINE
+        (tree / rel).write_text("".join(lines), encoding="utf-8")
+        run(["git", "-C", str(tree), "commit", "-qam", f"adopter: edit {rel}"], cwd=tree)
+        return True
+
+    def def_line(text: str) -> Optional[int]:
+        node = next((n for n in ast.parse(text).body if isinstance(n, ast.FunctionDef) and n.name == symbol), None)
+        return node.lineno if node else None
+
+    def import_line(text: str) -> Optional[int]:
+        node = next(
+            (
+                n
+                for n in ast.walk(ast.parse(text))
+                if isinstance(n, ast.ImportFrom)
+                and n.module == upgrade.module_of(source_rel)
+                and any(a.name == symbol for a in n.names)
+                and n.end_lineno is not None
+            ),
+            None,
+        )
+        return node.end_lineno if node else None
+
+    # The control, first, so a fixture that fires unconditionally is caught
+    # before either assertion below can take credit for it.
+    control = scaffold_from(clean, "control")
+    if control is None:
+        return [Result("moved symbol: could not scaffold the control tree", False, time.time() - started, "")]
+    quiet = upgrade_json(control)
+    # `applied` is asserted, not just the absence of findings. An upgrade that
+    # did not run, or whose envelope did not parse, has no findings either.
+    applied = (quiet.get("added") or []) + (quiet.get("updated") or [])
+    results.append(
+        Result(
+            f"moved symbol: an untouched tree takes the move cleanly and is quiet ({symbol})",
+            bool(applied) and not quiet.get("shadowed") and not quiet.get("dangling"),
+            time.time() - started,
+            (quiet.get("__unparseable__") or f"applied={applied} shadowed={quiet.get('shadowed')} "
+             f"dangling={quiet.get('dangling')} — an upgrade that applied nothing has no findings "
+             f"either, so this control has to see the move land before its silence means anything.")
+            if not (applied and not quiet.get("shadowed") and not quiet.get("dangling")) else "",
+        )
+    )
+
+    # **Two trees, because the two findings are mutually exclusive.** `shadowed`
+    # needs the defining module KEPT, so the stale definition survives;
+    # `dangling` needs that same module APPLIED, so the symbol is really gone
+    # and the kept importer's import no longer resolves. One tree editing both
+    # files reaches only the first — measured, and the reason this is two.
+    shadow_tree = scaffold_from(clean, "shadow")
+    if shadow_tree is None or not annotate(shadow_tree, source_rel, def_line):
+        results.append(Result(f"moved symbol: could not plant the edit on {source_rel}", False, 0.0, ""))
+        return results
+    shadowed = upgrade_json(shadow_tree).get("shadowed") or {}
+    results.append(
+        Result(
+            f"moved symbol: the kept module still defining {symbol} is named as shadowed",
+            any(symbol in entry for entry in shadowed.get(source_rel, [])),
+            0.0,
+            f"expected {source_rel} to shadow {symbol}; got {shadowed or 'nothing'}. The template moved "
+            f"that definition and this tree kept its own copy, so an importer of the old module gets the "
+            f"stale one with nothing red anywhere." if not shadowed.get(source_rel) else "",
+        )
+    )
+
+    dangle_tree = scaffold_from(clean, "dangle")
+    if dangle_tree is None or not annotate(dangle_tree, importer_rel, import_line):
+        results.append(Result(f"moved symbol: could not plant the edit on {importer_rel}", False, 0.0, ""))
+        return results
+    found = upgrade_json(dangle_tree)
+    dangling = found.get("dangling") or {}
+    results.append(
+        Result(
+            f"moved symbol: the kept importer of {symbol} is named as dangling",
+            any(symbol in entry for entry in dangling.get(importer_rel, [])),
+            0.0,
+            f"expected {importer_rel} to dangle on {symbol}; got {dangling or 'nothing'} "
+            f"(applied: {found.get('updated')}). That import no longer resolves, and an unresolved "
+            f"import in a tests/ module fails at collection — the whole suite, not one test."
+            if not dangling.get(importer_rel) else "",
+        )
+    )
+    return results
+
+
 def ported_only_conflict_gate(workdir: Path) -> List[Result]:
     """`--ported` advances the base when a conflict is the ONLY pending work.
 
@@ -8494,6 +8783,9 @@ def main() -> int:
             results.append(gate)
 
         for gate in append_seam_gate(workdir, venv_python):
+            results.append(gate)
+
+        for gate in moved_symbol_gate(workdir):
             results.append(gate)
 
         for gate in entangled_gate(workdir):

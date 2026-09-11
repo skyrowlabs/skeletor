@@ -693,6 +693,126 @@ def importers_of(needs_review: List[str], written: List[str], head_files: Dict[s
     return out
 
 
+def top_level(path: Optional[Path]) -> Dict[str, str]:
+    """`{name: what it is}` for every top-level definition in a python file.
+
+    An absent or unparseable file has no definitions, which is the answer a
+    dropped file needs and is why this returns a mapping rather than raising.
+    """
+    if path is None or not path.exists():
+        return {}
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (SyntaxError, OSError, UnicodeDecodeError):
+        return {}
+    out: Dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out[node.name] = "function"
+        elif isinstance(node, ast.ClassDef):
+            out[node.name] = "class"
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    out[target.id] = "value"
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            out[node.target.id] = "value"
+    return out
+
+
+def module_of(rel: str) -> str:
+    """The dotted module a repo-relative python path is imported as."""
+    return rel[: -len(".py")].replace("/", ".").removesuffix(".__init__")
+
+
+def stale_against_head(
+    kept: List[str],
+    written: List[str],
+    base_files: Dict[str, Path],
+    head_files: Dict[str, Path],
+    target: Path,
+) -> Tuple[Dict[str, List[str]], Dict[str, List[str]]]:
+    """What a file the tree KEPT now disagrees with in the tree around it.
+
+    `importers_of` faces one direction: a file written cleanly that imports a
+    file left behind. This is the other, and dream.doll named it — **the
+    template moves a definition out of A and into B, and A is a file this run
+    did not take.** B arrives, A keeps the old copy, and nothing is conflicted
+    about B at all, so every line this tool prints about A is true and none of
+    them says the definition now exists twice. The tree runs the stale one.
+
+    Two findings, and the second arrived from this repository's own release
+    rather than from an adopter:
+
+    * **shadowed** — a symbol the template removed from A and now defines in B.
+      Your A still defines it, so an importer of A gets the old one silently.
+    * **dangling** — a symbol A imports that the template has removed from the
+      file it lives in. This one is not silent, it is fatal: a `tests/` module
+      left behind importing a helper that moved takes **collection** down, so
+      the whole suite goes with it rather than one test.
+
+    The dangling case is the reason a rename and an API change are safe apart
+    and unsafe together. This tool never deletes — correctly — so a renamed
+    module arrives beside the one it replaces, and the old one is reported as
+    `no longer shipped` in a sentence that reads like housekeeping.
+
+    **Both predicates require the template to have removed the symbol**, which
+    is what keeps this quiet. `base` minus `head` for the same path is the
+    template's own edit, so two files that merely happen to define `main` or
+    `git` are not a finding — and a dropped file has no head render at all, so
+    everything it defines counts as removed, which is exactly right.
+
+    Reports and never refuses, like `importers_of`: it cannot know whether a
+    shadowed name is one anybody imports. Python only, for that function's
+    reason.
+    """
+    shadows: Dict[str, List[str]] = {}
+    dangling: Dict[str, List[str]] = {}
+    head_symbols = {rel: top_level(head_files.get(rel)) for rel in written if rel.endswith(".py")}
+    by_module = {module_of(rel): symbols for rel, symbols in head_symbols.items()}
+
+    for rel in kept:
+        if not rel.endswith(".py"):
+            continue
+        live = target / rel
+        if not live.exists():
+            continue
+        mine = top_level(live)
+        removed = set(top_level(base_files.get(rel))) - set(top_level(head_files.get(rel)))
+
+        moved = sorted(
+            f"{name} → {other}"
+            for name in removed
+            if name in mine
+            for other, symbols in head_symbols.items()
+            if other != rel and name in symbols
+        )
+        if moved:
+            shadows[rel] = moved
+
+        try:
+            tree = ast.parse(live.read_text(encoding="utf-8"))
+        except (SyntaxError, OSError, UnicodeDecodeError):
+            continue
+        gone = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or node.level or not node.module:
+                continue
+            symbols = by_module.get(node.module)
+            if symbols is None:
+                continue
+            source = next((other for other in head_symbols if module_of(other) == node.module), node.module)
+            was = top_level(base_files.get(source))
+            gone += [
+                f"{alias.name} from {node.module}"
+                for alias in node.names
+                if alias.name not in symbols and alias.name in was
+            ]
+        if gone:
+            dangling[rel] = sorted(set(gone))
+    return shadows, dangling
+
+
 def cross_check(base_files: Dict[str, Path], recorded: Dict[str, str]) -> List[str]:
     """Every recorded hash must match the base render it claims to describe.
 
@@ -1960,6 +2080,13 @@ def main() -> int:
         # planted bug: the plant changed one site and the gate asserted on the
         # other.
         entangled = importers_of(conflicted + collided, added + updated + merged, head_files)
+        # The other direction, and `dropped` is in the population here while it
+        # is not above: a file the template stopped shipping is the strongest
+        # case of a file the tree kept, because its head render is empty, so
+        # every symbol it defines is one the template removed.
+        shadowed, dangling = stale_against_head(
+            conflicted + collided + dropped, added + updated + merged, base_files, head_files, target
+        )
 
         if args.json:
             print(
@@ -2019,6 +2146,14 @@ def main() -> int:
                         # that depends on whether the run advanced.
                         "diverged": diverged,
                         "dropped": dropped,
+                        # Both halves of `stale_against_head`, for the reason
+                        # `diverged` and `head_ref` are here: a consumer that has
+                        # to infer a field the report already prints will infer
+                        # it differently. `dangling` is the one a CI consumer
+                        # wants most — it is the only finding in this envelope
+                        # that predicts a red collection rather than a decision.
+                        "shadowed": shadowed,
+                        "dangling": dangling,
                     },
                     indent=2,
                     sort_keys=True,
@@ -2243,6 +2378,28 @@ def main() -> int:
             detail("on. These were written because you had never edited them — which is the")
             detail("reassuring case, and the wrong one here: their behaviour is decided by a")
             detail("file above that you kept or must resolve by hand. Check the pair.")
+
+        # Before `dropped`, because the sentence there reads like housekeeping
+        # and these two are the cases where it is not.
+        if dangling:
+            say("❗", f"{len(dangling)} file(s) you kept import something the template has REMOVED")
+            for rel, names in sorted(dangling.items()):
+                item(f"{rel} → {', '.join(names)}")
+            detail()
+            detail("This one is fatal rather than quiet. An import that no longer resolves fails")
+            detail("at COLLECTION, so a file under tests/ takes the whole suite with it, not one")
+            detail("test. If the file is listed below as no longer shipped, deleting it is")
+            detail("probably what you want — this tool never deletes, so it is still here.")
+
+        if shadowed:
+            say("❗", f"{len(shadowed)} file(s) you kept still define something that MOVED")
+            for rel, names in sorted(shadowed.items()):
+                item(f"{rel} → {', '.join(names)}")
+            detail()
+            detail("The template moved these definitions out of the file on the left and into")
+            detail("the one on the right, which applied cleanly. Both now exist, and yours is")
+            detail("the one an importer of the old module gets — silently, with nothing red.")
+            detail("Every other line about these files is true and none of them says this.")
 
         if dropped:
             say("⚠️ ", f"{len(dropped)} file(s) the template no longer ships — NOT deleted")
