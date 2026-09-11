@@ -35,7 +35,12 @@ as a draft, push freely, flip to ready once. A draft carrying code still runs
 the cheap jobs; what it skips is the expensive ones, and
 [`.github/scripts/docs-only.cjs`](scripts/docs-only.cjs) is where that is
 decided. Nothing is un-gated by this — GitHub blocks merging a draft, and
-`ready_for_review` runs the full set before it can merge.
+`ready_for_review` re-runs whatever the PR earns. **What it earns does not change
+by leaving draft unless the base branch changes what it earns**: a code change
+entering `{{RELEASE_BRANCH}}` earns the full set, and in a two-branch tree a code
+change entering `{{BASE_BRANCH}}` earns the same jobs ready as it did in draft.
+The full set still runs before anything is released — the merge is a push, and a
+push earns everything.
 
 ## Docs are part of the change
 

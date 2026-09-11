@@ -45,6 +45,7 @@ jobs:
                 '```',
                 '',
                 'Nothing is un-gated by drafting: GitHub blocks merging a draft regardless, and',
-                'marking it ready fires `ready_for_review`, which runs everything before it can merge.',
+                'marking it ready fires `ready_for_review`, which re-runs what this PR earns — and a',
+                'change entering `{{RELEASE_BRANCH}}` earns everything before it can merge.',
               ].join('\n'),
             });

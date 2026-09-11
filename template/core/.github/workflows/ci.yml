@@ -56,9 +56,20 @@ name: CI
 
 on:
   pull_request:
-    # `ready_for_review` is LOAD-BEARING. Remove it and the gated jobs never
-    # re-run when a PR flips out of draft — they stay `skipped`, which branch
-    # protection ACCEPTS, and the PR merges having run nothing.
+    # `ready_for_review` is LOAD-BEARING, and it is load-bearing exactly where
+    # the verdict CHANGES on that transition. Remove it and the gated jobs never
+    # re-evaluate when a PR flips out of draft — they stay `skipped`, which
+    # branch protection ACCEPTS.
+    #
+    # Where the verdict changes is a pull request into {{RELEASE_BRANCH}}, and
+    # therefore every pull request in a tree whose base and release branch are
+    # the same. This comment used to say the PR would otherwise merge "having
+    # run nothing", full stop, and that is false for the ordinary case in a
+    # two-branch tree: `.github/scripts/docs-only.cjs` returns the same verdict
+    # for a draft carrying code and for a ready code change into
+    # {{BASE_BRANCH}}, so nothing escalates and the statuses already standing
+    # are correct. mind.head found it; the repository's own verdict table had
+    # the two rows side by side and identical.
     # tests/test_ci_draft_gate.py fails if it disappears.
     types: [opened, synchronize, reopened, ready_for_review]
     branches: {{CI_BRANCHES}}

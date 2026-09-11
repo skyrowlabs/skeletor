@@ -125,7 +125,13 @@ This named the five jobs by name for one release, which is a claim about *your* 
 rather than about the rule — a tree that had renamed or dropped one got a sentence that was
 more precise and less true than the vague one it replaced.
 Nothing is un-gated by this — GitHub blocks merging a draft regardless, and marking it ready
-fires `ready_for_review`, which runs the full set before it can merge.
+fires `ready_for_review`, which re-runs what the PR earns. **Leaving draft does not by itself
+escalate anything**: the classifier returns the same verdict for a draft carrying code and for a
+ready code change into `{{BASE_BRANCH}}`, so in a two-branch tree the expensive jobs stay
+`skipped` either way and branch protection accepts that. A code change entering
+`{{RELEASE_BRANCH}}` earns the full set, and so does every code change in a tree where those two
+branches are the same. Nothing reaches a release un-integrated regardless, because the merge is a
+push and a push earns everything.
 
 **Flip back to draft before pushing a fix** — `gh pr ready --undo <n>`. A `synchronize` event
 on a *ready* PR re-runs everything that PR earns; iterating in draft pays once, when the work

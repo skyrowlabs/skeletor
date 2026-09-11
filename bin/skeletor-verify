@@ -1326,6 +1326,57 @@ def monotonic_gate(shape: str, target: Path, actual: dict, base: str, release: s
         if not drafted <= ready:
             reduced.append(f"{ends['draft']} → {ends['ready']} LOSES {sorted(drafted - ready)}")
 
+    # **Which pairs escalate, asserted rather than left incidental.** The
+    # property above is one-directional: it forbids the transition LOSING a job
+    # and says nothing about whether it gains one. Five files claimed it gains
+    # the full suite, and for the ordinary case in a two-branch tree it gains
+    # nothing at all — the classifier returns the same verdict for a draft
+    # carrying code and for a ready code change into the base branch.
+    #
+    # mind.head found that in the prose. It was measurable here the whole time,
+    # from a table that had both rows adjacent and identical: **a table that
+    # answers a question is not the same as anybody having asked it.** So the
+    # answer is named now, and a change that makes the transition escalate on
+    # the base branch fails here rather than quietly making four documents true
+    # again by accident.
+    escalation = []
+    for key, ends in sorted(complete.items()):
+        drafted, ready = runs(actual[ends["draft"]]), runs(actual[ends["ready"]])
+        # A CODE change entering the released branch is a release candidate and
+        # earns everything; in a one-branch tree every code change is one.
+        #
+        # **Whether the pair carries code is read from the classifier's own
+        # verdict, never re-derived from the file list.** `DOC_PATTERNS` lives
+        # in `docs-only.cjs`, and a copy of it here would be a fact about that
+        # file spelled somewhere else — the defect this gate's neighbour exists
+        # to record. A docs-only pair escalates in no shape, which is correct
+        # and is why the first draft of this predicate was red on the one-branch
+        # tree: `base == release` made it demand escalation of the docs-only
+        # pair too.
+        carries_code = not actual[ends["ready"]].get("docsOnly")
+        must_escalate = carries_code and (key[0] == "{release}" or base == release)
+        if must_escalate and not drafted < ready:
+            escalation.append(
+                f"{ends['draft']} → {ends['ready']} should ESCALATE and does not: {sorted(drafted)} "
+                f"→ {sorted(ready)}. A code change entering the released branch is the one transition "
+                f"`ready_for_review` exists for."
+            )
+        if not must_escalate and drafted != ready:
+            escalation.append(
+                f"{ends['draft']} → {ends['ready']} escalates on the BASE branch: {sorted(drafted)} → "
+                f"{sorted(ready)}. Four documents and this tree's own ci.yml comment say leaving draft "
+                f"does not escalate here; if that has changed, they are now wrong in the other "
+                f"direction and need the same sweep."
+            )
+    results.append(
+        Result(
+            f"gating/{shape}: ready_for_review escalates where it is claimed to ({len(complete)} pair(s))",
+            not escalation,
+            time.time() - started,
+            "\n".join(escalation + lines) if escalation else "",
+        )
+    )
+
     results.append(
         Result(
             f"gating/{shape}: ready_for_review never reduces what runs ({len(complete)} pair(s))",
