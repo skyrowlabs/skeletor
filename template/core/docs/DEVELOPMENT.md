@@ -97,15 +97,24 @@ Full rules: [`docs/rules/testing.md`](rules/testing.md).
 
 | Event                          | What runs                              | ~min |
 | ------------------------------ | -------------------------------------- | ---- |
-| Draft PR                       | `CI Gate` alone                        | ~1   |
+| Draft PR, docs-only            | `CI Gate` alone                        | ~1   |
+| Draft PR carrying code         | `CI Gate` + `Node` + `pytest`          | ~5   |
+<!-- SCAFFOLD-IF-DIFFER {{BASE_BRANCH}} {{RELEASE_BRANCH}} -->
 | Ready PR → `{{BASE_BRANCH}}`, docs-only | `CI Gate` alone               | ~1   |
 | Ready PR → `{{BASE_BRANCH}}`, code      | `CI Gate` + `Node` + `pytest` | ~5   |
+| Ready PR → `{{RELEASE_BRANCH}}`, docs-only | `CI Gate` alone            | ~1   |
+| Ready PR → `{{RELEASE_BRANCH}}`, code      | **everything**             | full |
+<!-- /SCAFFOLD-IF -->
+<!-- SCAFFOLD-IF-SAME {{BASE_BRANCH}} {{RELEASE_BRANCH}} -->
+| Ready PR, docs-only            | `CI Gate` alone                        | ~1   |
+| Ready PR carrying code         | **everything**                         | full |
+<!-- /SCAFFOLD-IF -->
 | Ready PR opened by Dependabot  | **everything** — deliberately exempt   | full |
 <!-- SCAFFOLD-IF .github/release-please-config.json -->
-| Push to `{{RELEASE_BRANCH}}`   | **everything** + Release Please        | full |
+| Push to {{PROTECTED_BRANCHES}} | **everything**, and Release Please on `{{RELEASE_BRANCH}}` | full |
 <!-- /SCAFFOLD-IF -->
 <!-- SCAFFOLD-IF-NOT .github/release-please-config.json -->
-| Push to `{{RELEASE_BRANCH}}`   | **everything**                         | full |
+| Push to {{PROTECTED_BRANCHES}} | **everything**                         | full |
 <!-- /SCAFFOLD-IF -->
 
 Three things about this table are load-bearing:
