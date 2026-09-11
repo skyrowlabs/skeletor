@@ -34,9 +34,27 @@ to redo; a wrong spec is expensive to implement.
 Then read the spec yourself. Extract status, priority, dependencies, phases and
 every `- [ ]` task, and build a `TodoWrite` plan mirroring the phases.
 
-**Refuse an agent-managed plan.** If its frontmatter says `auto_generated: true`
-it is a derived artifact that a scheduled job rewrites wholesale — filing it
-would leave a zombie, and hand-editing it is overwritten on the next run.
+**An agent-managed plan is implemented, not filed.** If its frontmatter says
+`auto_generated: true` it is a derived artifact — a scheduled job rewrites it
+wholesale on the next run.
+
+```bash
+grep -q "^auto_generated: true" docs/TODO/<slug>.md && echo "DERIVED — implement it, skip Step 4"
+```
+
+The work it lists is real work. What is derived is the *document*, so the two
+things to skip are the two the reason actually names: **do not file it** (a move
+would leave a zombie behind that the producer recreates) and **do not check off
+its tasks** (hand edits are overwritten). Completed items drop out by
+themselves, because the producing job stops ranking a file once its fixes ship
+with tests. Say in the final report which items you closed and that the doc
+self-updates.
+
+This said *refuse the plan* — which is broader than the reason under it, and
+broader than the tree's own enforcement: `{{CLI}} docs file` already refuses an
+`auto_generated` plan and refuses nothing else. So the one artifact that can
+block this was correct, and the prose above it told you not to start. A
+test-gap backlog is the ordinary case, and it was unreachable.
 
 ## Step 1 — Implement
 
@@ -112,12 +130,27 @@ push to an open PR is what spends CI minutes. If a PR is already open and out of
 draft, flip it back with `gh pr ready --undo <n>` first, so the corrective push
 re-runs nothing.
 
-Verify before reporting success:
+Verify before reporting success, then report:
 
 ```bash
 ls docs/TODO/<slug>.md 2>&1 | grep -q "No such file" && echo "✅ filed" || echo "❌ NOT filed"
 {{CLI}} docs index --check
 ```
+
+```
+✅ COMPLETE — <feature>
+
+📁 Filed: docs/TODO/<slug>.md → docs/implementations/<category>/<slug>.md
+🎯 Phases: <one line each, with commit refs>
+🧪 Tests: <pass/skip summary>
+📚 Docs: <what the documenter updated>
+⏳ Deferred: <list or "none">
+
+Pushed: <branch> @ <short SHA>
+```
+
+A derived plan reports the same shape with `📁 Filed:` replaced by which items
+it closed and the note that the producing job drops them on its next run.
 
 ---
 
@@ -132,7 +165,36 @@ ls docs/TODO/<slug>.md 2>&1 | grep -q "No such file" && echo "✅ filed" || echo
 5. **Commit per phase, push once.** A phase boundary is a commit point, never a
    push point.
 6. Any hard blocker → **stop and surface it**.
-7. **Stay in the primary checkout** unless another agent is already editing it,
-   or the work genuinely needs its own branch. Rule 2 keeps the workers serial,
-   so ordinary work has nothing to collide with and needs no tree of its own.
-   Taking a worktree by reflex reintroduces branch-and-PR ceremony for nothing.
+7. **Stay in the primary checkout** unless § Worktrees says otherwise. Rule 2
+   keeps the workers serial, so ordinary work has nothing to collide with.
+
+---
+
+## Worktrees — when to take one, and when not to
+
+A linked worktree is a second checkout with its own branch. **The default is
+the primary checkout and that is not laziness:** a worktree implies a branch,
+since two checkouts cannot share one, so taking one by reflex reintroduces
+branch-and-PR ceremony for a small, self-contained, locally-verified change.
+
+Take one when a condition holds, not as a precaution:
+
+| Condition                                              | Why the primary will not do                                                          |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Another agent or session is already editing this tree  | A `git checkout` under them destroys uncommitted work with no error and no way back.  |
+| The work genuinely needs a branch — a PR, or a review  | You cannot check out a second branch in one repo without moving the tree out from under whoever is standing in it. |
+| You need a long-running stack while somebody else edits | A stack that bind-mounts the checkout can deadlock on a write beneath a mounted path. |
+
+```bash
+{{CLI}} worktree new ../<slug>-<task> -b <branch>
+{{CLI}} worktree list        # what exists
+{{CLI}} worktree holders     # what is holding one open
+{{CLI}} worktree drop ../<slug>-<task>
+```
+
+**Remove it when the work is done**, and let `drop` refuse rather than forcing
+past it: a detached worktree's commits are reachable from nothing but its own
+HEAD, so that refusal is the only thing between them and silent deletion.
+
+**Never `git checkout` in a tree you did not create.** git has no
+`pre-checkout` hook, so this one is written rather than enforced.
