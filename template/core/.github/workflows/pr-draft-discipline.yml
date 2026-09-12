@@ -26,36 +26,58 @@ jobs:
             // Docs-only PRs are exempt: they run one cheap job either way, so
             // the advice would be noise. Same shared definition as ci.yml — the
             // pattern is never re-inlined.
-            const { docsOnly } = await decide({ github, context, core });
+            const { docsOnly, fullSuite } = await decide({ github, context, core });
             if (docsOnly) return;
 
-            // **The headline below is a universal claim and must stay true in both
-            // branch shapes.** It read *"re-runs the full suite"*, which is the
-            // sentence `docs-only.cjs` corrects in itself: a ready pull request
-            // carrying code into the BASE branch of a two-branch tree runs the gate,
-            // the node job and the unit suite, not everything. The commit that fixed
-            // the conditional eleven lines below named "a bot comment that tells a
-            // contributor so on their own PR" as the worst place for that claim, and
-            // left this line — the opening sentence of the same string array.
+            // ## This headline is branched at RUN TIME, and the two rewordings before
+            // ## it are why
             //
-            // It cannot be split by `SCAFFOLD-IF`: those are HTML comments and would
-            // be a YAML syntax error, which is why prose in a workflow says the thing
-            // that is true everywhere and lets the substituted release branch below
-            // carry the narrower half. mind.head's finding.
+            // It read *"re-runs the full suite"*. A ready pull request carrying code
+            // into the BASE branch of a two-branch tree runs the gate, the node job
+            // and the unit suite — not everything — so that was false for the base
+            // most pull requests target. The commit that fixed the conditional eleven
+            // lines below had named "a bot comment that tells a contributor so on
+            // their own PR" as the worst place for that claim, and left this line.
+            //
+            // **The fix for that shipped a second false sentence**, which is the
+            // finding worth keeping. It became *"every job it earns — and it carries
+            // code, so that is strictly more than a draft would run"*: true against
+            // the release branch, and false against the base branch of a two-branch
+            // tree, where `fullSuite` is false for ready and draft alike and the two
+            // run IDENTICAL jobs. Two rewordings, two false universals, because a
+            // reworded sentence is still a sentence asserting something the tree
+            // decides.
+            //
+            // `SCAFFOLD-IF` cannot split it — those are HTML comments and a YAML
+            // syntax error here — which is what made rewording look like the only
+            // option. It was not: `decide()` already returns `fullSuite`, computed
+            // from this pull request's own base and author, so the claim can be
+            // *read* rather than asserted. A prose fix in a workflow is a guess about
+            // configuration; a branch on the classifier is the configuration.
+            //
+            // The negative branch does not say "drafting saves nothing" and stop.
+            // sky.boss's note, from the tree where it is the live case: a bare
+            // negative reads as the workflow apologising for its own existence, and
+            // the reviewer-facing reason for drafting survives the CI accounting
+            // entirely. Reported by mind.head, twice.
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.pull_request.number,
               body: [
-                '👋 This PR was opened **ready**, which means every push to it re-runs every job it',
-                'earns — and it carries code, so that is strictly more than a draft would run.',
+                fullSuite
+                  ? '👋 This PR was opened **ready**, so every push to it runs the full suite. A draft'
+                  : '👋 This PR was opened **ready**. A draft carrying code runs the same jobs this one',
+                fullSuite
+                  ? 'carrying code runs the gate, the node job and the unit suite and skips the rest.'
+                  : 'does, so drafting costs no CI time either way — it is worth doing for the reviewer,',
+                fullSuite ? '' : 'who can see the work is not finished without being asked to look at it.',
                 '',
-                'Cheaper loop:',
+                fullSuite ? 'Cheaper loop:' : 'Either way:',
                 '',
                 '```bash',
                 'gh pr ready --undo ' + context.payload.pull_request.number + '   # back to draft',
-                '# ...iterate; a draft carrying code skips the expensive jobs...',
                 'gh pr ready ' + context.payload.pull_request.number + '          # once, when it is done',
                 '```',
                 '',
