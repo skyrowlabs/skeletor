@@ -1602,7 +1602,12 @@ def set_arg_gate(workdir: Path) -> List[Result]:
     FLOOR = recorded_args[recorded_args.index("--python") + 1]
 
     # The control: an ordinary upgrade must change neither.
-    run([sys.executable, str(upgrade_bin), str(tree)], cwd=tree)
+    # `--allow-untagged` on every applying run: this grid's clone carries the
+    # working tree in as a `git stash create` commit, so `git describe` there has a
+    # suffix by construction and an applying upgrade is otherwise refused. See the
+    # note in `sidecar_gate`. `unpinned_head_gate` is where the refusal is asserted
+    # and is the one place that must not carry it.
+    run([sys.executable, str(upgrade_bin), str(tree), "--allow-untagged"], cwd=tree)
     control_ok = legs() == before_legs and ceiling() == before_ceiling
     results.append(
         Result(
@@ -1630,7 +1635,10 @@ def set_arg_gate(workdir: Path) -> List[Result]:
     )
 
     started = time.time()
-    code, real = run([sys.executable, str(upgrade_bin), str(tree), "--set-arg", "python-ceiling=3.14"], cwd=tree)
+    code, real = run(
+        [sys.executable, str(upgrade_bin), str(tree), "--set-arg", "python-ceiling=3.14", "--allow-untagged"],
+        cwd=tree,
+    )
     delivered = "3.14" in legs() and before_legs != legs()
     results.append(
         Result(
@@ -1710,7 +1718,10 @@ def set_arg_gate(workdir: Path) -> List[Result]:
     git_in(tree, "add", "-A")
     git_in(tree, "commit", "-m", "adopter edit on the matrix line")
     held = ceiling()
-    code, partial = run([sys.executable, str(upgrade_bin), str(tree), "--set-arg", "python-ceiling=3.13"], cwd=tree)
+    code, partial = run(
+        [sys.executable, str(upgrade_bin), str(tree), "--set-arg", "python-ceiling=3.13", "--allow-untagged"],
+        cwd=tree,
+    )
     said = "were NOT recorded" in partial and f"still recorded as {held!r}" in partial
     pending = "still pending" in partial
     results.append(
@@ -1749,7 +1760,11 @@ def set_arg_gate(workdir: Path) -> List[Result]:
         return recorded[recorded.index("--python-ceiling") + 1]
 
     was = declined_ceiling()
-    code, out = run([sys.executable, str(upgrade_bin), str(declined_tree), "--set-arg", "python-ceiling=3.15"], cwd=declined_tree)
+    code, out = run(
+        [sys.executable, str(upgrade_bin), str(declined_tree),
+         "--set-arg", "python-ceiling=3.15", "--allow-untagged"],
+        cwd=declined_tree,
+    )
     still_declined = not (declined_tree / ".github" / "workflows" / "ci.yml").exists()
     results.append(
         Result(
@@ -2348,13 +2363,32 @@ def check_version_resolves(tree: Path) -> Result:
     def version() -> str:
         return run([f"./{CLI_NAME}", "--version"], cwd=work, env_extra={"PYTHONPATH": str(work)})[1].strip()
 
-    declared = (work / "VERSION").read_text(encoding="utf-8").strip()
+    # ## Two modes, keyed on the TREE rather than on the flag
+    #
+    # `--versioning tag` subtracts `VERSION`, and the flag is gone by the time
+    # anything reads this — so the predicate is whether the file is there, which is
+    # the rule both of the scaffolder's other subtraction mechanisms follow.
+    #
+    # **This read `VERSION` unconditionally and crashed the moment the tag arm
+    # joined the grid.** For its whole life the gate had only ever seen trees that
+    # ship the file, because `versioning_gate` ran two hand-picked commands instead
+    # of this set — so the arm four of six adopters are on was the arm with no
+    # coverage, and the first thing it found was a gate that could not run there.
+    #
+    # The two modes answer genuinely different questions and both are asserted. A
+    # tree with `VERSION` must reach that fallback when no release tag exists; a
+    # tree without one must say `unknown` there, because `git describe` in a
+    # repository with no matching tag has nothing to report and a sha would be a
+    # version that is not one. Both must ignore a non-release tag, which is the
+    # `--match` half and the reason this gate exists.
+    declared = (work / "VERSION").read_text(encoding="utf-8").strip() if (work / "VERSION").exists() else None
+    release_tag = f"v{declared}" if declared else "v0.3.0"
 
     untagged = version()
     git_in(work, "tag", "archive/v1")
     git_in(work, "commit", "-q", "--allow-empty", "-m", "chore: past the archive marker")
     non_release = version()
-    git_in(work, "tag", f"v{declared}")
+    git_in(work, "tag", release_tag)
     released = version()
 
     # And that it names the COMMAND. `prog_name` shipped as the wordmark, so a
@@ -2372,18 +2406,24 @@ def check_version_resolves(tree: Path) -> Result:
     announces = f"{CLI_NAME}, version "
     names_the_command = untagged.startswith(announces)
 
+    # `unknown` is the honest answer before the first release tag in a tree with no
+    # `VERSION` to fall back on, and it is what the fallback must produce in a tree
+    # that has one. Same two positions, different expected strings.
+    fallback = declared if declared else "unknown"
     ok = (
-        declared in untagged  # the VERSION fallback is reachable
+        fallback in untagged  # the fallback is reachable at all
         and "archive/v1" not in non_release  # a non-release tag is not a version
-        and declared in non_release
-        and f"v{declared}" in released  # a release tag wins when there is one
+        and fallback in non_release  # and does not displace the fallback
+        and release_tag in released  # a release tag wins when there is one
         and names_the_command
     )
     return Result(
-        f"--version reports a release, not any tag, and names `{CLI_NAME}` ({declared})",
+        f"--version reports a release, not any tag, and names `{CLI_NAME}` "
+        f"({'VERSION ' + declared if declared else 'no VERSION, so ' + fallback})",
         ok,
         time.time() - started,
-        f"untagged: {untagged}\nnon-release tag: {non_release}\nreleased: {released}",
+        f"untagged: {untagged}\nnon-release tag: {non_release}\nreleased: {released}\n"
+        f"expected the fallback {fallback!r} and the release tag {release_tag!r}",
     )
 
 
@@ -2969,7 +3009,7 @@ def one_branch_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]
     return results
 
 
-def versioning_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+def versioning_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     """`--versioning tag` produces a tree that passes its own gates.
 
     The flag is a **subtraction and nothing else**, which is the only shape a
@@ -3094,30 +3134,31 @@ def versioning_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]
         )
     )
 
+    # ## The whole gate set, not two commands chosen by hand
+    #
+    # This ran `check docs` and `test unit` and stopped, which is a list where a
+    # pattern will do — and the list was two of the fourteen questions every other
+    # configuration in this grid answers. **Four of six adopter trees are on this
+    # arm**, so the population most likely to hit a defect was the one covered
+    # least: no lints, no pyright, no merge-driver check, no output contract, no
+    # `actionlint` over workflows that this flag edits with a file test.
+    #
+    # `gates()` unmodified, the way `--shell-package` does it, for the same reason
+    # given there — the substantive assertion is that a subtracted tree answers
+    # every question an unsubtracted one does. It is also what makes the flag's
+    # rule enforceable rather than stated: a subtraction that broke something would
+    # show up here, and anything that needs a check of its own is a sign the flag
+    # stopped being a subtraction.
     (target / ".venv").symlink_to(venv_python.parents[1])
-    for command, label in (
-        (["check", "docs"], "check docs"),
-        (["test", "unit"], "unit suite"),
-    ):
-        started = time.time()
-        code, output = run([f"./{CLI_NAME}", *command], cwd=target, env_extra={"PYTHONPATH": str(target)})
-        results.append(Result(f"--versioning tag: {label}", code == 0, time.time() - started, output))
+    for gate in gates(target, venv_python, pyright_ok):
+        gate.label = f"--versioning tag: {gate.label}"
+        results.append(gate)
 
-    # `unknown` is the honest answer before the first tag, and the tag after it.
-    # A tree with no VERSION file to fall back on is exactly where `get_version`
-    # had been describing a fallback it could not take.
-    started = time.time()
-    before = run([f"./{CLI_NAME}", "--version"], cwd=target)[1].strip()
-    git_in(target, "tag", "-a", "v0.3.0", "-m", "first")
-    after = run([f"./{CLI_NAME}", "--version"], cwd=target)[1].strip()
-    results.append(
-        Result(
-            "--versioning tag: --version is `unknown` until tagged, then the tag",
-            before.endswith("unknown") and after.endswith("v0.3.0"),
-            time.time() - started,
-            f"untagged: {before}\ntagged:   {after}",
-        )
-    )
+    # The bespoke `--version` assertion that used to sit here is gone: it is
+    # `check_version_resolves`, which `gates()` above now runs against this tree
+    # like any other, and which asserts the same two positions plus the
+    # non-release-tag case this one never reached. Two homes for one fact, and the
+    # one that stayed is the one every configuration answers.
     return results
 
 
@@ -3763,7 +3804,17 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
         """
         return [b for b in output.split("\n\n") if "tmp/upgrade/<path>" in b]
 
-    upgrade = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree), "--no-base"]
+    # ### `--allow-untagged`, on every applying run this grid makes
+    #
+    # An applying upgrade is refused when the head render would be stamped with
+    # anything but a bare tag, and **this grid can never satisfy that**:
+    # `clean_skeletor` carries the working tree in as a `git stash create` commit,
+    # so `git describe` in the clone has a suffix by construction — including on a
+    # release commit, where the checkout itself is exactly on the tag. The flag is
+    # the grid's standing consent, and `unpinned_head_gate` is where the refusal
+    # itself is asserted, so it is the one place that must NOT carry it.
+    upgrade = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree),
+               "--no-base", "--allow-untagged"]
 
     before = snapshot()
     code, output = run([*upgrade, "--dry-run"], cwd=tree)
@@ -3959,7 +4010,9 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     # sitting right there, so naming *a* sha proves nothing.
     head = run(["git", "-C", str(tree), "rev-parse", "HEAD"], cwd=tree)[1].strip()
 
-    real_code, real_output = run([sys.executable, str(upgrade_bin), str(tree), "--no-base"], cwd=tree)
+    real_code, real_output = run(
+        [sys.executable, str(upgrade_bin), str(tree), "--no-base", "--allow-untagged"], cwd=tree
+    )
     results.append(
         Result(
             "collect-diff: a real run that touched tests/ names the pre-upgrade commit",
@@ -4082,7 +4135,9 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     git_in(other, "add", "-A")
     git_in(other, "commit", "-m", "tamper")
 
-    code, output = run([sys.executable, str(upgrade_bin), str(other), "--no-base"], cwd=other)
+    code, output = run(
+        [sys.executable, str(upgrade_bin), str(other), "--no-base", "--allow-untagged"], cwd=other
+    )
     results.append(
         Result(
             "collect-diff: a run that touched no test file stays quiet",
@@ -4968,6 +5023,128 @@ def manifest_args_gate() -> Result:
     )
 
 
+def unpinned_head_gate(workdir: Path) -> List[Result]:
+    """An applying run refuses to stamp a `git describe` string; a tagged one does not.
+
+    The harm is sticky rather than unreproducible, which is why this needed its
+    own argument: `v0.28.0-1-g6f4a54e` resolves anywhere the commit exists, so
+    `refuse_a_dirty_base`'s reasoning does not reach it. What does reach it is that
+    the manifest is re-copied only by a run that APPLIES something — so a tree
+    stamped with a description and then brought current keeps that string
+    indefinitely, and neither `--ported` nor a hand-edit is a way out. stash.flow
+    reconstructed a tree held at exactly that ref, freed only because the next
+    release happened to carry work for its tier.
+
+    ## Both tag positions are manufactured, never read off this checkout
+
+    The obvious fixture is "run it here and watch it refuse", and that is a gate
+    with a release-shaped hole: this repository sits past its newest tag all
+    through development and ON it at the moment a release is cut, so a fixture
+    keyed on the checkout's own position tests one thing for a fortnight and the
+    other thing exactly once, on the commit that ships. Both states are made here
+    — an empty commit for *past a tag*, a checkout of the tag itself for *at a
+    tag* — so the same run asserts both.
+
+    The negative is the load-bearing half. A refusal that fired for a tagged
+    operator would block every legitimate release-time upgrade, and it would look
+    identical to this gate passing.
+
+    ## What it does NOT assert, stated because the refusal over-approximates
+
+    It fires before classification, so it also refuses an applying run that would
+    have written nothing — an already-current tree, or one left pending by a
+    conflict. Those are false alarms, deliberately: knowing whether the manifest
+    will be rewritten needs the whole comparison, and the cost of the
+    over-approximation is one flag or one tag, while the cost of under-applying it
+    is a version nobody chose, permanently. The fixture is an already-current tree
+    precisely because that is the over-approximating case, so the assertion is
+    about the refusal rather than about a merge.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    tier = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
+    clean = clean_skeletor(workdir)
+    tags = run(["git", "-C", str(clean), "tag", "--sort=-creatordate"], cwd=clean)[1].split()
+    if not tags:
+        return [Result("unpinned head: no tags are visible at all — a shallow clone?", False,
+                       time.time() - started, "")]
+    tag = tags[0]
+
+    target = workdir / "unpinned-head" / "probe"
+    if target.exists():
+        shutil.rmtree(target.parent)
+    code, output = run(
+        [sys.executable, str(clean / "bin" / "skeletor-new"), str(target),
+         "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--force"],
+        cwd=SKELETOR,
+    )
+    if code != 0:
+        return [Result("unpinned head: could not scaffold the probe tree", False, time.time() - started, output)]
+
+    upgrade = [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target)]
+
+    # ### Past a tag, made rather than assumed
+    #
+    # An empty commit is enough: `git describe` appends `-1-g<sha>` to the newest
+    # tag, which is exactly the string three adopters recorded.
+    run(["git", "-C", str(clean), "checkout", "--quiet", "-B", "unpinned-probe"], cwd=clean)
+    run(["git", "-C", str(clean), "commit", "--quiet", "--allow-empty", "-m",
+         "scratch: one commit past the newest tag"], cwd=clean)
+    described = run(["git", "-C", str(clean), "describe", "--tags", "--always"], cwd=clean)[1].strip()
+    problems = []
+    if described == tag or not described.startswith(tag):
+        problems.append(
+            f"the fixture did not reach `past a tag`: describe says {described!r} against tag {tag!r}, so "
+            f"every assertion below is about the wrong state."
+        )
+
+    past_code, past = (1, "") if problems else run(upgrade, cwd=target)
+    if not problems:
+        if past_code == 0 or "not a tag" not in past:
+            problems.append(
+                f"an applying run from a checkout at {described} was NOT refused (exit {past_code}). It "
+                f"would stamp a version nobody chose into the manifest, and the manifest is re-copied only "
+                f"by a run that applies something, so the tree keeps it:\n{past[-1200:]}"
+            )
+        elif described not in past:
+            problems.append(
+                f"the refusal did not name {described!r}, so a reader cannot see what would have been "
+                f"recorded or pass it to --ref:\n{past[-800:]}"
+            )
+        # The escapes, both of them, because a refusal with no way past it is a
+        # removed feature rather than a guard.
+        for flag in ("--allow-untagged", "--dry-run"):
+            code, output = run(upgrade + [flag], cwd=target)
+            if "not a tag" in output:
+                problems.append(f"{flag} did not clear the refusal:\n{output[-600:]}")
+        code, output = run(upgrade + ["--ref", tag], cwd=target)
+        if "not a tag" in output:
+            problems.append(f"--ref {tag} did not clear the refusal:\n{output[-600:]}")
+
+    # ### At a tag — the negative, and the half a release depends on
+    run(["git", "-C", str(clean), "checkout", "--quiet", tag], cwd=clean)
+    at_tag = run(["git", "-C", str(clean), "describe", "--tags", "--always"], cwd=clean)[1].strip()
+    if at_tag != tag:
+        problems.append(f"the fixture did not reach `at a tag`: describe says {at_tag!r}, wanted {tag!r}")
+    else:
+        code, output = run(upgrade, cwd=target)
+        if "not a tag" in output:
+            problems.append(
+                f"an applying run from a checkout AT {tag} was refused. Every release-time upgrade is "
+                f"this case, and a refusal here is indistinguishable from this gate working:\n{output[-900:]}"
+            )
+    run(["git", "-C", str(clean), "checkout", "--quiet", "unpinned-probe"], cwd=clean)
+
+    return [
+        Result(
+            f"unpinned head: an applying run is refused at {described} and allowed at {tag}",
+            not problems,
+            time.time() - started,
+            "\n".join(problems),
+        )
+    ]
+
+
 def pinned_ref_gate(workdir: Path) -> List[Result]:
     """`--ref` renders the head from a named ref, and stamps that ref exactly.
 
@@ -5394,7 +5571,10 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
 
             manifest = target / scaffolder.MANIFEST_NAME
             before = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
-            _, first = run([sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target)], cwd=target)
+            _, first = run(
+                [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--allow-untagged"],
+                cwd=target,
+            )
             after = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
             _, second = run(
                 [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--dry-run"], cwd=target
@@ -5409,7 +5589,9 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
             # re-run cannot advance anything, since a hand-ported file
             # conflicts exactly like an unapplied one.
             _, ported = run(
-                [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--ported"], cwd=target
+                [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target),
+                 "--ported", "--allow-untagged"],
+                cwd=target,
             )
             ported_ref = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
         finally:
@@ -5610,7 +5792,10 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
             # this checkout is dirty whenever somebody is working in it. That is not
             # a workaround: a user upgrading from a clean skeletor is the condition
             # being tested, and running it from here would test the refusal instead.
-            _, upgrade_output = run([sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target)], cwd=target)
+            _, upgrade_output = run(
+                [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--allow-untagged"],
+                cwd=target,
+            )
             after = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
             applied = upgrade_applied(target, scaffolder.MANIFEST_NAME)
         finally:
@@ -7124,7 +7309,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     for label, tree in rerun_trees.items():
         if rerun_problems:
             break
-        upgrade = [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree)]
+        upgrade = [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree), "--allow-untagged"]
         _, first_text = run(upgrade + ["--json"], cwd=tree)
         first = envelope(first_text)
         # The fixture's own preconditions, asserted rather than assumed. A first
@@ -7487,6 +7672,56 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
         )
     )
 
+    # ## The destination the run did NOT write, which is a fifth tree
+    #
+    # Every fixture above has the moved symbol landing in a brand-new file, so it
+    # always applies and is always in `written`. `head_symbols` was built from
+    # `written`, which means the shadow was only ever found when the destination
+    # applied cleanly — sky.boss's third cause (*a symbol's new home does not have
+    # to be a file that applied cleanly*), fixed for `dangling` in the commit that
+    # named it and left standing for `shadowed`.
+    #
+    # A **collision** is how that happens for real and it needs no version skew: an
+    # adopter who already has a file where the template puts the moved definition
+    # gets it reported as a collision, left alone, and therefore unwritten. Their
+    # kept module still defines the symbol, the template defines it somewhere the
+    # run did not touch, and under the old scan nothing said so.
+    #
+    # Planting the `written`-only scan back turns this Result red and leaves the
+    # four above green, which is the signature that says the population widened
+    # rather than the predicate loosening.
+    collide_tree = scaffold_from(clean, "collide")
+    if collide_tree is None:
+        results.append(Result("moved symbol: could not scaffold the collide tree", False, 0.0, ""))
+        return results
+    squatter = collide_tree / moved_rel
+    squatter.parent.mkdir(parents=True, exist_ok=True)
+    squatter.write_text('"""My own file, which happens to sit where the template moved it."""' + NEWLINE,
+                        encoding="utf-8")
+    run(["git", "-C", str(collide_tree), "add", "-A"], cwd=collide_tree)
+    run(["git", "-C", str(collide_tree), "commit", "-qm", f"adopter: my own {moved_rel}"], cwd=collide_tree)
+    if not annotate(collide_tree, source_rel, def_line):
+        results.append(Result(f"moved symbol: could not plant the edit on {source_rel} (collide)", False, 0.0, ""))
+        return results
+    collided_run = upgrade_json(collide_tree)
+    collided_shadows = collided_run.get("shadowed") or {}
+    # The fixture's own precondition: the destination has to be UNWRITTEN, or this
+    # is the shadow_tree assertion again under a different label.
+    landed = moved_rel in (collided_run.get("collided") or [])
+    results.append(
+        Result(
+            f"moved symbol: a shadow is named even when {symbol}'s new home collided",
+            landed and any(symbol in entry for entry in collided_shadows.get(source_rel, [])),
+            0.0,
+            (collided_run.get("__unparseable__") or "")
+            + (f"{moved_rel} is not in collided={collided_run.get('collided')}, so the destination was "
+               f"written after all and this fixture is the shadow tree again. " if not landed else "")
+            + (f"expected {source_rel} to shadow {symbol}; got {collided_shadows or 'nothing'}."
+               if not collided_shadows.get(source_rel) else "")
+            if not (landed and collided_shadows.get(source_rel)) else "",
+        )
+    )
+
     dangle_tree = scaffold_from(clean, "dangle")
     if dangle_tree is None or not annotate(dangle_tree, importer_rel, import_line):
         results.append(Result(f"moved symbol: could not plant the edit on {importer_rel}", False, 0.0, ""))
@@ -7678,8 +7913,13 @@ def ported_only_conflict_gate(workdir: Path) -> List[Result]:
         return str(json.loads((tree / scaffolder.MANIFEST_NAME).read_text(encoding="utf-8"))["skeletor_ref"])
 
     before = ref_of(taken)
-    _, with_flag = run([sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(taken), "--ported"], cwd=taken)
-    _, without = run([sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(left)], cwd=left)
+    _, with_flag = run(
+        [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(taken), "--ported", "--allow-untagged"],
+        cwd=taken,
+    )
+    _, without = run(
+        [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(left), "--allow-untagged"], cwd=left
+    )
 
     problems = []
     # The plant, asserted before anything is read from it. A scratch commit that
@@ -8180,7 +8420,15 @@ def declined_gate(tier: str, workdir: Path) -> List[Result]:
     git_in(tree, "add", "-A")
     git_in(tree, "commit", "-m", "decline")
 
-    upgrade = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree), "--no-base", "--json"]
+    # **`--json` is added by `report`, never sliced off by position.** This was one
+    # list ending in `--json`, and three callers reached for the human report as
+    # `upgrade[:-1]` — so appending `--allow-untagged` for the refusal silently
+    # handed those callers `--json` and took the escape away, turning the human
+    # assertion into a JSON comparison and the real run into a refusal. A slice by
+    # position is a claim about which flag is last, which nothing states and
+    # anybody may change. `human` is the base and `report` composes onto it.
+    human_argv = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree),
+                  "--no-base", "--allow-untagged"]
 
     def report(extra: List[str]) -> dict:
         """The envelope, or an empty one — never an exception.
@@ -8190,7 +8438,7 @@ def declined_gate(tier: str, workdir: Path) -> List[Result]:
         looking for. An upgrade that printed no JSON has already failed every
         assertion below on the merits.
         """
-        _, output = run([*upgrade, *extra], cwd=tree)
+        _, output = run([*human_argv, "--json", *extra], cwd=tree)
         try:
             return json.loads(output[output.index("{") : output.rindex("}") + 1])
         except (ValueError, json.JSONDecodeError):
@@ -8215,8 +8463,8 @@ def declined_gate(tier: str, workdir: Path) -> List[Result]:
     # has not gets silence. Both directions, because writing a sidecar for every
     # standing decline on every run is the noise this report is shaped to avoid.
     started = time.time()
-    _, human = run([*upgrade[:-1], "--dry-run"], cwd=tree)
-    code, _ = run(upgrade[:-1], cwd=tree)
+    _, human = run([*human_argv, "--dry-run"], cwd=tree)
+    code, _ = run(human_argv, cwd=tree)
     sidecars = tree / "tmp" / "upgrade"
     results.append(
         Result(
@@ -8257,7 +8505,7 @@ def declined_gate(tier: str, workdir: Path) -> List[Result]:
     # about either line: the decline is still reported AND the verdict is still
     # printed.
     started = time.time()
-    _, current = run([*upgrade[:-1], "--dry-run"], cwd=tree)
+    _, current = run([*human_argv, "--dry-run"], cwd=tree)
     results.append(
         Result(
             "declined: a standing decline does not suppress the currency verdict",
@@ -9677,7 +9925,7 @@ def main() -> int:
         # puts `governed` after `agentic`, which would have quietly gated the
         # wrong tree.
         fullest = max(tiers, key=lambda t: len(scaffolder.TIERS[t]))
-        for gate in versioning_gate(fullest, workdir, venv_python):
+        for gate in versioning_gate(fullest, workdir, venv_python, pyright_ok):
             results.append(gate)
 
         for gate in one_branch_gate(fullest, workdir, venv_python):
@@ -9753,6 +10001,9 @@ def main() -> int:
             results.append(gate)
 
         for gate in pinned_ref_gate(workdir):
+            results.append(gate)
+
+        for gate in unpinned_head_gate(workdir):
             results.append(gate)
 
         leak = author_leak_gate(fullest, workdir)
