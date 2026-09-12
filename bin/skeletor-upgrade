@@ -271,6 +271,60 @@ def warn_a_dirty_base(base: Path, role: str) -> None:
     detail("Read the plan as a statement about a tree that exists on one machine.")
 
 
+def refuse_an_unpinned_head(head_ref: str, writing: str) -> None:
+    """An applying run must stamp a ref the adopter could have chosen.
+
+    `git describe` of a commit past a tag is `v0.28.0-2-g8338234`. It resolves —
+    on any machine that has the commit — so this is NOT the unreproducible-render
+    hazard `refuse_a_dirty_base` guards, and the short version of that argument
+    would decline to guard it.
+
+    **It earns a refusal by the same test, one rung down: re-running does not get
+    you out.** The manifest is re-copied only by a run that APPLIES something, so
+    a tree that becomes current keeps whatever ref it was last stamped with,
+    indefinitely, and `.skeletor.json` says do not hand-edit on its first line —
+    correctly. `--ported` does not reach it either. stash.flow reconstructed a
+    tree held at `v0.24.0-1-g6f4a54e` that was corrected only because the next
+    release happened to carry file work for their tier; had it not, the trap's own
+    logic would have held them there forever. mind.head filed the same finding in
+    a separate session with no shared channel.
+
+    So the harm is sticky and silent, which is the profile a guard is owed. Three
+    trees recorded a describe string in one round — node-zero, dream.doll and
+    stash.flow — and not one of them could pin it from their side, because the
+    only cheap moment is the run that writes it.
+
+    **This reverses a ruling, and says so.** `head_standing`'s ladder held that
+    *unpushed is the tool's problem while untagged is an adopter's policy, and
+    this tool holds no opinion about it.* That was written before `--ref` existed,
+    and it was right then: refusing would have forbidden the operation outright.
+    Now the remedy is one flag, so the trade is no longer refusal-versus-freedom
+    but refusal-versus-a-version-nobody-chose. node-zero asked for the
+    escalation, named the way `--allow-dirty` is.
+
+    `--dry-run` is never refused, for the reason it is never refused anywhere
+    here: it writes nothing, and it is what `bin/skeletor-verify` runs against
+    this checkout mid-edit.
+    """
+    if bare_tag(head_ref):
+        return
+    say("❌", f"the head render would be stamped {head_ref}, which is not a tag")
+    detail()
+    detail(f"{writing} would record a version nobody chose, and the record is STICKY: the")
+    detail("manifest is re-copied only by a run that applies something, so a tree that")
+    detail("becomes current keeps this string indefinitely. --ported does not reach it and")
+    detail(f"{MANIFEST_NAME} says do not hand-edit, correctly.")
+    detail()
+    detail("Pin the render instead — this is the moment the flag exists for:")
+    detail()
+    detail("    skeletor-upgrade <target> --ref <tag>")
+    detail()
+    detail("`git -C <this checkout> tag --list` names the candidates. Tag first if what")
+    detail("you are handing over has no tag yet; that is the real remedy and it is one")
+    detail("command. --allow-untagged records the description above anyway.")
+    raise SystemExit(1)
+
+
 def refuse_a_dirty_base(base: Path, writing: str, role: str) -> None:
     """A base render nobody can reproduce must not be written into a manifest.
 
@@ -1522,6 +1576,15 @@ def main() -> int:
         "with your work in `git diff`, and reverting it discards both.",
     )
     parser.add_argument(
+        "--allow-untagged",
+        action="store_true",
+        help="stamp a `git describe` string rather than a tag. An applying run is otherwise "
+        "refused when this checkout sits past its last tag, because the manifest is re-copied "
+        "only by a run that applies something — so a version nobody chose sticks until the "
+        "next release that happens to carry work for the tree's tier. `--ref <tag>` is the "
+        "remedy; this flag is for a fork with no tags and for this repository's own grid.",
+    )
+    parser.add_argument(
         "--normalise",
         action="store_true",
         help="run the tree's own formatters over both rendered sides before merging",
@@ -1734,6 +1797,18 @@ def main() -> int:
             notes.append(f"{unpushed} not on {tracking}")
         standing = f"head: skeletor @ {head_ref}" + (f" ({', '.join(notes)})" if notes else "")
         say("→", standing)
+        # **After the standing line, so the reader sees what would be stamped before
+        # being told it is refused.** The refusal reads the ref out of the head
+        # render's own manifest rather than from `--ref` or from `git describe` here
+        # — same value the writing path would record, so an accepted-and-ignored
+        # flag cannot pass this.
+        # `--ref` suppresses this whatever it names, and that is the flag's meaning
+        # rather than a loophole: an operator who typed a ref chose one. A `--ref`
+        # that resolves to a describe string is a worse choice than a tag and it is
+        # still a choice, which is the line this refusal is drawn on — the harm is a
+        # version nobody picked, not a version that is ugly.
+        if not (args.dry_run or args.allow_untagged or args.ref):
+            refuse_an_unpinned_head(head_ref, "The upgrade")
         # The ⚠️ is on the writing path alone, and the split is the same one
         # `warn_a_dirty_base`/`refuse_a_dirty_base` already make: a dry run
         # reports, and stamping somebody's manifest is the act. Warning on every
