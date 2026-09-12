@@ -1343,18 +1343,47 @@ class Normaliser:
         if not config.exists():
             self.reason = "the tree declares no .pre-commit-config.yaml"
             return
-        declared = re.findall(r"^\s*-?\s*id:\s*([\w.-]+)", config.read_text(encoding="utf-8"), re.MULTILINE)
+        text = config.read_text(encoding="utf-8")
+        declared = re.findall(r"^\s*-?\s*id:\s*([\w.-]+)", text, re.MULTILINE)
+        pins = self._pins(text)
         for hook in dict.fromkeys(declared):
             if hook not in FORMATTERS:
                 continue
             exe = self._executable(target, hook.split("-")[0])
             settings = next((target / name for name in CONFIG_FILES[hook] if (target / name).exists()), None)
-            if exe and settings:
-                self.steps.append((hook, exe, settings))
-            else:
+            if not exe or not settings:
                 self.unsupported.append(f"{hook} ({'no config' if exe else 'not installed'})")
+                continue
+            pinned = pins.get(hook)
+            running = self._version(exe)
+            if pinned and not self._matches(pinned, running):
+                self.unsupported.append(
+                    f"{hook} (tree pins {pinned}, {exe} reports {running or 'no parseable version'})"
+                )
+                continue
+            self.steps.append((hook, exe, settings))
         if not self.steps and not self.reason:
             self.reason = "no formatter the tree declares is runnable here"
+
+    ## The version is checked, not the location
+    #
+    # `_executable` prefers the tree's `.venv` and falls back to PATH, and the
+    # fallback used to be the end of it — so `--normalise` would bind whatever
+    # `black` happened to be on PATH, at whatever version, and put ONE SIDE of a
+    # three-way merge through it. A formatter at a different version formats
+    # differently, which manufactures exactly the divergence this class exists to
+    # remove, and `__call__`'s docstring two screens below says so in as many
+    # words about a different failure.
+    #
+    # dream.doll and proto.pilot both landed on it. proto.pilot flagged their own
+    # evidence as the weaker of the two and were right to: they watched isort bind
+    # from `~/.local/bin` and its version matched the pin, so the failing case
+    # never actually ran. It is a reading rather than an observed mismatch.
+    #
+    # So the pin is verified wherever the binary came from, `.venv` included — a
+    # venv can hold a stale version as easily as PATH can, and trusting a location
+    # is the mistake `pyright pin resolves` was built to stop making one tool over.
+    # A mismatch refuses that formatter and names both versions.
 
     @staticmethod
     def _executable(target: Path, name: str) -> Optional[str]:
@@ -1362,6 +1391,55 @@ class Normaliser:
         if local.exists():
             return str(local)
         return shutil.which(name)
+
+    @staticmethod
+    def _pins(text: str) -> Dict[str, str]:
+        """`{hook id: the version its own `repo:` block pins}`.
+
+        A `rev:` belongs to the repository above it and governs every `id:` below
+        it until the next `- repo:`, so the association is positional and this
+        walks it rather than pattern-matching a pair.
+        """
+        pins: Dict[str, str] = {}
+        rev: Optional[str] = None
+        for line in text.splitlines():
+            if re.match(r"^\s*-\s*repo:", line):
+                rev = None
+                continue
+            found = re.match(r"^\s*rev:\s*[\"\']?([\w.+-]+)", line)
+            if found:
+                rev = found.group(1)
+                continue
+            hook = re.match(r"^\s*-\s*id:\s*([\w.-]+)", line)
+            if hook and rev:
+                pins[hook.group(1)] = rev
+        return pins
+
+    @staticmethod
+    def _version(exe: str) -> Optional[str]:
+        """What the resolved binary says it is, stdout and stderr merged."""
+        try:
+            done = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        reported = (done.stdout or "") + (done.stderr or "")
+        return " ".join(reported.split()) or None
+
+    @staticmethod
+    def _matches(pinned: str, running: Optional[str]) -> bool:
+        """Whether the binary's own version output carries the pinned version.
+
+        **Substring, not a parse, and that is the point.** Every formatter prints
+        its version in its own shape — `black, 26.5.1 (compiled: yes)`, isort's
+        ASCII banner, `ruff 0.x.y` — and a parser per tool is a registry that goes
+        stale the release a fourth formatter ships. Asking whether the declared
+        string is present is tool-agnostic and fails in the safe direction: an
+        unrecognised format refuses the formatter and says why, rather than
+        running one nobody checked.
+        """
+        if running is None:
+            return False
+        return pinned.lstrip("v") in running
 
     def __bool__(self) -> bool:
         return bool(self.steps)
@@ -1816,7 +1894,15 @@ def main() -> int:
         fresh: List[str] = []
         normaliser = Normaliser(target, workdir)
         if args.normalise and not normaliser:
-            die(f"--normalise: {normaliser.reason}")
+            # **The summary names no cause, and there are three.** `reason` is
+            # "no formatter the tree declares is runnable here" whether a hook is
+            # not installed, has no config, or reports a version that is not the
+            # one the tree pins — and only the third is a thing the reader can act
+            # on by choosing a different interpreter. Refusing without the detail
+            # is the `absent` versus `empty` split at a third artifact: one message
+            # over causes that expire differently.
+            detail_lines = "".join(f"\n   · {hook}" for hook in normaliser.unsupported)
+            die(f"--normalise: {normaliser.reason}{detail_lines}")
         if args.normalise and args.no_base:
             # Silence here would be the flag's own failure mode: a run that
             # normalises nothing looks exactly like a run whose normalisation

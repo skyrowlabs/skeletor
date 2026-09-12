@@ -6313,7 +6313,7 @@ def dirty_signals_gate(workdir: Path) -> List[Result]:
     return results
 
 
-def normalise_gate(workdir: Path) -> List[Result]:
+def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
     """A conflict written by the adopter's own formatter is resolved by it.
 
     mind.head's only conflict taking `v0.9.0` was **one blank line** between two
@@ -6368,6 +6368,22 @@ def normalise_gate(workdir: Path) -> List[Result]:
          "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--language", "python", "--force"],
         cwd=SKELETOR,
     )
+
+    # **The pinned formatters, or this gate measures the bug it now guards.**
+    # This fixture had no `.venv`, so `--normalise` fell back to PATH — and on the
+    # box that wrote this that is no `black` at all and an `isort` from
+    # `~/.local/bin` at 8.0.1 against a tree pinning 9.0.1. So every assertion
+    # below was passing while one side of a three-way merge went through a
+    # formatter a major version off the pin, which is the defect dream.doll and
+    # proto.pilot reported and the reason the version check exists. proto.pilot
+    # could not observe it because their PATH isort happened to match; this one
+    # did not.
+    #
+    # Symlinking the shared venv is what every other tree here gets, and it is
+    # also the faithful case: an adopter running `--normalise` has a venv built
+    # from their own `scripts/requirements.txt`, where the pins agree by
+    # construction.
+    (tree / ".venv").symlink_to(venv_python.parents[1])
 
     # The adopter's config change, and the file it reformats. Derived from the
     # tree: whichever first-party module the config names that a test imports
@@ -6474,14 +6490,65 @@ def normalise_gate(workdir: Path) -> List[Result]:
             f"path printed in both columns. Listed: {standing_names(normalised)}"
         )
 
-    return [
+    # ## A formatter at the wrong version is refused, and says both numbers
+    #
+    # `--normalise` resolves each declared formatter from the tree's `.venv` and
+    # falls back to PATH. Binding a different version and putting ONE SIDE of a
+    # three-way merge through it manufactures the divergence the flag exists to
+    # remove. dream.doll and proto.pilot both read it out of `_executable`;
+    # proto.pilot could not observe it, because the isort they saw bind from
+    # `~/.local/bin` happened to match the pin.
+    #
+    # Planting it is cheap and does not need a second binary: move the tree's own
+    # `rev:` for a formatter it really has. That is the same disagreement from the
+    # tool's side — declared version is not the running one — and it reaches the
+    # refusal without arranging a PATH.
+    config = tree / ".pre-commit-config.yaml"
+    pinned_text = config.read_text(encoding="utf-8")
+    moved = re.sub(r"(?m)^(\s*rev:\s*)([\w.+-]+)(\s*(?:#.*)?)$", r"\g<1>0.0.1-planted\g<3>", pinned_text, count=0)
+    version_problems = []
+    if moved == pinned_text:
+        version_problems.append(f"the plant did not land: no `rev:` line in {config.name} was rewritten")
+    else:
+        config.write_text(moved, encoding="utf-8")
+        try:
+            _, refused = run(upgrade + ["--normalise"], cwd=tree)
+            if "0.0.1-planted" not in refused:
+                version_problems.append(
+                    "with every formatter pin moved to a version nothing reports, --normalise does not "
+                    f"name the pin it refused on. A reader cannot tell it was skipped:\n{refused[-700:]}"
+                )
+            # **Refusing the RUN is the correct behaviour, not merging un-normalised.**
+            # This first asserted that the file came back conflicted — i.e. that the
+            # upgrade proceeded with normalisation skipped. It does not: with no
+            # runnable formatter the run dies, which is the `__call__` docstring's
+            # own principle at the level of the whole invocation. A run that
+            # silently dropped the flag would put the two sides through different
+            # treatment, which is what the flag exists to prevent.
+            if "no formatter the tree declares is runnable here" not in refused:
+                version_problems.append(
+                    f"with every formatter pinned to a version no binary reports, --normalise did not "
+                    f"refuse the run. Proceeding without normalisation is the one outcome the flag must "
+                    f"not have, because it is indistinguishable from having normalised:\n{refused[-700:]}"
+                )
+        finally:
+            config.write_text(pinned_text, encoding="utf-8")
+
+    results = [
+        Result(
+            "normalise: a formatter whose version is not the tree's pin is refused, by name",
+            not version_problems,
+            0.0,
+            "\n".join(version_problems),
+        ),
         Result(
             f"normalise: a formatter's own divergence in {rel} conflicts, and --normalise applies it",
             not problems,
             time.time() - started,
             "\n".join(problems) or f"diverged by dropping {dropped} from known_first_party",
-        )
+        ),
     ]
+    return results
 
 
 def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
@@ -6616,10 +6683,20 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
         worst. A region append that survives a re-merge proves nothing unless the
         rule it supersedes does not.
         """
-        anchor = "#: the constant the template defined.\n"
-        if anchor not in text:
+        # **Derived, not a literal.** This anchored on one line of the seam's prose
+        # and that prose was rewritten in the same release that added the region —
+        # so the fixture stopped being placeable and the gate reported "could not
+        # place", which is the honest failure and still a gate that had stopped
+        # testing. The seam's last line is a structural position: the final `#:`
+        # line above the region marker.
+        lines = text.splitlines(keepends=True)
+        marker = next((i for i, line in enumerate(lines) if line.startswith("# ── Your own ")), None)
+        if marker is None:
             return None
-        return text.replace(anchor, anchor + "\n" + as_append.lstrip("\n"), 1)
+        tail = next((i for i in range(marker - 1, -1, -1) if lines[i].lstrip().startswith("#:")), None)
+        if tail is None:
+            return None
+        return "".join(lines[: tail + 1] + ["\n", as_append.lstrip("\n")] + lines[tail + 1 :])
 
     #: The second shipped file both re-run trees also edit, so the first run
     #: leaves something pending and holds the base back. Without that the run
@@ -6696,12 +6773,24 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     # repository really does there: v0.26.0 inserted a 28-line removal-idiom
     # block into exactly that gap, which is how dream.doll's append ended up
     # sharing an insertion point with the template's.
-    seam_tail = "#: the constant the template defined.\n"
+    # Derived the same way `blank_line_append` derives it, and for the same
+    # reason: a literal line of this seam's prose was the anchor here too, and the
+    # release that added the region rewrote it. Two fixtures, one hardcoded
+    # position, both silently unplaceable — which is why the position is computed
+    # from the marker in one helper now.
     text = source.read_text(encoding="utf-8")
-    if seam_tail not in text:
+    seam_lines = text.splitlines(keepends=True)
+    marker_at = next((i for i, line in enumerate(seam_lines) if line.startswith("# ── Your own ")), None)
+    tail_at = (
+        next((i for i in range(marker_at - 1, -1, -1) if seam_lines[i].lstrip().startswith("#:")), None)
+        if marker_at is not None
+        else None
+    )
+    if tail_at is None:
         return [Result(f"append seam: no seam-tail line to edit upstream in {paths_rel}", False,
-                       time.time() - started, "")]
-    source.write_text(text.replace(seam_tail, seam_tail.rstrip("\n") + " Reworded upstream.\n", 1), encoding="utf-8")
+                       time.time() - started, f"marker at {marker_at}")]
+    seam_lines[tail_at] = seam_lines[tail_at].rstrip("\n") + " Reworded upstream.\n"
+    source.write_text("".join(seam_lines), encoding="utf-8")
     git_in(scratch, "commit", "--quiet", "-am", "scratch: reword inside the literal and at the seam's last line")
 
     problems = []
@@ -9517,7 +9606,7 @@ def main() -> int:
         for gate in dirty_signals_gate(workdir):
             results.append(gate)
 
-        for gate in normalise_gate(workdir):
+        for gate in normalise_gate(workdir, venv_python):
             results.append(gate)
 
         for gate in append_seam_gate(workdir, venv_python):
