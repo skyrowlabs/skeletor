@@ -687,7 +687,13 @@ def standing_divergence(
 
 
 def importers_of(needs_review: List[str], written: List[str], head_files: Dict[str, Path]) -> Dict[str, List[str]]:
-    """Files that were written cleanly but import one that was not.
+    """Files that landed this run but import one that did not.
+
+    **`written` is three buckets, not one** — `added`, `updated` and `merged` — and
+    the caller labels each result with the one it came from. This docstring said
+    "written cleanly" and drove a report sentence claiming every named file was one
+    the adopter had never edited, which is false of `merged`. mind.head found it
+    with a run naming one file from each bucket under that single claim.
 
     A merge status describes **one file**. It says nothing about what that file
     depends on — so the single most reassuring line this tool prints, *"file(s)
@@ -1817,6 +1823,25 @@ def main() -> int:
         # version nobody picked, not a version that is ugly.
         if not (args.dry_run or args.allow_untagged or args.ref):
             refuse_an_unpinned_head(head_ref, "The upgrade")
+        # ## A dry run that does not preview the apply is worse than none
+        #
+        # `--ref` changes what `theirs` renders from, so it changes the plan — and
+        # the refusal above asks for it on the applying run while nothing asks for
+        # it here. An operator following both this tool and the round's own
+        # instructions therefore previews from the live checkout and applies from a
+        # tag: two different releases, one report. sky.boss's, and they were careful
+        # to say the harm was never a bad stamp — it is that **the preview describes
+        # a different release than the apply.**
+        #
+        # Not a refusal. A dry run writes nothing, and refusing it would take away
+        # the one command that is safe to run from anywhere, which is what keeps
+        # this repository's own grid pointing `--from-dir .` at a checkout mid-edit.
+        # One line, on the dry-run path only, where the applying path has a refusal.
+        if args.dry_run and not (args.allow_untagged or args.ref) and not bare_tag(head_ref):
+            say("⚠️ ", f"this plan renders from {head_ref}, and an applying run will refuse it")
+            detail("So the run you make next will be `--ref <tag>`, which renders theirs from that")
+            detail("tag instead — a different plan from this one. Pass the same --ref here to")
+            detail("preview what you will actually apply.")
         # The ⚠️ is on the writing path alone, and the split is the same one
         # `warn_a_dirty_base`/`refuse_a_dirty_base` already make: a dry run
         # reports, and stamping somebody's manifest is the act. Warning on every
@@ -2028,7 +2053,8 @@ def main() -> int:
         # a formatter's reflow both differ from the recorded base and neither is
         # a decision anybody made. The function carries the argument.
         normalising = normaliser if args.normalise else None
-        diverged = standing_divergence(target, hashes or {}, head_files, base_files, normalising)
+        divergence_inputs = (hashes or {}, head_files, base_files)
+        diverged = standing_divergence(target, *divergence_inputs, normalising)
 
         for rel in sorted(set(base_files) | set(head_files)):
             if rel in GENERATED or rel == MANIFEST_NAME:
@@ -2363,13 +2389,12 @@ def main() -> int:
                 # post-write reading "under-counts on the runs that changed the
                 # most" — which is true only if you take every applied file to
                 # be a divergence, and an applied file is the opposite of one.
-                diverged = standing_divergence(
-                    target,
+                divergence_inputs = (
                     {rel: sha256(path) for rel, path in head_files.items()},
                     head_files,
                     head_files,
-                    normalising,
                 )
+                diverged = standing_divergence(target, *divergence_inputs, normalising)
 
         # One call, two renderings. It was computed separately for the JSON and
         # for the human report — two call sites for one answer, which is the
@@ -2645,6 +2670,38 @@ def main() -> int:
             detail("than replacing them, and `--ported` advances the base without erasing that.")
             for rel in diverged:
                 item(rel)
+            # ## How many of those "decisions" are a formatter's, counted here
+            #
+            # This block hashes raw bytes while the merge honours `--normalise`, so a
+            # plain run and a normalised one disagree about the size of this list and
+            # only one of them ever mentions the flag. mind.head measured 48 against
+            # 31 in their tree at v0.26.0 and again at v0.29.0, unmoved, and pointed
+            # out that 17 of the 48 were `ruff --fix` output — **not decisions at
+            # all**, under a heading asserting every entry is one.
+            #
+            # v0.29.0 answered the CONFLICT path and stopped there, which is why this
+            # recurred: the flag becomes discoverable exactly where a conflict already
+            # forced somebody to read, and this list is read on every run by somebody
+            # with nothing wrong. Counting is the whole fix — the classification is
+            # not touched, because a formatting-only divergence is still a divergence
+            # until the adopter decides otherwise.
+            if not args.normalise and normaliser:
+                # The counterfactual is **the same function with the flag forced on**,
+                # over the same reference and the same render this run used. A second
+                # implementation of "what counts as a divergence" is how the two
+                # answers would come to disagree about something other than the flag,
+                # which is the drift `standing_divergence` exists as one function to
+                # prevent.
+                settled = sorted(
+                    set(diverged) - set(standing_divergence(target, *divergence_inputs, normaliser))
+                )
+                if settled:
+                    detail()
+                    detail(f"{len(settled)} of these differ only in formatting — `--normalise` puts both")
+                    detail("rendered sides through the formatters this tree declares and they stop")
+                    detail("reading as decisions. Yours on disk is never touched either way:")
+                    for rel in settled:
+                        item(rel)
             # The one class of standing edit that is not a decision to keep, and
             # it is invisible from inside the list. If you edited one of these to
             # change a value skeletor RENDERS — a python version, a line length —
@@ -2699,14 +2756,30 @@ def main() -> int:
         # After the two blocks that name files needing a decision, because this
         # is about those files — and before `dropped`, which is unrelated.
         if entangled:
-            say("⚠️ ", f"{len(entangled)} file(s) applied cleanly import one that did NOT")
+            # **Each path carries the bucket it arrived in, because the population
+            # spans three and the sentence asserted one.** `importers_of` is handed
+            # `added + updated + merged`, and *"written because you had never edited
+            # them"* is true of the first two and false of the third — a `merged`
+            # file is one the adopter DID edit. mind.head's run named two files, one
+            # from each bucket, under that single claim, with `check_doc_links.py`
+            # listed three lines above as a clean merge. Their reading is the one
+            # taken here: the pairing is correct and useful, only the explanation
+            # was wrong, so the fix is to label rather than to narrow.
+            arrival = {
+                rel: name
+                for name, group in (("added", added), ("updated", updated), ("merged", merged))
+                for rel in group
+            }
+            say("⚠️ ", f"{len(entangled)} file(s) that landed import one that did NOT")
             for rel, targets in sorted(entangled.items()):
-                item(f"{rel} → {', '.join(targets)}")
+                item(f"{rel} [{arrival.get(rel, 'landed')}] → {', '.join(targets)}")
             detail()
             detail("A merge status describes one file and says nothing about what it depends")
-            detail("on. These were written because you had never edited them — which is the")
-            detail("reassuring case, and the wrong one here: their behaviour is decided by a")
-            detail("file above that you kept or must resolve by hand. Check the pair.")
+            detail("on. The tag after each path is how it arrived: `added` and `updated` are")
+            detail("files you had never edited — the reassuring case, and the wrong one here —")
+            detail("while `merged` is one you had, whose clean merge knows nothing about what it")
+            detail("imports still being pending. Either way the behaviour is decided by a file")
+            detail("above that you kept or have yet to resolve. Check each pair.")
 
         # Before `dropped`, because the sentence there reads like housekeeping
         # and these two are the cases where it is not.

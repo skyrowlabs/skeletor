@@ -5155,3 +5155,169 @@ both were enumeration failures of the same family: the first missed callers that
 named the tool through a variable, this one missed callers that named a flag
 through its position. **Neither spelling is searchable, and both were found by
 running.**
+
+## A boundary with one side is not a boundary
+
+The append seams were given a frozen rule so an adopter's line could never sit
+adjacent to template prose a release might rewrite. One release later, six trees
+reported that the rule did not do that, and the reason is embarrassing in the
+useful way: **a line saying "nothing below this is skeletor's" was false about the
+file it was in.** `scripts/paths.py` carries template-owned sections further down
+— `# ── Code and configuration ──`, `# ── State: the record ──` — so "below" meant
+*somewhere in the middle of a template file*, and an append landing there is
+surrounded by skeletor on both sides again.
+
+So the region is bounded now: an opening rule and a closing one, with nothing of
+skeletor's between them, and the adopter's appends plus any prose they write about
+them going in the middle.
+
+### Where the closing rule goes was measured, not chosen, and the wrong answer is the quiet one
+
+Three placements, run with the real tool against the six real adopter trees at
+their recorded bases:
+
+| Placement | Merge outcome | Where the existing appends end up |
+|---|---|---|
+| **A** — closing rule directly under the opening block | clean, all six | **outside the region, all of them** |
+| **B** — closing rule glued above the next template heading | clean ×4, conflict ×2 | inside the region where it is clean |
+| **C** — whole seam relocated to end of file | clean, all six | **outside the region, all of them** |
+
+A and C are the placements that look best and are worst. They merge clean
+everywhere, which means every adopter's upgrade reports success while their
+appends now sit on skeletor's side of the new boundary — the exact condition the
+boundary exists to prevent, delivered silently by a green run. B costs two trees a
+conflict on one file, with the template's own version written to `tmp/upgrade/`
+and a hand-port to do.
+
+**A conflict is a cost; a clean merge that relocates somebody's line is a
+liability.** This repository already knew the shape from the other direction —
+`bin/skeletor-upgrade` refuses rather than guessing when a hand-port cannot be
+distinguished from a missing one — and it is the same trade: the expensive outcome
+of over-reporting is somebody's afternoon, and the expensive outcome of
+under-reporting is a tree that believes something about itself that is not true.
+B shipped.
+
+The tree's own test is what makes the hand-move survivable: it fails, in the
+adopter's tree, naming their own heading as the likely cause, until the appends
+are inside the region. A release that asks for a hand-move and cannot tell you
+whether you made it is asking you to remember.
+
+### A prediction about a file you cannot see
+
+The sentence this replaced was the seam's worst line, and both of the things it
+said were measured and true:
+
+* **v0.27.0** measured two append positions against one release and concluded
+  appends already land in the safe region.
+* **v0.29.0** measured the same positions against the next release and found them
+  interleaved with template prose, needing a move.
+
+Neither measurement was wrong. The variable was never the position — it was
+**which prose the next release happened to rewrite**, which is a fact about a
+commit nobody has written yet. So the file no longer predicts anything about
+anybody's tree:
+
+> **Where your existing append ends up is not predicted here. Run the check.**
+
+That is the *undistinguished, not confirmed* rule arriving at a fixture instead of
+a flag: one release cannot tell a safe position from a lucky one, because with one
+observation those are the same reading.
+
+### A floor is a list with one number
+
+`invited_files()` discovers the seams rather than listing them, which was the
+point of the rewrite. The predicate was `invitation AND terminator`, so a seam
+file that shipped the invitation *without* its rule simply **left the population**
+— and the only thing standing between that and total silence was `scanned(...,
+least=2)`, which is today's seam count written down.
+
+dream.doll priced it exactly: stripping a terminator today fails through the floor
+(2 → 1), and with a third seam in the tree a fourth arriving without its rule
+leaves 3 ≥ 2 and goes quiet. Keeping the floor honest would mean bumping an
+integer every time a seam is added — **the hardcoded list the discovery rewrite
+had just deleted, relocated into a number.**
+
+Population and assertion are separate now: the invitation selects the file, and
+carrying both rules is asserted over it. The floor stays, doing the job a floor is
+for — refusing a scan too small to prove anything — rather than standing in for a
+check.
+
+### One mistake, two red tests
+
+The seam test execs the file's source **above** the opening rule, so an append that
+landed on the wrong side of the boundary joins that namespace and can satisfy the
+template's own documented `PRESENT_TENSE.pop(...)` example in advance, turning it
+into a no-op. One misplaced line reddens the placement check *and* the
+example-does-something check, and only the first names the cause. dream.doll met
+it and the coupling is written into the test's docstring, because the cost is not
+the second failure — it is the half hour spent debugging it as a separate problem.
+
+### A comment cannot assert what is beside it
+
+`pr-draft-discipline.yml` explained that placeholder substitution reaches inside
+its own comment block, and proved it by pointing at "`{{RELEASE_BRANCH}}` eleven
+lines below". sky.boss had **declined that whole file**. The line being pointed at
+was not in their copy, and the offsets in their copy are not ours.
+
+> **A comment addressed to the tree most likely to have diverged from it cannot
+> safely assert what is beside it.**
+
+The block now states the property — it carries a substituted branch name — without
+an offset, and the rename instruction is `git grep` for the branch rather than a
+list of files or a line number. The retracted proof is quoted in place, as the
+record of what was wrong, which is the one legitimate reason for that string to
+remain in the file.
+
+That block also carried a four-case table whose last column is a property of **the
+template's job graph**, not of Actions: a tree that rewires `needs:` changes the
+answer. It says so now, in the table, because a reader with a diverged workflow is
+exactly the reader who will act on it.
+
+### What the six-tree pricing does not price
+
+Every cost in the table above is **per tree**: four trees extend `paths.py`, two of
+those four conflict on it once. proto.pilot's objection is that this treats each
+adopter's divergence as one unit, when a seam has two halves — the appended
+constant and the prose around it — that can conflict independently and are
+repaired differently. The measurement cannot currently attribute a conflict to a
+half, so the table says which trees pay and not which edit of theirs does. That
+is a limit of the harness rather than a property of the seams, and it is recorded
+here rather than guarded, because the fix is a different measurement and nobody
+has run it.
+
+### A search whose failure mode is a crash names nothing
+
+`pending_ref_gate` searches the tag list for a version gap that actually applies
+something, and its whole design argument is that **a selector it cannot satisfy
+fails naming every tag it tried** — rather than asserting about a scenario that did
+not happen. The candidate scaffold's exit code was never checked, so that property
+had a hole: a tag whose `bin/skeletor-new` refused this grid's arguments would
+write nothing, and every `cwd=target` after it would point at a directory that does
+not exist. The gate would die with `FileNotFoundError` naming a temp path — no
+assertion, no tag, nothing saying a scaffold was refused. A candidate that cannot
+render this configuration is not a candidate, and it is skipped with a line in the
+attempts list now, which is what every other rejection in the loop already did.
+
+**The scope is smaller than the story it first got written up as, and the
+correction is the part worth keeping.** A crash of exactly that shape was observed
+once, at candidate 48, and the write-up confidently attributed it to this line and
+to the unpinned-head refusal exhausting the search. Neither was measured. Testing
+the tags around that index — `v0.4.2`, `v0.4.1`, `v0.4.0`, `v0.3.9`, and `v0.1.0`
+for good measure — every one of them scaffolds this configuration cleanly, so the
+branch has **no live trigger at all**; and the observed crash's real cause was this
+session deleting the grid's workdir from another shell while it ran.
+
+So the fix stands on the hazard rather than on the incident: an unchecked
+subprocess status is `post_copy_steps`'s shape met inside the instrument instead of
+the template. What the incident actually establishes is narrower and more useful —
+**a deleted workdir and a refused scaffold are the same traceback**, which is the
+second reason for the attempts list to name the tag. Writing a cause down without
+running it is the failure this document is mostly about, arriving in a section about
+a gate that could not report its own inability to reach a branch.
+
+**And the incident has a rule of its own, which cost two grid runs today.**
+`clean_skeletor` carries working-tree edits into its clone through
+`git stash create`, which is what lets a plant be uncommitted — and it means a
+`template/` or `bin/` edit made *while the grid runs* is picked up by the
+configurations scaffolded after it and not by the ones before. The verdict is then
+mixed, and a mixed green is indistinguishable from a clean one. Edit, then run.

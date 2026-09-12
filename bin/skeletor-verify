@@ -5516,12 +5516,14 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
     # watching it pick exactly that line for all 38 tags.
     head_tree = workdir / "pending-head" / "probe"
     if not head_tree.exists():
-        run(
+        code, output = run(
             [sys.executable, str(clean / "bin" / "skeletor-new"), str(head_tree),
              "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
              "--tier", tier, "--language", language, "--force"],
             cwd=SKELETOR,
         )
+        if code != 0:
+            return [Result("pending ref: scaffold the head tree", False, time.time() - started, output)]
 
     attempts: List[str] = []
     for index, tag in enumerate(candidates):
@@ -5533,12 +5535,32 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
             return [Result(f"pending ref: check out {tag}", False, time.time() - started, output)]
         try:
             target = workdir / f"pending-scaffold-{index}" / "probe"
-            run(
+            # **A candidate tag that cannot render THIS configuration is not a
+            # candidate, and this scaffold's exit code went unchecked.** Every
+            # other rejection in this loop appends a line to `attempts` and moves
+            # on, which is what makes an unsatisfiable selector fail *naming the
+            # tags it tried*; an old `bin/skeletor-new` that refused these
+            # arguments would instead have left every `cwd=target` below pointing
+            # at a directory that was never created, and the gate would have died
+            # with a `FileNotFoundError` naming a temp path — no assertion, no
+            # tag, nothing saying a scaffold was refused.
+            #
+            # Measured, and this is the honest scope: every tag this grid can
+            # reach scaffolds today, so the branch has no live trigger and is
+            # here because the failure mode is a crash rather than a report. A
+            # `FileNotFoundError` of exactly that shape WAS observed once and its
+            # cause was somebody deleting the grid's workdir from another shell,
+            # not this line. Those two look identical in a traceback, which is
+            # the second reason to name the tag.
+            code, output = run(
                 [sys.executable, str(old_checkout / "bin" / "skeletor-new"), str(target),
                  "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
                  "--tier", tier, "--language", language, "--force"],
                 cwd=SKELETOR,
             )
+            if code != 0:
+                attempts.append(f"{tag}: cannot scaffold {tier}/{language} — {output.strip().splitlines()[-1:]}")
+                continue
 
             # Derive the plant: a file both versions ship whose text differs.
             planted = None
@@ -6848,6 +6870,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     #: assembles it too, and had to — spelled, it matched itself and the suite
     #: failed reporting the detector.
     frozen_rule = "# ── " + " ".join(("Nothing below", "this line is", "skeletor's"))
+    closing_rule = "# ── " + " ".join(("Skeletor's again", "below this line"))
 
     def frozen_block(lines: List[str]) -> Optional[Tuple[int, int]]:
         """`(rule index, first line after the frozen comment run)`, or None."""
@@ -7021,21 +7044,24 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
 
     adopters = {}
     rerun_trees = {}
-    for label, mutate in (("append", None), ("in-block", in_block)):
+    # **`region_append`, not end-of-file.** This appended at EOF, which was inside
+    # the seam's space while the space ran to the end of the file and is outside it
+    # now that a closing rule bounds it. The tree's own placement check caught the
+    # fixture, which is the right way round: this gate asserts the tree's suite
+    # stays green on a documented append, so a fixture placing it somewhere the
+    # documentation does not is the gate testing its own bad habit.
+    for label, mutate in (("append", region_append), ("in-block", in_block)):
         tree = build(label)
         if tree is None:
             return [Result(f"append seam: could not scaffold the {label} tree", False,
                            time.time() - started, "")]
         target = tree / paths_rel
         text = target.read_text(encoding="utf-8")
-        if mutate is None:
-            target.write_text(text + as_append, encoding="utf-8")
-        else:
-            rewritten = mutate(text)
-            if rewritten is None:
-                return [Result("append seam: no PRESENT_TENSE literal in the scaffolded tree", False,
-                               time.time() - started, "")]
-            target.write_text(rewritten, encoding="utf-8")
+        rewritten = mutate(text)
+        if rewritten is None:
+            return [Result(f"append seam: could not place the {label} edit in the scaffolded {paths_rel}",
+                           False, time.time() - started, "")]
+        target.write_text(rewritten, encoding="utf-8")
         run(["git", "-C", str(tree), "add", "-A"], cwd=tree)
         run(["git", "-C", str(tree), "commit", "-q", "-m", f"adopter: {label} removal"], cwd=tree)
         adopters[label] = tree
@@ -7170,6 +7196,14 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     # release; proto.pilot found it with `git grep`. The predicate is the
     # invitation itself — a file that tells an adopter to add something *as an
     # append* is a file with a seam — so a fourth arrives covered or arrives red.
+    # **The invitation is the population; carrying the rules is the assertion.**
+    # These used to be one predicate joined with `and`, so a seam shipping the
+    # invitation and no rule left the population rather than failing, and the only
+    # thing between that and silence was the `< 2` floor — a copy of today's seam
+    # count. dream.doll priced it: with a third seam, a fourth arriving without its
+    # rule leaves 3 >= 2 and goes quiet, and keeping the floor honest means bumping
+    # an integer per seam, which is the list the discovery rewrite removed wearing
+    # a number. The tree ships the same split in its own test.
     invitation = "**Add your own"
     seam_files = sorted(
         path
@@ -7181,9 +7215,11 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     region_problems = []
     if len(seam_files) < 2:
         region_problems.append(
-            f"found {len(seam_files)} append seams in the rendered tree by the invitation "
+            f"found {len(seam_files)} files inviting an append in the rendered tree by "
             f"{invitation!r}; the template ships more than that, so the discovery is not finding "
-            f"them and every assertion below covers nothing."
+            f"them and every assertion below covers nothing. This floor is on the INVITATION "
+            f"population only — whether each invited file bounds a space is asserted per file below, "
+            f"never inferred from this count."
         )
     # ### The rule sits at the BOTTOM of its block, and that placement is the check
     #
@@ -7202,21 +7238,29 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     for seam in seam_files:
         seam_rel = seam.relative_to(probe).as_posix()
         seam_lines = seam.read_text(encoding="utf-8").splitlines()
-        starts = [i for i, line in enumerate(seam_lines) if line.startswith(frozen_rule)]
-        if len(starts) != 1:
+        bounds = {}
+        for name, rule in (("opening", frozen_rule), ("closing", closing_rule)):
+            found = [i for i, line in enumerate(seam_lines) if line.startswith(rule)]
+            if len(found) != 1:
+                region_problems.append(
+                    f"{seam_rel} invites an append and has {len(found)} {name} rules (`{rule}`). "
+                    f"`between the rules` needs exactly one of each; a seam missing the opening one is "
+                    f"still on the blank-line rule, and one missing the CLOSING one certifies every "
+                    f"template-owned section below it — which is the defect two adopters found in "
+                    f"v0.29.0, one latent and one by planting."
+                )
+            else:
+                bounds[name] = found[0]
+        if len(bounds) != 2:
+            continue
+        if bounds["closing"] <= bounds["opening"]:
             region_problems.append(
-                f"{seam_rel} invites an append and has {len(starts)} `{frozen_rule}` rules. An "
-                f"adopter cannot be told to append below `the` rule unless there is exactly one, and "
-                f"a seam with none is still on the blank-line rule — a first-merge guarantee that "
-                f"re-conflicts on any re-run before the base advances."
+                f"{seam_rel} ships the closing rule at line {bounds['closing'] + 1}, above the opening "
+                f"one at {bounds['opening'] + 1}, so the bounded region is empty by inversion and every "
+                f"append in the file is outside it."
             )
             continue
-        body, closed = [], False
-        for line in seam_lines[starts[0] + 1 :]:
-            if line.startswith("# ── "):
-                closed = True
-                break
-            body.append(line)
+        body, closed = seam_lines[bounds["opening"] + 1 : bounds["closing"]], True
         content = [line for line in body if line.strip() and not line.lstrip().startswith("#")]
         if content:
             region_problems.append(
@@ -7242,14 +7286,18 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
                 f"is prose a later release will rewrite, at the adopter's insertion point, which is "
                 f"precisely what moving the rule to the bottom of its block was for."
             )
-        if not closed:
-            region_problems.append(
-                f"{seam_rel}'s region is not closed by a following `# ── ` section header, so it runs "
-                f"to end of file and this check cannot bound what is in it."
-            )
-        block = seam_lines[starts[0] :]
-        end = next((i for i, line in enumerate(block) if not line.startswith("#")), len(block))
-        frozen_texts[seam_rel] = "\n".join(block[:end])
+        if not closed:  # unreachable while the bounds above are asserted; kept as a guard
+            region_problems.append(f"{seam_rel}'s region could not be bounded")
+        def comment_run(at: int) -> str:
+            block = seam_lines[at:]
+            end = next((i for i, line in enumerate(block) if not line.startswith("#")), len(block))
+            return "\n".join(block[:end])
+
+        # Only the OPENING block is compared across seams. The closing one carries
+        # each file's own reason — `scripts/paths.py` holds the measurement and
+        # `check_doc_links.py` points at it — so requiring them identical would
+        # force one of the two to say less than it knows.
+        frozen_texts[seam_rel] = comment_run(bounds["opening"])
     # **One frozen block, shared by every seam.** The word "frozen" is a promise
     # about future releases, and there is no population to check it against yet —
     # no released tag carries this block, so an across-tags assertion would pass
@@ -7264,7 +7312,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
         )
     results = [
         Result(
-            f"append seam: every seam ships one frozen rule with nothing of the template's below it "
+            f"append seam: every seam bounds an empty space between two frozen rules "
             f"({len(seam_files)} seam(s))",
             not region_problems,
             0.0,

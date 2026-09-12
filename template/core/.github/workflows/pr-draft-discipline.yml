@@ -64,16 +64,36 @@ jobs:
             // ## Why not decide it at scaffold time, which was asked for and declined
             //
             // sky.boss proposed a substituted boolean instead of a run-time read, and
-            // they are right that the mechanism is available — `{{RELEASE_BRANCH}}`
-            // eleven lines below proves substitution reaches inside this block. They
-            // would ship the negative sentence unconditionally. The four cases,
-            // walked rather than argued, for a ready pull request carrying code:
+            // they are right that the mechanism is available — this block does carry a
+            // substituted branch name, so substitution reaches inside it. They would
+            // ship the negative sentence unconditionally.
+            //
+            // **That proof used to point at the release-branch placeholder a fixed
+            // number of lines below, and sky.boss is the reason it does not.** (The
+            // old sentence spelled the placeholder, which a scaffold then substituted,
+            // so the quotation of it could not survive being quoted here either.) A
+            // comment addressed to the tree most
+            // likely to have diverged from it cannot safely assert what is beside it:
+            // they had declined this whole file, so the line being pointed at was not
+            // in their copy, and the offsets in their copy are not ours. Their line is
+            // the general one, and it applies to any block of ours that argues from its
+            // own surroundings. The four cases, walked rather than argued, for a ready
+            // pull request carrying code:
             //
             //     tree           base of the PR      fullSuite   drafting saves
             //     one-branch     main (= release)    true        the full suite
             //     two-branch     develop             false       nothing
             //     two-branch     main (= release)    true        the full suite
             //     either         docs-only          (exempt)     n/a, returns above
+            //
+            // **The last column is a property of the template's job graph, not a
+            // universal.** It reads "the full suite" because `ci.yml` as shipped gates
+            // several jobs on `docs_only`, so a draft runs fewer of them. A tree that
+            // pruned that graph — dropped the integration or UI jobs, or gates nothing
+            // on the classifier — has no row where drafting saves anything, and the
+            // argument below is then correct about this template and does not reach
+            // that tree. sky.boss asked for this clause while declining the file, which
+            // is exactly the position it is written for.
             //
             // Row three is the whole disagreement. In a two-branch tree the positive
             // arm fires only on a pull request into the release branch, which is
@@ -100,7 +120,10 @@ jobs:
             // check in the tree can catch it: the real release branch is a fact about
             // the repository's settings and its git refs, and every gate here asks
             // whether the tree is consistent with itself. Renaming means a sweep for
-            // the rendered name, in this file and in `.github/scripts/docs-only.cjs`.
+            // the rendered name — wherever your tree spells it, which is this file and
+            // `.github/scripts/docs-only.cjs` as shipped and may be neither if you have
+            // rearranged them. `git grep` for the branch name is the instruction that
+            // survives a fork; a line number is not.
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,

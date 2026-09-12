@@ -980,7 +980,7 @@ does it, and that is also what makes the subtraction rule enforceable rather
 than stated — anything needing a check of its own is a sign the flag stopped
 being a subtraction.
 
-**The append seams, and why their rule sits at the BOTTOM of its block.**
+**The append seams, and why their region is bounded at BOTH ends.**
 `scripts/paths.py` and `scripts/check_doc_links.py` invite an adopter to extend
 a constant *as an append*, because an append is a different line from the
 template's and merges clean where an edit to the literal collides with every
@@ -999,12 +999,39 @@ inverse, and both readings were correct — *undistinguished, not confirmed*, at
 the level of a fixture. The table is in
 [`docs/DESIGN_RATIONALE.md`](docs/DESIGN_RATIONALE.md).
 
-So each seam ends with a frozen rule, skeletor renders nothing below it, and the
-explanation stays above where it cannot be adjacent to anybody's line. Measured
-cost against the six real trees at their recorded base: four extend
-`scripts/paths.py` and two of those four conflict on it once — and *which* two is
-not a function of how far down the append sits, but of which prose this release
-rewrote next to them, which is the argument for the move restated as a bill.
+So each seam has a frozen rule with the explanation above it, where the
+explanation cannot be adjacent to anybody's line. Measured cost against the six
+real trees at their recorded base: four extend `scripts/paths.py` and two of those
+four conflict on it once — and *which* two is not a function of how far down the
+append sits, but of which prose this release rewrote next to them, which is the
+argument for the move restated as a bill.
+
+**One rule was not a boundary, and the line saying so was false about its own
+file.** `scripts/paths.py` carries template-owned sections *further down* — code,
+configuration, the state paths — so "nothing below this line is skeletor's" meant
+*somewhere in the middle of a template file*, and an append landing there is
+surrounded on both sides again. Six trees reported it. There is a **closing** rule
+now, and the region between the two is the adopter's: their appends and any prose
+they write about them, with skeletor rendering nothing in between.
+
+**Where the closing rule goes was measured, and the wrong answers are the quiet
+ones.** Three placements against the six real trees: directly under the opening
+block, or the whole seam moved to end of file, both merge clean for all six — and
+move **every existing append out of the region**, which is the condition the
+boundary exists to prevent, delivered by a green run. Glued above the next
+template heading costs two trees a conflict on one file and puts every append
+where it belongs. *A conflict is a cost; a clean merge that relocates somebody's
+line is a liability* — the same trade as refusing rather than guessing at a
+hand-port. The table is in
+[`docs/DESIGN_RATIONALE.md`](docs/DESIGN_RATIONALE.md).
+
+**The file no longer predicts where anybody's append will land.** It said appends
+already sit in the safe region, measured; the next release measured the same
+positions and found them interleaved. Both readings were correct, because the
+variable was never the position — it is which prose the next release rewrites,
+which is a fact about a commit nobody has written. The sentence is now *run the
+check*, and the check is the tree's own test, which fails naming the adopter's own
+heading until the appends are inside the region.
 
 Three ways the check for it did not bite, and the first is Rule 2 eating itself.
 The tree's test named `scripts/paths.py` and five `paths.py`-shaped regexes while
@@ -1032,6 +1059,21 @@ gives `clean, clean` at every offset, because after one merge both sides agree
 about that line, so no control was placeable at all. An **insertion** at a
 shared anchor is what actually happened to the trees that found this, and it is
 what discriminates.
+
+**A floor is a list with one number.** The seam population was `invitation AND
+terminator`, so a seam shipping the invitation *without* its rule left the
+population rather than failing, and the only thing before silence was
+`least=2` — today's seam count. dream.doll priced it: stripping a terminator fails
+today through the floor, and with a third seam a fourth arriving bare leaves
+`3 >= 2` and goes quiet, so honesty would mean bumping an integer per seam, which
+is the list the discovery rewrite had just deleted. Population and assertion are
+separate now.
+
+**One misplaced append reddens two tests, and only one names the cause.** The
+seam test execs the source above the opening rule, so an append on the wrong side
+joins that namespace and can satisfy the documented `PRESENT_TENSE.pop(...)`
+example in advance, making it a no-op. The coupling is in the test's docstring:
+fix the placement first. dream.doll met it.
 
 **The one thing a scaffold hands over broken, and it is not in any file.**
 Release Please opens a pull request, and `can_approve_pull_request_reviews` — a
