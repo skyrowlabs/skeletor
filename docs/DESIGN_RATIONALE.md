@@ -4883,3 +4883,68 @@ measurement made an hour earlier — and **a harness that no longer reproduces t
 defect it was built from is not measuring the defect.** A disagreement between two
 runs of your own instrument is a finding about the instrument before it is a
 finding about the subject.
+
+## The trees with nothing to count are the ones that mattered
+
+v0.27.0's region was priced by counting conflicts across six adopter trees, twice
+— once here and once by skyrow-workspace, with different harnesses. Both counts
+were right. Both conclusions about **placement** were wrong, and the three trees
+that found it are the three that conflicted zero times.
+
+The claim was that an existing append which merges cleanly ends up *below* the
+arriving marker, so nobody has to move anything. git orders two additions at a
+shared anchor rather than colliding on them, and which side yours lands on depends
+on exactly where it sat. dream.doll merged cleanly and landed **above**; mind.head
+found the same from a tree that did conflict. dream.doll's own sentence is the
+indictment:
+
+> The six-tree measurement behind the cost estimate would not have caught this,
+> since it counted conflicts and this tree has none.
+
+**A conflict count is a measurement of the trees that conflict.** The failure mode
+here is the reverse of the usual one: not a sample too small, but a sample whose
+selection criterion is the thing that hides the defect. Every tree with the bad
+outcome was, by construction, in the half the instrument discarded — and the bad
+outcome is silent, because an append above the marker keeps the pre-region
+behaviour while every signal says it is covered.
+
+Three things this repository already knew, arriving together:
+
+- **A negative over a filtered set is a claim about the filter.** Stated here for
+  `filesAnalyzed` and for lint gates asserting they enumerated the tree. A
+  conflict count is the same shape one level up: zero conflicts is the *absence*
+  the instrument reports, and absence of the measured event is not absence of the
+  hazard.
+- **Undistinguished, not confirmed**, applied to a harness instead of a flag. The
+  placement claim also carried *"measured across five offsets"* — and those five
+  offsets returned an identical answer five times. An identical answer across
+  every value of a parameter is the tell that the parameter varied nothing.
+  proto.pilot reached the same conclusion from outside with three probes, and
+  declined to assert it because they could not see the harness. They were right:
+  a first-merge probe cannot distinguish the layouts, because the region buys
+  nothing on a first merge. It buys the re-run, and only the re-run.
+- **A claim a tree can check should not be a claim a tree is asked to believe.**
+  dream.doll asked for a test rather than a corrected sentence, which is the right
+  trade and the one this file keeps arriving at from other directions. Placement is
+  a fact about the adopter's own file, so
+  `tests/test_narrative_covers_lifecycle_folders.py` settles it locally and no
+  release note has to be trusted. The corrected prose still ships, because a check
+  says *what* and the reason says *why* — but the check is what makes it safe.
+
+**The same release named two seams and shipped the region to both, and there were
+three.** `check_doc_links.py`'s `SCAN_ROOTS` kept the blank-line rule for another
+release; proto.pilot found it with `git grep`. Rule 2 says never introduce a list
+where a pattern will do, and a fix that enumerates its sites is a list wearing a
+diff. `append_seam_gate` enumerates seams by their invitation now — a file that
+tells an adopter to add something *as an append* is a file with a seam — so a
+fourth arrives covered or arrives red.
+
+**And the pronoun.** The dispatch carrying these fixes said to resolve two
+conflicts as *take ours*, which is right from the template's seat and reverses
+across exactly the boundary a relay crosses: one of the two was the adopter's
+truthful local rewrite, which the same message separately said to keep. sky.boss
+caught it by ignoring both instructions and reading the sidecar patch. Their line
+is the durable one — **which files conflict is cheap to predict from outside and
+travels well; how to resolve one does not travel at all**, because the resolution
+is a fact about the fork's reason and the reason lives in the tree that wrote it.
+Name the side, never the pronoun, and prefer not to prescribe a resolution at all.
