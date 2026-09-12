@@ -6767,53 +6767,69 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     # must survive the re-run, and the same append sitting hard against the
     # template's own last line must not. Without the second tree a clean re-run
     # says nothing, since a first-merge-only fix is equally green on the subject.
-    # ## The promise the region makes, asserted against what ships
+    # ## The promise the region makes, asserted against every seam that ships
     #
-    # The region's whole mechanism is that an upgrade has no change there to
-    # collide with, and that is only true while skeletor ships it empty. One
-    # template line in it and the region is just another shared insertion point —
-    # with prose above it telling adopters it is safe. This is the generator's
-    # question: a tree can see its own file and cannot see what the next release
-    # will put in it.
-    marker = "# ── Your own lifecycle folders"
-    shipped_text = (probe / paths_rel).read_text(encoding="utf-8")
+    # The region's mechanism is that an upgrade has no change there to collide
+    # with, and that holds only while skeletor ships it empty. One template line
+    # in it and the region is another shared insertion point, with prose above it
+    # saying otherwise. This is the generator's question: a tree sees its own file
+    # and cannot see what the next release will put in it.
+    #
+    # **Seams are discovered, not named, because naming them is how one was
+    # missed.** v0.27.0 gave the region to the two seams in `scripts/paths.py` and
+    # left `check_doc_links.py`'s `SCAN_ROOTS` on the blank-line rule for another
+    # release; proto.pilot found it with `git grep`. The predicate is the
+    # invitation itself — a file that tells an adopter to add something *as an
+    # append* is a file with a seam — so a fourth arrives covered or arrives red.
+    invitation = "**Add your own"
+    seam_files = sorted(
+        path
+        for path in probe.rglob("*.py")
+        if ".git/" not in path.relative_to(probe).as_posix()
+        and invitation in path.read_text(encoding="utf-8", errors="replace")
+        and "as an append" in path.read_text(encoding="utf-8", errors="replace")
+    )
     region_problems = []
-    # **By line, not by substring.** Splitting on the marker text cuts its own
-    # line in half and leaves the trailing box rule as the first thing "inside"
-    # the region — which this reported as a line of template content, in the
-    # region, in the gate asserting there is none. A marker is a line.
-    shipped_lines = shipped_text.splitlines()
-    starts = [i for i, line in enumerate(shipped_lines) if line.startswith(marker)]
-    if len(starts) != 1:
+    if len(seam_files) < 2:
         region_problems.append(
-            f"the region marker appears {len(starts)} times in the rendered {paths_rel}; an adopter "
-            f"cannot be told to append below `the` marker if there is not exactly one."
+            f"found {len(seam_files)} append seams in the rendered tree by the invitation "
+            f"{invitation!r}; the template ships more than that, so the discovery is not finding "
+            f"them and every assertion below covers nothing."
         )
-    else:
-        body, end = [], -1
-        for offset, line in enumerate(shipped_lines[starts[0] + 1 :]):
+    for seam in seam_files:
+        seam_rel = seam.relative_to(probe).as_posix()
+        seam_lines = seam.read_text(encoding="utf-8").splitlines()
+        starts = [i for i, line in enumerate(seam_lines) if line.startswith("# ── Your own ")]
+        if len(starts) != 1:
+            region_problems.append(
+                f"{seam_rel} invites an append and has {len(starts)} `# ── Your own ...` region "
+                f"markers. An adopter cannot be told to append below `the` marker unless there is "
+                f"exactly one, and a seam with none is still on the blank-line rule — a first-merge "
+                f"guarantee that re-conflicts on any re-run before the base advances."
+            )
+            continue
+        body, closed = [], False
+        for line in seam_lines[starts[0] + 1 :]:
             if line.startswith("# ── "):
-                end = offset
+                closed = True
                 break
             body.append(line)
-        # Comment lines are the marker's own explanation and belong to it; any
-        # line that is neither blank nor a comment is template CONTENT below the
-        # line that promises there is none.
         content = [line for line in body if line.strip() and not line.lstrip().startswith("#")]
         if content:
             region_problems.append(
-                f"skeletor ships {len(content)} line(s) of content inside the region it promises never to "
-                f"add a line to: {content}. Every adopter append below them then shares an insertion "
-                f"point with the template again, under prose saying it does not."
+                f"{seam_rel} ships {len(content)} line(s) of content inside the region it promises "
+                f"never to add a line to: {content}. Every adopter append below them shares an "
+                f"insertion point with the template again, under prose saying it does not."
             )
-        if end < 0:
+        if not closed:
             region_problems.append(
-                f"no section header closes the region in the rendered {paths_rel}, so it runs to end of "
-                f"file and this check cannot bound what is in it."
+                f"{seam_rel}'s region is not closed by a following `# ── ` section header, so it runs "
+                f"to end of file and this check cannot bound what is in it."
             )
     results = [
         Result(
-            f"append seam: skeletor ships the adopter region empty in {paths_rel}",
+            f"append seam: every seam that invites an append ships an empty region "
+            f"({len(seam_files)} seam(s))",
             not region_problems,
             0.0,
             "\n".join(region_problems),
