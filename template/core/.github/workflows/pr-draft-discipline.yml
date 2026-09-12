@@ -60,6 +60,47 @@ jobs:
             // negative reads as the workflow apologising for its own existence, and
             // the reviewer-facing reason for drafting survives the CI accounting
             // entirely. Reported by mind.head, twice.
+            //
+            // ## Why not decide it at scaffold time, which was asked for and declined
+            //
+            // sky.boss proposed a substituted boolean instead of a run-time read, and
+            // they are right that the mechanism is available — `{{RELEASE_BRANCH}}`
+            // eleven lines below proves substitution reaches inside this block. They
+            // would ship the negative sentence unconditionally. The four cases,
+            // walked rather than argued, for a ready pull request carrying code:
+            //
+            //     tree           base of the PR      fullSuite   drafting saves
+            //     one-branch     main (= release)    true        the full suite
+            //     two-branch     develop             false       nothing
+            //     two-branch     main (= release)    true        the full suite
+            //     either         docs-only          (exempt)     n/a, returns above
+            //
+            // Row three is the whole disagreement. In a two-branch tree the positive
+            // arm fires only on a pull request into the release branch, which is
+            // usually release-please's — a bot, and nobody reads a comment on it. So
+            // the arm looks dead, and the tempting conclusion is to delete it.
+            //
+            // It is not dead: a human hotfix straight to the release branch takes
+            // that row, and there the unconditional negative sentence is FALSE in the
+            // direction that costs minutes. A scaffold-time boolean cannot see which
+            // base a pull request will target, because that is not a fact about the
+            // tree. So the trade is a dead-but-true arm against a live-but-sometimes-
+            // false sentence, and this file has now shipped two of the second kind.
+            //
+            // Worth knowing while reading this, because it explains an absence:
+            // **in a two-branch tree a human contributor will normally only ever see
+            // the negative sentence.** That is correct, not a bug.
+            //
+            // ## The limit, which is sky.boss's other point and is real
+            //
+            // `fullSuite` is computed against `'{{RELEASE_BRANCH}}'` — a literal
+            // rendered once, at scaffold time. A tree that RENAMES its release branch
+            // afterwards keeps the old name here, so this comment advises against a
+            // branch that no longer releases, and `ci.yml` gates against it too. No
+            // check in the tree can catch it: the real release branch is a fact about
+            // the repository's settings and its git refs, and every gate here asks
+            // whether the tree is consistent with itself. Renaming means a sweep for
+            // the rendered name, in this file and in `.github/scripts/docs-only.cjs`.
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,

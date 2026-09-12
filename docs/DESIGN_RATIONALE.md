@@ -4948,3 +4948,114 @@ is the durable one — **which files conflict is cheap to predict from outside a
 travels well; how to resolve one does not travel at all**, because the resolution
 is a fact about the fork's reason and the reason lives in the tree that wrote it.
 Name the side, never the pronoun, and prefer not to prescribe a resolution at all.
+
+## A safe position inside prose is safe for one release
+
+The region fixed the wrong half. It gave the adopter a marker to append below, and
+put the marker at the **top** of its explanation block — so "below this line" named
+a position with ninety lines of template prose under it, and the prose is the thing
+a release rewrites.
+
+proto.pilot measured two positions against one release and got a clean answer:
+just under the marker re-conflicted, the foot of the prose was clean. Reproducing
+it against the next release got the inverse — the foot re-conflicted and just
+under the marker was clean. Both readings were correct. Systematically, with
+`git merge-file` over the rendered file, varying which line upstream edits:
+
+    upstream edits    adopter's append at
+    the line N        1 above   2 above   3 above   below the rule
+    above the rule    the rule  the rule  the rule
+    ──────────────────────────────────────────────────────────────
+    N = 1             CONFLICT  CONFLICT  clean     clean
+    N = 2             clean     CONFLICT  CONFLICT  clean
+    N = 3             clean     clean     CONFLICT  clean
+
+Read the last column first. **Below the rule is clean whatever upstream edits**;
+every other column is the interaction of two numbers, one of which is a fact about
+the next release. So the advice was not merely imprecise — it was *unwritable*, and
+the two anecdotes that looked like a contradiction were the parameter being varied
+one value at a time.
+
+The remedy is a **frozen terminator at the bottom of the block**: the rule is the
+template's last word in its section, nothing rendered ever goes below it, and the
+explanation — which does get rewritten — sits above it where it cannot be adjacent
+to anybody's append. The separation stops depending on which paragraph a release
+happened to touch.
+
+**Measured cost, against the six real trees at their real recorded base.** Four
+extend `scripts/paths.py`; two of those four conflict on it once, and which two is
+*not* a function of how far down the append sits — one conflicting append is two
+lines above the old block's end and two clean ones are three. It is a function of
+which prose this release rewrote next to them, which is the argument for the move
+restated as a bill.
+
+### Three ways the check for it did not bite, and one is Rule 2 eating itself
+
+- **It covered one seam of two.** The test hardcoded `scripts/paths.py` and five
+  `paths.py`-shaped regexes, while the generator discovered its seams by their
+  invitation. dream.doll's line: *the generator discovers its seams and the adopter
+  is handed a list of one.* They measured `SCAN_ROOTS += ["src"]` immediately above
+  `check_doc_links.py`'s marker and got 211 passed. Rule 2 says never introduce a
+  list where a pattern will do, and the artifact that had one was the artifact
+  enforcing the rule.
+
+  Both ends are discovered now. Seams come from the same invitation predicate the
+  gate uses; the constants come from each seam's own documented examples; and the
+  appends come from an `ast` walk rather than a regex, so *which statement extends
+  a seam constant* is answered by syntax. One predicate serves both populations —
+  run over the examples it says what a seam invites, run over the body it says what
+  is an append — and a name in a value position is excluded by construction rather
+  than by exemption.
+
+- **It did not bite where it did cover.** The region held ~57 lines of prose, and
+  the assertion was *below the marker*, which the whole measurement above shows is
+  not the property that matters.
+
+- **The detector spelled its own needle.** Assembled contiguously, the test file
+  matched its own seam predicate and the suite failed reporting itself. Assembling
+  the string from parts is what `checkout_path_literal_gate` already does for
+  exactly this, and the alternative — an allowlist entry for the detector's own
+  source — is the second entry that means the predicate is wrong.
+
+### The control could not be a chosen offset either, and the first fix was clean
+
+`append_seam_gate`'s discriminator is a pair: an append below the rule must survive
+a re-run, and the same append at the foot of the prose must not. That control had
+been anchored on a literal line of the seam's prose twice, and both times the
+release that changed the seam rewrote it — an honest `could not place` failure, and
+still a gate that had stopped testing. The obvious repair is a structural offset,
+and the table above says why that is wrong too.
+
+So the position is **found**: scan upward from the rule for the nearest place that
+is clean on the first merge and conflicting on the re-run, using `git merge-file`
+as a cheap oracle over the same texts the real tool will merge, then verify with
+the real tool. Both conditions are load-bearing — one that conflicts immediately
+never reaches the re-run, and one that is clean twice is the subject wearing the
+control's label.
+
+**Building it found that the upstream edit was the wrong shape.** A *reword* of the
+seam's last line cannot make a re-run conflict at all: after the first merge the
+tree already holds the reworded line, so the second merge finds both sides agreeing
+about it. Measured across every offset, a reworded tail gives `clean, clean`
+wherever it gives a clean first merge, and the gate spent a run reporting exactly
+that — no control was placeable. An **insertion** at a shared anchor is what
+actually happened to the trees that found this (v0.26.0 put 28 lines into that
+gap), and it is what discriminates. The fixture inserts a paragraph now, through
+the same helper the oracle selects against, so the control cannot be placed against
+one change and verified against another.
+
+### A comment-shaped regression passes a comment-skipping check
+
+The region assertion skipped comments, because an adopter's append is code and the
+frozen block is comments. So a release adding a *paragraph* below the rule passed
+it while doing the one thing the rule forbids — which is not hypothetical, it is
+the layout that shipped for two releases. Below the rule there is now one comment
+run and then nothing but blank lines, and planting a paragraph below the frozen
+block turns the gate red.
+
+**What is not asserted, said as a limit rather than left implied.** "Frozen" is a
+promise about future releases and there is no population to check it against yet:
+no released tag carries this block, so an across-tags assertion would pass
+vacuously today. What is checkable now is that the promise reads identically
+wherever it is made — the two seams are each other's control — and a seam whose
+block has drifted is a seam making a different promise.
