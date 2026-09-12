@@ -915,7 +915,15 @@ def stale_against_head(
     """
     shadows: Dict[str, List[str]] = {}
     dangling: Dict[str, List[str]] = {}
-    head_symbols = {rel: top_level(head_files.get(rel)) for rel in written if rel.endswith(".py")}
+    # **Over the whole head render, not over `written`.** This was `written`-only,
+    # which is sky.boss's third cause — *a symbol's new home does not have to be a
+    # file that applied cleanly* — fixed for `dangling` in the same commit that
+    # named it and left in place here. The two predicates ask different questions
+    # and the fix generalises to both: a definition the template moved out of A is
+    # stale in A whichever way B arrived, and B conflicting means the adopter will
+    # port it and then be shadowed. That shadow is the one thing in no other list,
+    # so under-reporting it is the expensive direction.
+    head_symbols = {rel: top_level(path) for rel, path in head_files.items() if rel.endswith(".py")}
 
     # Every path the template shipped this release, by every name it can be
     # imported as. Built over the whole head render rather than over `written`:
@@ -2495,6 +2503,38 @@ def main() -> int:
                 detail("formatters this tree declares before merging — yours is never touched:")
                 for rel in formatting_only:
                     item(rel)
+
+            # ## And what could NOT be tried, which the counterfactual above cannot say
+            #
+            # That block needs `normaliser.applies(rel)` to be true, so a formatter
+            # this tree declares and cannot run contributes no files to it — and the
+            # output is then identical to a tree with no formatting divergence at
+            # all. **Silence is the wrong answer twice over**: the flag goes
+            # undiscovered, and the reader concludes their conflict is a real
+            # disagreement about content when it may be two versions of one tool.
+            #
+            # This is a gap the previous release opened. `--normalise` used to bind
+            # whatever binary was on PATH at whatever version; refusing a mismatch
+            # was right, and it turned a wrong answer into no answer, in exactly the
+            # trees whose pins have drifted from what is installed. mind.head filed
+            # it as `normalise-not-discoverable` one release later.
+            #
+            # Printed whether or not the block above printed, because a partially
+            # loaded normaliser is truthy: some hooks ran, others were refused, and
+            # the refused ones are invisible in `formatting_only` by construction.
+            if not args.normalise and (normaliser.reason or normaliser.unsupported):
+                detail()
+                detail("--normalise could not be offered for every file here, so some of these")
+                detail("conflicts may be two versions of one formatter rather than a disagreement")
+                detail("about content:")
+                if normaliser.reason:
+                    item(normaliser.reason)
+                for hook in normaliser.unsupported:
+                    item(hook)
+                detail()
+                detail("A version in the list above is a pin in .pre-commit-config.yaml against what")
+                detail("is installed here. `pre-commit install --install-hooks`, or a venv built from")
+                detail("scripts/requirements.txt, makes the flag available for those files.")
             if not args.dry_run:
                 # The window in which this is recoverable closes at the next
                 # run, and nothing used to say so at the moment it opened. A
