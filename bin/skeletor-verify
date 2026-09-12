@@ -6657,16 +6657,95 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     # passes, and the whole fixture asserts nothing. That is how the first
     # version of this gate read: green on the append for a reason that had
     # nothing to do with appends.
+    #: Assembled, never spelled, for `checkout_path_literal_gate`'s reason: this
+    #: file hunts the string, so a contiguous copy here makes the hunter its own
+    #: first finding. The tree's own `test_narrative_covers_lifecycle_folders.py`
+    #: assembles it too, and had to — spelled, it matched itself and the suite
+    #: failed reporting the detector.
+    frozen_rule = "# ── " + " ".join(("Nothing below", "this line is", "skeletor's"))
+
+    def frozen_block(lines: List[str]) -> Optional[Tuple[int, int]]:
+        """`(rule index, first line after the frozen comment run)`, or None."""
+        at = next((i for i, line in enumerate(lines) if line.startswith(frozen_rule)), None)
+        if at is None:
+            return None
+        end = next((i for i in range(at + 1, len(lines)) if not lines[i].startswith("#")), len(lines))
+        return at, end
+
+    def upstream_template_edit(text: str) -> Optional[str]:
+        """Both edits this release stands in for, applied to the template's text.
+
+        One home, because the **selection oracle below merges these exact texts**.
+        A second copy of "what upstream did" would pick the control's position
+        against one change and verify it against another, and the two would agree
+        for as long as they happened to be the same edit.
+        """
+        hit = re.search(r'^\s+"Not a stage of the document lifecycle.*$', text, re.MULTILINE)
+        if not hit:
+            hit = re.search(r"^PRESENT_TENSE = \{\n\s+\S.*$", text, re.MULTILINE)
+        if not hit:
+            return None
+        # Inside the literal the adopters are extending, ~35 lines from where
+        # anybody appends: a reworded reason is the smallest true version of what
+        # this repository does to that block.
+        text = text.replace(hit.group(0), hit.group(0) + "  # reworded upstream")
+        # And an INSERTION at the foot of the seam's own prose, directly above the
+        # frozen rule.
+        #
+        # **Inserting rather than rewording, and the difference is the whole
+        # fixture.** A reword of the last line cannot make a re-run conflict:
+        # after the first merge the tree already holds the reworded line, so the
+        # second merge finds ours and theirs agreeing about it. Measured across
+        # every offset from the rule to eight lines above it, a reworded tail gives
+        # `clean, clean` everywhere it gives a clean first merge — the control
+        # cannot be placed at all, and this gate spent a run reporting exactly
+        # that.
+        #
+        # An insertion at a shared anchor is what actually happened to the trees
+        # that found this: v0.26.0 put a 28-line block into this gap, so after one
+        # merge the file holds the template's new lines AND the append at one
+        # insertion point, and the next merge sees two different insertions there.
+        # Measured with the same oracle: an append one line above the rule goes
+        # `clean, CONFLICT`, which is the population, and below the rule stays
+        # `clean, clean`.
+        lines = text.splitlines(keepends=True)
+        found = frozen_block(lines)
+        if found is None:
+            return None
+        at, _ = found
+        added = (
+            "#\n"
+            "# ## A paragraph this release added at the foot of the seam's prose\n"
+            "#\n"
+            "# Which is what every release here does to this block.\n"
+        )
+        return "".join(lines[:at] + [added] + lines[at:])
+
+    def merged_text(base: str, ours: str, theirs: str) -> Optional[str]:
+        """The clean merge of three strings, or `None` when it conflicts.
+
+        The result is returned rather than a boolean because the re-run's `theirs`
+        IS the first merge's output — asking the second question needs the first
+        answer, not a second opinion about it.
+        """
+        with tempfile.TemporaryDirectory() as box:
+            room = Path(box)
+            for name, text in (("base", base), ("ours", ours), ("theirs", theirs)):
+                (room / name).write_text(text, encoding="utf-8")
+            code, output = run(
+                ["git", "merge-file", "-p", "--diff3", str(room / "ours"), str(room / "base"), str(room / "theirs")],
+                cwd=room,
+            )
+            return output if code == 0 else None
+
     def region_append(text: str) -> Optional[str]:
-        """The append in the marked region, which is what the seam now documents."""
-        marker = "# ── Your own lifecycle folders"
-        if marker not in text:
+        """The append below the frozen rule, which is what the seam now documents."""
+        lines = text.splitlines(keepends=True)
+        found = frozen_block(lines)
+        if found is None:
             return None
-        head, rest = text.split(marker, 1)
-        end = rest.find("\n# ── ")
-        if end < 0:
-            return None
-        return head + marker + rest[:end] + "\n" + as_append + rest[end:]
+        _, end = found
+        return "".join(lines[:end] + [as_append] + lines[end:])
 
     def blank_line_append(text: str) -> Optional[str]:
         """The append one blank line below the template's last line at the seam.
@@ -6683,20 +6762,71 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
         worst. A region append that survives a re-merge proves nothing unless the
         rule it supersedes does not.
         """
-        # **Derived, not a literal.** This anchored on one line of the seam's prose
-        # and that prose was rewritten in the same release that added the region —
-        # so the fixture stopped being placeable and the gate reported "could not
-        # place", which is the honest failure and still a gate that had stopped
-        # testing. The seam's last line is a structural position: the final `#:`
-        # line above the region marker.
+        # ### The position is MEASURED, because no offset is safe for every release
+        #
+        # This anchored on a literal line of the seam's prose twice, and both times
+        # the release that changed the seam rewrote that line — so the fixture
+        # stopped being placeable and the gate said "could not place", which is the
+        # honest failure and still a gate that had stopped testing. The obvious
+        # repair is a structural offset, and that is wrong too, measured on the
+        # rendered file with `git merge-file`:
+        #
+        #     upstream edits    adopter's append at
+        #     the line N        1 above   2 above   3 above   below the rule
+        #     above the rule    the rule  the rule  the rule
+        #     ──────────────────────────────────────────────────────────────────
+        #     N = 1             CONFLICT  CONFLICT  clean     clean
+        #     N = 2             clean     CONFLICT  CONFLICT  clean
+        #     N = 3             clean     clean     CONFLICT  clean
+        #
+        # Read the last column first: **below the rule is clean whatever upstream
+        # edits**, which is the guarantee the seam now makes. Every other column
+        # depends on the interaction between two numbers, one of which is a fact
+        # about the next release — which is why the advice "put it below this line"
+        # could not be given while the line sat inside the prose, and why the two
+        # anecdotes behind that finding (proto.pilot's pair, and its inversion one
+        # release later) were both correct.
+        #
+        # So the control cannot be a chosen offset either. What it has to be is
+        # the population: an adopter who followed the old rule, whose first merge
+        # was clean, and who therefore reaches a second merge at all. That is
+        # found rather than assumed — scan upward from the rule for the nearest
+        # position that merges clean against this release's actual edits, and fail
+        # if there is none, which would mean the old rule never worked.
+        #
+        # **The control must be clean on the first merge or it proves nothing.** A
+        # control that conflicts immediately never reaches the re-run, so it cannot
+        # establish that a re-run is capable of conflicting, and the subject's
+        # clean re-run would be unfalsifiable.
         lines = text.splitlines(keepends=True)
-        marker = next((i for i, line in enumerate(lines) if line.startswith("# ── Your own ")), None)
-        if marker is None:
+        found = frozen_block(lines)
+        if found is None:
             return None
-        tail = next((i for i in range(marker - 1, -1, -1) if lines[i].lstrip().startswith("#:")), None)
-        if tail is None:
+        at, _ = found
+        pristine = source.read_text(encoding="utf-8")
+        edited = upstream_template_edit(pristine)
+        if edited is None:
             return None
-        return "".join(lines[: tail + 1] + ["\n", as_append.lstrip("\n")] + lines[tail + 1 :])
+        # Offsets are taken from the rule in each text rather than shared as line
+        # numbers: the oracle merges the TEMPLATE's copy and the fixture writes the
+        # RENDERED one, and nothing guarantees those two agree about line numbering.
+        proxy = pristine.splitlines(keepends=True)
+        proxy_at = next((i for i, line in enumerate(proxy) if line.startswith(frozen_rule)), None)
+        if proxy_at is None:
+            return None
+        for offset in range(0, 12):
+            here, there = at - offset, proxy_at - offset
+            if here <= 0 or there <= 0 or not lines[here - 1].startswith("#"):
+                break
+            insert = ["\n", as_append.lstrip("\n")]
+            theirs = "".join(proxy[:there] + insert + proxy[there:])
+            first = merged_text(pristine, edited, theirs)
+            # Both conditions, because each alone selects a useless fixture: a
+            # position that conflicts immediately never reaches the re-run, and one
+            # that is clean twice is the subject wearing the control's label.
+            if first is not None and merged_text(pristine, edited, first) is None:
+                return "".join(lines[:here] + insert + lines[here:])
+        return None
 
     #: The second shipped file both re-run trees also edit, so the first run
     #: leaves something pending and holds the base back. Without that the run
@@ -6736,8 +6866,17 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
                            time.time() - started, "")]
         placed = place((tree / paths_rel).read_text(encoding="utf-8"))
         if placed is None:
+            detail_text = (
+                f"No position above the frozen rule is clean on the first merge and conflicting on the "
+                f"re-run, so the control that makes the subject falsifiable cannot be built. The usual "
+                f"cause is a LAYOUT change rather than a broken fixture: with the rule at the head of "
+                f"its block instead of the foot, upstream's edit at the foot of the prose lands nowhere "
+                f"near where an adopter appends, and the hazard this pair measures is unreachable."
+                if label == "blank-line"
+                else ""
+            )
             return [Result(f"append seam: could not place a {label} append in the scaffolded {paths_rel}",
-                           False, time.time() - started, "")]
+                           False, time.time() - started, detail_text)]
         (tree / paths_rel).write_text(placed, encoding="utf-8")
         # The same local edit to the second file, so the first run conflicts
         # there and the base is held back for both trees identically.
@@ -6751,46 +6890,22 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
         run(["git", "-C", str(tree), "commit", "-q", "-m", f"adopter: {label} append and a local edit"], cwd=tree)
         rerun_trees[label] = tree
 
-    # Only now does upstream edit the literal these adopters are extending. A
-    # reworded reason is the smallest true version of what this repository does
-    # to that block, and it is what the seam's claim is about.
-    template = source.read_text(encoding="utf-8")
-    hit = re.search(r'^\s+"Not a stage of the document lifecycle.*$', template, re.MULTILINE)
-    if not hit:
-        hit = re.search(r"^PRESENT_TENSE = \{\n\s+\S.*$", template, re.MULTILINE)
-    if not hit:
-        return [Result("append seam: nothing inside PRESENT_TENSE to rewrite upstream", False,
-                       time.time() - started, "")]
-    source.write_text(template.replace(hit.group(0), hit.group(0) + "  # reworded upstream"), encoding="utf-8")
-
-    # **And upstream touches its own LAST line at the seam**, which is the change
-    # the re-run pair is actually about. The edit above lands inside the literal,
-    # some 35 lines from where an adopter appends — so it creates no adjacency
-    # with anybody's append, and the adjacent control merged clean, leaving the
-    # region's clean re-run proving nothing.
+    # Only now does upstream make its two edits, through the one helper the control's
+    # position was selected against — so the fixture cannot have been placed against
+    # a different change from the one it is verified against.
     #
-    # Editing the final line of the seam's own comment block is what this
-    # repository really does there: v0.26.0 inserted a 28-line removal-idiom
-    # block into exactly that gap, which is how dream.doll's append ended up
-    # sharing an insertion point with the template's.
-    # Derived the same way `blank_line_append` derives it, and for the same
-    # reason: a literal line of this seam's prose was the anchor here too, and the
-    # release that added the region rewrote it. Two fixtures, one hardcoded
-    # position, both silently unplaceable — which is why the position is computed
-    # from the marker in one helper now.
-    text = source.read_text(encoding="utf-8")
-    seam_lines = text.splitlines(keepends=True)
-    marker_at = next((i for i, line in enumerate(seam_lines) if line.startswith("# ── Your own ")), None)
-    tail_at = (
-        next((i for i in range(marker_at - 1, -1, -1) if seam_lines[i].lstrip().startswith("#:")), None)
-        if marker_at is not None
-        else None
-    )
-    if tail_at is None:
-        return [Result(f"append seam: no seam-tail line to edit upstream in {paths_rel}", False,
-                       time.time() - started, f"marker at {marker_at}")]
-    seam_lines[tail_at] = seam_lines[tail_at].rstrip("\n") + " Reworded upstream.\n"
-    source.write_text("".join(seam_lines), encoding="utf-8")
+    # Editing the last line of the seam's own prose is what this repository really
+    # does there: v0.26.0 inserted a 28-line removal-idiom block into exactly that
+    # gap, which is how dream.doll's append ended up sharing an insertion point
+    # with the template's. The edit inside the literal is ~35 lines away and
+    # creates no adjacency with anybody's append, which is why it alone left the
+    # region's clean re-run proving nothing.
+    edited = upstream_template_edit(source.read_text(encoding="utf-8"))
+    if edited is None:
+        return [Result(f"append seam: nothing to rewrite upstream in {paths_rel} — no PRESENT_TENSE "
+                       f"literal, or no frozen rule to find the seam's last line from", False,
+                       time.time() - started, "")]
+    source.write_text(edited, encoding="utf-8")
     git_in(scratch, "commit", "--quiet", "-am", "scratch: reword inside the literal and at the seam's last line")
 
     problems = []
@@ -6852,7 +6967,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     # `already current`, and the re-merge never happens — which is why no gate
     # here had seen this.
     #
-    # The pair is the discriminator, as above: an append in the marked region
+    # The pair is the discriminator, as above: an append below the frozen rule
     # must survive the re-run, and the same append sitting hard against the
     # template's own last line must not. Without the second tree a clean re-run
     # says nothing, since a first-merge-only fix is equally green on the subject.
@@ -6885,16 +7000,30 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
             f"{invitation!r}; the template ships more than that, so the discovery is not finding "
             f"them and every assertion below covers nothing."
         )
+    # ### The rule sits at the BOTTOM of its block, and that placement is the check
+    #
+    # It headed the block for two releases, with the explanation between it and the
+    # adopter's append — so "below this line" named a position inside prose the
+    # template rewrites, and **which position is safe moved from one release to the
+    # next**. Measured, same append, same two merges, base `v0.27.0`: against
+    # `v0.28.0` the position just under the marker re-conflicted while the foot of
+    # the prose was clean, and against the release after it the two swapped. Both
+    # readings were correct, which is what made the advice unwritable.
+    #
+    # So the assertion is not just "there is a marker" but that **nothing editable
+    # follows it**: everything between the rule and the next section header is the
+    # frozen comment block and then the adopter's own lines.
+    frozen_texts = {}
     for seam in seam_files:
         seam_rel = seam.relative_to(probe).as_posix()
         seam_lines = seam.read_text(encoding="utf-8").splitlines()
-        starts = [i for i, line in enumerate(seam_lines) if line.startswith("# ── Your own ")]
+        starts = [i for i, line in enumerate(seam_lines) if line.startswith(frozen_rule)]
         if len(starts) != 1:
             region_problems.append(
-                f"{seam_rel} invites an append and has {len(starts)} `# ── Your own ...` region "
-                f"markers. An adopter cannot be told to append below `the` marker unless there is "
-                f"exactly one, and a seam with none is still on the blank-line rule — a first-merge "
-                f"guarantee that re-conflicts on any re-run before the base advances."
+                f"{seam_rel} invites an append and has {len(starts)} `{frozen_rule}` rules. An "
+                f"adopter cannot be told to append below `the` rule unless there is exactly one, and "
+                f"a seam with none is still on the blank-line rule — a first-merge guarantee that "
+                f"re-conflicts on any re-run before the base advances."
             )
             continue
         body, closed = [], False
@@ -6906,18 +7035,51 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
         content = [line for line in body if line.strip() and not line.lstrip().startswith("#")]
         if content:
             region_problems.append(
-                f"{seam_rel} ships {len(content)} line(s) of content inside the region it promises "
-                f"never to add a line to: {content}. Every adopter append below them shares an "
-                f"insertion point with the template again, under prose saying it does not."
+                f"{seam_rel} ships {len(content)} line(s) of content below the rule it promises never "
+                f"to render below: {content}. Every adopter append after them shares an insertion "
+                f"point with the template again, under prose saying it does not."
+            )
+        # **Prose counts, and the check above cannot see it.** Both assertions here
+        # skip comments, because an adopter's append is code and the frozen block is
+        # comments — so a release that adds a PARAGRAPH below the rule passes them
+        # both while doing the exact thing the rule forbids. That is the regression
+        # this release fixed: the rule headed its block for two releases with ~90
+        # lines of rewritable prose under it, and an adopter's append sat among
+        # them. So below the rule there is one comment run — the frozen block — and
+        # after it nothing but blank lines until the next section.
+        run_end = next((i for i, line in enumerate(body) if not line.startswith("#")), len(body))
+        trailing = [line for line in body[run_end:] if line.strip()]
+        if trailing:
+            region_problems.append(
+                f"{seam_rel} ships {len(trailing)} more template line(s) below the frozen block, after "
+                f"the run of comments that block is: {trailing[:4]}. Everything below the rule has to "
+                f"be the frozen block and then the adopter's own lines — a second paragraph down there "
+                f"is prose a later release will rewrite, at the adopter's insertion point, which is "
+                f"precisely what moving the rule to the bottom of its block was for."
             )
         if not closed:
             region_problems.append(
                 f"{seam_rel}'s region is not closed by a following `# ── ` section header, so it runs "
                 f"to end of file and this check cannot bound what is in it."
             )
+        block = seam_lines[starts[0] :]
+        end = next((i for i, line in enumerate(block) if not line.startswith("#")), len(block))
+        frozen_texts[seam_rel] = "\n".join(block[:end])
+    # **One frozen block, shared by every seam.** The word "frozen" is a promise
+    # about future releases, and there is no population to check it against yet —
+    # no released tag carries this block, so an across-tags assertion would pass
+    # vacuously today, which is the shape this repository refuses. What IS
+    # checkable now is that the promise reads identically wherever it is made: a
+    # seam whose block has drifted is a seam making a different promise, and
+    # divergence between two copies is how a shared format actually fails.
+    if len({text for text in frozen_texts.values()}) > 1:
+        region_problems.append(
+            "the frozen block differs between seams, so they promise different things:\n"
+            + "\n\n".join(f"--- {rel}\n{text}" for rel, text in sorted(frozen_texts.items()))
+        )
     results = [
         Result(
-            f"append seam: every seam that invites an append ships an empty region "
+            f"append seam: every seam ships one frozen rule with nothing of the template's below it "
             f"({len(seam_files)} seam(s))",
             not region_problems,
             0.0,
@@ -6992,7 +7154,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
         reconflicted = paths_rel in (again.get("conflicted") or [])
         if label == "region" and reconflicted:
             rerun_problems.append(
-                f"an append in the marked region re-conflicted on the second merge. The region exists so "
+                f"an append below the frozen rule re-conflicted on the second merge. The rule exists so "
                 f"the adopter's line is never at the template's insertion point, and the run before this "
                 f"one merged the same file cleanly. conflicted={again.get('conflicted')}"
             )
