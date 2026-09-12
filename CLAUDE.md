@@ -969,6 +969,70 @@ tier-composition gate checks both staleness directions, so a declaration for a
 path that ships everywhere, or one whose file stopped mentioning it, is red.
 That is the only exemption mechanism the gate has, and it is two entries.
 
+**`versioning_gate` runs the whole gate set now, not two commands.** It asked
+`check docs` and `test unit` and stopped — a list where a pattern will do, and a
+list of two out of the fourteen questions every other configuration answers,
+against the arm **four of six adopter trees are on**. So the population most
+likely to hit a defect was covered least: no lints, no pyright, no
+merge-drivers, no output contract, no `actionlint` over the workflows this flag
+edits with a file test. It is `gates()` unmodified, the way `--shell-package`
+does it, and that is also what makes the subtraction rule enforceable rather
+than stated — anything needing a check of its own is a sign the flag stopped
+being a subtraction.
+
+**The append seams, and why their rule sits at the BOTTOM of its block.**
+`scripts/paths.py` and `scripts/check_doc_links.py` invite an adopter to extend
+a constant *as an append*, because an append is a different line from the
+template's and merges clean where an edit to the literal collides with every
+future change to it. The invitation needs a place to put the line, and for two
+releases that place was named by a marker HEADING a block of explanation — so
+"below this line" meant *inside template prose*, which is exactly what a release
+rewrites.
+
+**No advice of that form can be correct.** Measured with `git merge-file` over
+the rendered file, varying which line upstream edits against where the adopter
+appended: only *below a rule with nothing under it* is clean for every upstream
+edit. Every other position is the interaction of two numbers, one of which is a
+fact about the next release. proto.pilot measured two positions against one
+release and got a clean answer; reproducing it against the next got the exact
+inverse, and both readings were correct — *undistinguished, not confirmed*, at
+the level of a fixture. The table is in
+[`docs/DESIGN_RATIONALE.md`](docs/DESIGN_RATIONALE.md).
+
+So each seam ends with a frozen rule, skeletor renders nothing below it, and the
+explanation stays above where it cannot be adjacent to anybody's line. Measured
+cost against the six real trees at their recorded base: four extend
+`scripts/paths.py` and two of those four conflict on it once — and *which* two is
+not a function of how far down the append sits, but of which prose this release
+rewrote next to them, which is the argument for the move restated as a bill.
+
+Three ways the check for it did not bite, and the first is Rule 2 eating itself.
+The tree's test named `scripts/paths.py` and five `paths.py`-shaped regexes while
+the generator discovered its seams — *the generator discovers its seams and the
+adopter is handed a list of one*, dream.doll, who measured `SCAN_ROOTS += ["src"]`
+above the other seam's marker and got a green suite. Both ends are discovered
+now: seams by the same invitation predicate the gate uses, the constants from each
+seam's own documented examples, and the appends by an `ast` walk, with one
+predicate serving both populations — over the examples it says what a seam
+invites, over the body it says what is an append. Second, the assertion was
+*below the marker*, which the measurement shows is not the property that matters.
+Third, spelled contiguously the needle made the detector its own first finding,
+so it is assembled from parts, exactly as `checkout_path_literal_gate` does it.
+
+`append_seam_gate`'s two halves both moved with it. The region assertion skipped
+comments — an append is code and the frozen block is comments — so a release
+adding a *paragraph* below the rule passed it while doing the one forbidden
+thing, which is the layout that shipped; below the rule there is now one comment
+run and then nothing but blank lines. And the control's position is **found
+rather than chosen**: scan upward for the nearest place that is clean on the
+first merge and conflicting on the re-run, with `git merge-file` as a cheap
+oracle over the same texts the real tool will merge. Building that established
+the upstream edit was the wrong shape — a **reword** of the seam's last line
+gives `clean, clean` at every offset, because after one merge both sides agree
+about that line, so no control was placeable at all. An **insertion** at a
+shared anchor is what actually happened to the trees that found this, and it is
+what discriminates.
+
 **The one thing a scaffold hands over broken, and it is not in any file.**
 Release Please opens a pull request, and `can_approve_pull_request_reviews` — a
 repo/org switch — decides whether Actions may. No `permissions:` block lifts it;
@@ -1071,6 +1135,38 @@ manifest, and that is a question about a remote rather than about this checkout
 — the writing path already asks it with `git ls-remote`, about any ref. A
 tags-only rule would be enforced at the one place that cannot check the thing it
 is standing in for.
+
+**Offering the flag was not enough, and the next round said so.** An applying run
+is now **refused** when the head render would be stamped with anything but a bare
+tag, with `--ref <tag>` as the remedy and `--allow-untagged` as the escape. That
+reverses the ladder's ruling that *untagged is an adopter's policy* — which was
+right while refusing meant forbidding the operation, and stopped being right once
+`--ref` existed, because the trade became refusal-versus-a-version-nobody-chose.
+node-zero asked for the escalation, named the way `--allow-dirty` is.
+
+It earns a refusal by `refuse_a_dirty_base`'s own test rather than by a looser
+one. A describe string is perfectly **reproducible**, so the unreproducible-render
+argument does not reach it; what reaches it is that **re-running does not get you
+out.** The manifest is re-copied only by a run that applies something, so a tree
+stamped with a description and then brought current keeps it indefinitely, and
+neither `--ported` nor a hand-edit is a way out. stash.flow reconstructed a tree
+held at exactly that ref, freed only because the next release happened to carry
+work for its tier.
+
+The refusal **over-approximates and says so**: it fires before classification, so
+it also stops an applying run that would have written nothing — an already-current
+tree, or one a conflict leaves pending. Knowing whether the manifest will be
+rewritten needs the whole comparison, and the asymmetry decides it: the cost of
+over-applying is one flag or one tag, and the cost of under-applying is permanent.
+
+`unpinned_head_gate` **manufactures both tag positions rather than reading this
+checkout's**, and that is the whole design. This repository sits past its newest
+tag all through development and exactly on it at the moment a release is cut — so
+a fixture keyed on the checkout's own position tests one thing for a fortnight and
+the other thing once, on the commit that ships. An empty commit makes *past a
+tag*, a checkout of the tag makes *at a tag*, and the negative is the load-bearing
+half: a refusal that fired for a tagged operator would block every legitimate
+release-time upgrade and would look identical to this gate passing.
 
 `pinned_ref_gate` asserts the stamp is the tag with no `-N-gsha` suffix, read
 out of the run's own standing line rather than echoed from the flag, so a flag

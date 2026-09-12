@@ -193,6 +193,18 @@ and that value is the base `bin/skeletor-upgrade` re-renders from. An untagged
 run records a bare sha; an unpushed tag records a base only one machine can
 resolve. See CLAUDE.md § Conventions.
 
+**Tag before carrying a change into anybody's tree, not after.** An applying
+`bin/skeletor-upgrade` is **refused** from a checkout sitting past its last tag,
+because the stamp would be `vX.Y.Z-1-gabc1234` — a version nobody chose, and one
+that sticks: the manifest is re-copied only by a run that applies something, so a
+tree brought current keeps it indefinitely. Three adopter trees recorded one and
+none could correct it from their side.
+
+The remedy is the order above — tag, push, then upgrade. If you genuinely need to
+hand over an untagged render, `--ref <some-tag>` pins the stamp and
+`--allow-untagged` records the description anyway; both are deliberate, and
+neither is the normal path.
+
 ---
 
 ## What an agent running this must not do

@@ -5059,3 +5059,99 @@ no released tag carries this block, so an across-tags assertion would pass
 vacuously today. What is checkable now is that the promise reads identically
 wherever it is made — the two seams are each other's control — and a seam whose
 block has drifted is a seam making a different promise.
+
+## The arm with no coverage had a gate that could not run on it
+
+`--versioning tag` is a subtraction, and `versioning_gate` proved the subtraction
+was correct: the omitted files are gone, the prose swapped rather than vanished,
+`--version` degrades honestly. Then it ran **two commands** — `check docs` and
+`test unit` — and stopped. Fourteen questions every other configuration in the
+grid answers, two of them asked here, against the arm **four of six adopter trees
+are on**.
+
+`gates()` unmodified is the fix, the way `--shell-package` does it. What it found
+immediately is the argument for having done it sooner: `check_version_resolves`
+read `VERSION` unconditionally, and `--versioning tag` is the flag that deletes
+that file. The gate crashed with `FileNotFoundError` on the first tree it had ever
+been pointed at without one — a gate that had been green for its whole life
+because the population it ran over contained none of its subject.
+
+That is this repository's own sentence, stated in `scripts/paths.py` about
+`SCAFFOLD_MANIFEST` and quoted in `CLAUDE.md` about `--shell-package`: *a
+measurement over a population that contains none of the subject is not a
+measurement of the subject.* The hole is the same shape both times — one
+configuration axis the grid enumerated for static checks and never executed.
+
+The two modes are now keyed on **the tree** rather than on the flag, which is the
+rule `drop_absent_prose` and the workflow file tests already follow: the flag is
+gone by the time anything reads the tree, so the predicate is whether `VERSION` is
+there. Both questions are asserted, because they differ — a tree with the file must
+reach that fallback when no release tag exists, and a tree without one must say
+`unknown`, since `git describe` with no matching tag has nothing to report and a
+sha is a version that is not one. `versioning_gate`'s bespoke `--version` block is
+gone with it: two homes for one fact, and the surviving home is the one every
+configuration answers.
+
+### A lint finding no blocking gate selects
+
+The same run reported `E303 too many blank lines` in both append seams — the
+frozen block had left three. Neither of the tree's *blocking* flake8 invocations
+selects `E303`; the one that reports it is the `|| true` informational step. What
+caught it was `informational_step_gate`'s third assertion, *the tree's own debt is
+not what failed it*, which exists to prove the bait plant means something and
+therefore requires a fresh scaffold to have **no** informational findings at all.
+
+So a check written to validate another check's fixture is the only thing in this
+repository that holds the template to the non-blocking lint set. That is worth
+knowing before anybody decides that assertion is incidental to the gate around it.
+
+### Enumerating the callers of a refusal, twice, and both times short
+
+Adding the refusal meant giving this grid a standing escape at every applying
+upgrade it performs, and the population was enumerated with an `ast` walk over
+`bin/skeletor-verify` looking for argv lists containing the string
+`skeletor-upgrade`. It reported **10 of 27**, which felt like a complete answer
+because it was a specific one.
+
+It missed six. Every gate that builds its tool path once — `upgrade_bin = clean /
+"bin" / "skeletor-upgrade"` — and reuses the variable has no such string in the
+argv at all, so `set_arg_gate`'s four runs and `collect_diff_gate`'s two were
+invisible to a scan keyed on the spelling. The grid found them the only way it
+can: by running, and failing one gate at a time.
+
+The rule is the one this repository already applies to `grep`-based checks, one
+level up from prose: **a scan for callers keyed on how they spell the callee
+misses every caller that names it indirectly**, and a variable is the ordinary way
+to name something indirectly. The second scan keys on the *names* the argv
+mentions as well as the strings, which finds all sixteen — and its three remaining
+hits are the two gates that assert a refusal and one false positive, which is what
+a correct enumeration of this looks like.
+
+Worth keeping alongside it: the flag is a **list**, and Rule 2 says not to
+introduce one. It is defensible here only because the failure is
+self-documenting — the refusal's own message names `--allow-untagged`, so a gate
+author who adds an applying run and omits it gets the remedy in the failure rather
+than a silent pass. A missing entry cannot go quiet, which is the property that
+matters; a meta-gate over this file would have had to exempt the two gates that
+test the refusal, by name.
+
+### A slice by position is a claim about which flag is last
+
+Appending `--allow-untagged` to `declined_gate`'s argv broke three of its own
+callers, and the mechanism is worth more than the fix. The list ended in `--json`,
+and the human-report callers reached for it as `upgrade[:-1]` — so the append
+handed them `--json` and took the escape away at once, turning a prose assertion
+into a JSON comparison and the real run into a refusal.
+
+Nothing states that `--json` is last. `upgrade[:-1]` is a **claim about list
+order**, made at three call sites, held by none of them, and correct only until
+somebody extends the list — which is what an escape flag is for. The human argv is
+the base now and `report()` composes `--json` onto it, which is the same
+direction this repository takes everywhere else: the derived form is built from
+the plain one, never carved out of it.
+
+It is also the second thing the refusal's blast radius taught in one round, and
+both were enumeration failures of the same family: the first missed callers that
+named the tool through a variable, this one missed callers that named a flag
+through its position. **Neither spelling is searchable, and both were found by
+running.**

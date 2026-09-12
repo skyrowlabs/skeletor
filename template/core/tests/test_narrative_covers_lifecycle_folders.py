@@ -157,6 +157,7 @@ def _touched(node) -> list:
     statements are appends*. A name in a value position — `DOCS_DIR` inside a
     tuple — is neither, and is excluded by construction rather than by a list.
     """
+
     def target(expr) -> list:
         if isinstance(expr, ast.Name):
             return [expr.id]

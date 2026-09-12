@@ -94,7 +94,6 @@ SCAN_ROOTS = ["docs", ".claude", ".github"]
 # bottom of it rather than at the top.
 
 
-
 # ── Link syntax ──────────────────────────────────────────────────────────────
 
 _LINK = re.compile(r"(?<!!)\[(?P<text>[^\]]*)\]\((?P<href>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
