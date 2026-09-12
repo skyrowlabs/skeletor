@@ -195,7 +195,7 @@ PRESENT_TENSE = {
 #: editing its own:
 #:
 #:     PRESENT_TENSE.pop("docs/business-planning", None)
-#:     NARRATIVE = tuple(role for role in NARRATIVE if role is not IMPL_DIR)
+#:     NARRATIVE = tuple(role for role in NARRATIVE if role != DOCS_DIR / "reports")
 #:
 #: `pop` takes a default so the line is idempotent — an entry the template
 #: later stops shipping must not turn an adopter's removal into a `KeyError`,
@@ -203,9 +203,29 @@ PRESENT_TENSE = {
 #:
 #: The rebuilt tuple reads as editing `NARRATIVE` and is not: the name on the
 #: left is assigned on a **new line below the template's**, and git merges
-#: lines. `is not` rather than `!=` because these are directory objects whose
-#: equality is by path, and identity is what an adopter means when they name
-#: the constant the template defined.
+#: lines.
+#:
+#: ## `!=`, and this line shipped as `is not` for a release
+#:
+#: The argument for identity was that these are directory objects whose equality
+#: is by path, so identity is what an adopter means when they name the constant
+#: the template defined. That is true about **intent** and false about the
+#: objects: half the tuple above has no name to be identical to.
+#: `DOCS_DIR / "reports"` builds a new `Path` on every evaluation, so
+#: `role is not DOCS_DIR / "reports"` is true for every element and the removal
+#: **silently does nothing** — the filter runs, the tuple comes back the same
+#: length, and nothing anywhere says so.
+#:
+#: Measured on a fresh tree, 2 of the 4 shipped entries are anonymous
+#: expressions and 2 are named constants. `is not` works for the named half;
+#: `!=` works for all four. So the idiom that reads as more precise was correct
+#: for the entries somebody would reach for first and inert for the rest, which
+#: is the shape this repository keeps meeting: the convenient example cannot
+#: discriminate. proto.pilot found it.
+#:
+#: `tests/test_narrative_covers_lifecycle_folders.py` executes the spellings in
+#: this comment against the real constants now, so an example that stops working
+#: fails rather than waiting for somebody to paste it.
 
 
 # ── Your own lifecycle folders ───────────────────────────────────────────────

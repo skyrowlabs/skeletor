@@ -32,6 +32,7 @@ day. Classify a folder once, in the file that argues the case.
 
 from __future__ import annotations
 
+import copy
 import re
 import sys
 from pathlib import Path
@@ -44,6 +45,7 @@ pytestmark = [pytest.mark.unit]
 # every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import scripts.paths  # noqa: E402
 from scripts.paths import DOCS_DIR, NARRATIVE, PRESENT_TENSE, PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 from tests.scanning import scanned  # noqa: E402
 
@@ -167,4 +169,119 @@ def test_your_appends_are_inside_the_region() -> None:
         "below the marker — it is a cut and paste, and nothing else has to change. If one arrived "
         "there by an upgrade rather than by you, that is expected: git placed it, and moving it is "
         "the whole remedy."
+    )
+
+
+#: An indented example inside a `#:` block — the spelling the seam hands an
+#: adopter to paste. Grouped into contiguous blocks because one example defines a
+#: name the next one uses.
+_EXAMPLE = re.compile(r"^#:(?P<indent> {4,})(?P<code>\S.*)$")
+
+
+def _example_blocks() -> list:
+    """Every contiguous run of indented examples in `scripts/paths.py`, as source."""
+    blocks, current = [], []
+    for line in PATHS_FILE.read_text(encoding="utf-8").splitlines():
+        found = _EXAMPLE.match(line)
+        if found:
+            current.append(found.group("code"))
+        elif current:
+            blocks.append(current)
+            current = []
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def _shipped_constants() -> dict:
+    """`NARRATIVE` and `PRESENT_TENSE` as the TEMPLATE ships them, appends excluded.
+
+    **Not the imported values, and an adopter action is what proved it.** The
+    examples are evaluated to answer *is this spelling correct*, which is a
+    question about the spelling. Evaluated against the live module it becomes *does
+    this do something in my tree*, and those differ the moment somebody accepts the
+    seam's invitation: the removal example names the seeded `PRESENT_TENSE` key, so
+    an adopter who pops that key — following the instruction the failing staleness
+    check prints, verbatim — makes the template's own example a no-op and turns
+    this test red for doing exactly as they were told.
+
+    `pop` takes a default *because* a no-op is correct once the key is gone. The
+    defect this test exists for is different and is never correct: a filter on
+    `is not` against an anonymous entry cannot remove anything for anybody.
+
+    So the baseline is the file's source up to the adopter region, executed fresh.
+    Everything above that line is the template's; everything below is the
+    adopter's, which is what the region is for — so the same marker that keeps
+    merges clean also draws the boundary this needs.
+    """
+    lines = PATHS_FILE.read_text(encoding="utf-8").splitlines(keepends=True)
+    marker = next(i for i, line in enumerate(lines) if line.startswith(_REGION_MARKER))
+    # `__file__`, because this module derives PROJECT_ROOT from it and an exec
+    # namespace has none — the first run of this helper failed with a NameError
+    # rather than a finding, which is the right failure and the wrong report.
+    namespace: dict = {"__file__": str(PATHS_FILE)}
+    exec("".join(lines[:marker]), namespace)  # noqa: S102 - this tree's own source
+    return {name: namespace[name] for name in ("NARRATIVE", "PRESENT_TENSE")}
+
+
+def test_the_seam_examples_actually_do_something() -> None:
+    """A spelling that no-ops is worse than one that errors, and one of these did.
+
+    **`is not` silently did nothing for half the shipped tuple.** The removal
+    idiom was `role is not IMPL_DIR`, argued for over `!=` on the grounds that
+    these are directory objects whose equality is by path, so identity is what an
+    adopter means. True about intent, false about the objects: `DOCS_DIR /
+    "reports"` builds a new `Path` on every evaluation, so the comparison is true
+    for every element, the filter runs, and the tuple comes back unchanged. Two of
+    four entries are anonymous expressions, so the idiom worked for the half
+    somebody reaches for first and was inert for the rest. proto.pilot found it.
+
+    So the examples are **executed** rather than read, one statement at a time.
+
+    ## Per statement, because a block hid the bug it was written to catch
+
+    The first version checked whether a BLOCK left either constant changed. The
+    removal block touches both — `PRESENT_TENSE.pop(...)` then the `NARRATIVE`
+    rebuild — so the working half satisfied the assertion for the broken half and
+    the exact defect under test passed. Two statements, one verdict, and the
+    verdict went to whichever succeeded.
+
+    ## What is skipped, and why that cannot go quiet
+
+    A statement that raises is illustrative rather than pasteable: the seam
+    carries a comparison of two spellings with `CONFLICT` and `clean` annotated in
+    a column, which is prose in code shape and not valid python, and one example
+    names a constant defined only in a neighbouring block. Neither is this
+    check's business. But "skip what raises" is how a check stops checking, so
+    what is asserted is the number of statements that actually RAN — not the
+    number found.
+    """
+    blocks = scanned(_example_blocks(), f"indented examples in {PATHS_FILE.name}", least=2)
+    shipped = _shipped_constants()
+    inert, executed = [], []
+    for block in blocks:
+        namespace = {name: value for name, value in vars(scripts.paths).items()}
+        namespace.update({name: copy.copy(value) for name, value in shipped.items()})
+        for statement in block:
+            touches = [name for name in ("NARRATIVE", "PRESENT_TENSE") if name in statement]
+            # `copy`, not a reference. `PRESENT_TENSE |= {...}` mutates the dict in
+            # place, so a snapshot that aliases it compares the object with itself
+            # and every mapping example reads as inert — the harness reporting its
+            # own aliasing as a finding about the seam, which it did on first run.
+            before = {name: copy.copy(namespace[name]) for name in touches}
+            try:
+                exec(statement, namespace)  # noqa: S102 - the file under test is this tree's own
+            except Exception:  # noqa: BLE001 - illustrative or context-dependent; see the docstring
+                break
+            executed.append(statement)
+            unchanged = [name for name in touches if namespace[name] == before[name]]
+            if unchanged:
+                inert.append(f"{statement}   ->   {', '.join(unchanged)} unchanged")
+    scanned(executed, f"seam example statements that ran in {PATHS_FILE.name}", least=3)
+    assert not inert, (
+        f"these example statements in {PATHS_FILE.name} name a constant and leave it as it was:\n  "
+        + "\n  ".join(inert)
+        + "\n\nAn adopter pastes one and nothing happens, silently. A removal that filters on identity "
+        'is the known case: an anonymous entry like `DOCS_DIR / "reports"` builds a new object on every '
+        "evaluation, so `is not` is true for every element. Use `!=`."
     )
