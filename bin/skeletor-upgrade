@@ -611,6 +611,23 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+#: The two frozen rules that bound an append seam's space in a template file. The
+#: tree's `scripts/seams.py` finds them the same way; spelled here because this
+#: tool reads renders, not the tree's modules.
+SEAM_OPENING = "# ── Nothing below this line is skeletor's"
+SEAM_CLOSING = "# ── Skeletor's again below this line"
+
+
+def outside_space(text: str) -> str:
+    """`text` without what sits between its seam rules, rules included; unchanged if it has no seam."""
+    lines = text.splitlines(keepends=True)
+    opening = [i for i, line in enumerate(lines) if line.startswith(SEAM_OPENING)]
+    closing = [i for i, line in enumerate(lines) if line.startswith(SEAM_CLOSING)]
+    if len(opening) != 1 or len(closing) != 1 or closing[0] < opening[0]:
+        return text
+    return "".join(lines[: opening[0]] + lines[closing[0] + 1 :])
+
+
 def standing_divergence(
     target: Path,
     reference: Dict[str, str],
@@ -659,9 +676,16 @@ def standing_divergence(
     honours the flag the merge honoured: if the disk and the render normalise
     to the same text, the difference is the formatter's and not the reader's.
 
-    Both are computed only for files that already differ by hash, so the common
-    path is unchanged and the formatter subprocesses are bounded by the size of
-    the list being corrected rather than by the tree.
+    **An append in the file's own space.** A seam file invites you to add lines
+    between its two frozen rules, and doing exactly that put the file on this
+    list — the one an adopter reads to find their forks. mind.head measured 31
+    become 32 for one invited append. If the disk and the render agree once each
+    loses what sits between its rules, the file is the template's plus what the
+    template asked for, which is not a fork.
+
+    All three are computed only for files that already differ by hash, so the
+    common path is unchanged and the formatter subprocesses are bounded by the
+    size of the list being corrected rather than by the tree.
     """
     out = []
     for rel, digest in sorted(reference.items()):
@@ -677,6 +701,11 @@ def standing_divergence(
         if head is not None and disk == sha256(head):
             continue
         source = (render or {}).get(rel)
+        if source is not None:
+            here, there = read(live), read(source)
+            if here is not None and there is not None and SEAM_OPENING in there:
+                if outside_space(here) == outside_space(there):
+                    continue
         if normaliser and source is not None and normaliser.applies(rel):
             here, there = read(live), read(source)
             if here is not None and there is not None:
@@ -2110,6 +2139,10 @@ def main() -> int:
         #: Conflicts that a run of the tree's own formatters over both rendered
         #: sides would have resolved. Reported, never acted on without the flag.
         formatting_only: List[str] = []
+        #: Files the template changed that this tree already carries — a previous run
+        #: applied them, or the adopter ported them. Not written, and not nothing:
+        #: see `already_applied`, and the advance below that has to count them.
+        carried: List[str] = []
         #: Merged or conflicted files where the template changed comments alone. See `touches_code`.
         comment_only: List[str] = []
         #: What `render_dirt` found in the checkout that renders `ours` — the
@@ -2327,6 +2360,7 @@ def main() -> int:
             # listed as "merged cleanly" while equal to the template. The second is a
             # file an earlier run MERGED, which re-merging can duplicate into.
             if theirs == ours or already_applied(base, ours, theirs):
+                carried.append(rel)
                 continue
 
             resolved = merge(base, theirs, ours, workdir)
@@ -2414,7 +2448,14 @@ def main() -> int:
         # head render for every file it holds, and the manifest copied is that
         # render's — including the declined entries, which is how a decline
         # stays detectable.
-        if not args.dry_run and (added or updated or merged or pending or set_args_applied):
+        # `carried` is the fifth reason, and v0.32.0 shipped without it. Skipping an
+        # already-applied file made a re-run list nothing — so a tree whose first run
+        # held the base back, and whose conflicts were then ported, had every changed
+        # file carried and nothing to apply, and the base could never advance without
+        # `--ref`. proto.pilot read that the unpinned `--ported` re-run in this state
+        # might not advance; it could not. The files ARE at the new render, which is
+        # the one thing an advance records.
+        if not args.dry_run and (added or updated or merged or pending or set_args_applied or carried):
             # The head render's manifest, verbatim — the hashes recorded are of
             # what skeletor PRODUCES, never of what is on disk. The difference
             # decides whether the next upgrade destroys work: a merged file is
@@ -2517,6 +2558,14 @@ def main() -> int:
                     detail("re-running.")
                 shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
                 advanced = True
+                # **Announced where it happens, whatever else the run did.** v0.33.0
+                # put the line in the one branch that lists nothing, and neither real
+                # advance reached it: mind.head's carried a ported conflict, and
+                # proto.pilot's arrived through the relabel. The only place either
+                # could see the new version was `.skeletor.json`. The deed produces
+                # the message — the rule this file already states about `advanced`.
+                if ref != head_ref:
+                    say("📌", f"{MANIFEST_NAME}: {ref} → {head_ref} — this tree's base is now {head_ref}")
                 # The manifest just written is the head render's, so the head
                 # render is what "skeletor wrote this" now means. Re-asking the
                 # same question of the new base is what stops this run's own
@@ -2596,6 +2645,9 @@ def main() -> int:
                         # tell a decision to port from a formatter's opinion
                         # without re-running the merge to find out.
                         "formatting_only": formatting_only,
+                        # Changed by the template and already present — neither written
+                        # nor pending, and a reason the base advances.
+                        "carried": carried,
                         "collided": collided,
                         "entangled": entangled,
                         "declined": declined,
@@ -3150,7 +3202,11 @@ def main() -> int:
         # a condition whose term set does not match the question it is asking.
         # There the set was too small and excluded a conflict; here it is too
         # large and includes two things that are not work.
-        if not any((added, updated, merged, conflicted, collided, fresh)):
+        if carried:
+            say("✓ ", f"{len(carried)} file(s) the template changed already carry the change — nothing to write")
+            detail("A previous run applied them, or you ported them. Merging them again can insert")
+            detail("the same lines twice, which is what these are kept out of the merge to prevent.")
+        if not any((added, updated, merged, conflicted, collided, fresh, carried)):
             # Name the version it is current *with*. This compares the tree
             # against a render of skeletor's HEAD, so that is the claim — but the
             # manifest is only re-copied by a run that applies something, so a
@@ -3169,8 +3225,7 @@ def main() -> int:
                 # nothing to list — and printed "already current … nothing to carry
                 # over" on the same run that rewrote the manifest. proto.pilot saw it
                 # replaying v0.30.0: true about the files, silent about the record.
-                say("✅", f"recorded: this tree's base is now skeletor @ {head_ref} — nothing further to carry")
-                detail("The files already carried this release; this run moved the manifest to match.")
+                say("✅", f"nothing further to carry — the record moved to skeletor @ {head_ref} above")
             else:
                 say("✅", f"already current with skeletor @ {head_ref} — nothing to carry over")
             if not _WARNED_DIRTY and head_ref.endswith("-dirty"):
@@ -3245,8 +3300,11 @@ def main() -> int:
                 #
                 # Recording it here is sound rather than merely convenient.
                 # Reaching this branch means no file was added, updated, merged,
-                # conflicted or collided, which is to say the head render equals
-                # the base render for every path — so the map this writes is the
+                # conflicted, collided **or carried** — the last is what v0.32.0's
+                # `already_applied` made necessary, since a carried file is one the
+                # renders DISAGREE about, and without it this branch printed "the two
+                # renders are identical" on proto.pilot's replay while they were not —
+                # which is to say the head render equals the base render for every path — so the map this writes is the
                 # one already on disk and only `skeletor_ref` moves. That is why
                 # it is safe without applying anything, and why it is gated on
                 # the flag: without `--ref`, the same write would stamp whatever

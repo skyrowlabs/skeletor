@@ -8115,13 +8115,44 @@ def ported_only_conflict_gate(workdir: Path) -> List[Result]:
         if ref_of(left) != before:
             problems.append(f"a plain conflict run advanced the base {before} → {ref_of(left)}")
 
+    # **The held-back tree, ported by hand, then re-run plain.** Since v0.32.0 a file
+    # that already carries the template's change is kept out of the merge — and
+    # until `carried` counted as a reason to advance, a tree in exactly this state
+    # listed nothing and could never advance without `--ref`. Porting here is
+    # taking the template's version verbatim through `--show`, the most complete
+    # port there is; the plain re-run must then record the new base and say so.
+    carry_problems: List[str] = []
+    if not problems:
+        upgrade = [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(left), "--allow-untagged"]
+        code, shown = run(upgrade + ["--show", subject], cwd=left)
+        if code != 0 or not shown.strip():
+            carry_problems.append(f"--show {subject} printed nothing to port with:\n{shown[-600:]}")
+        else:
+            rendered = subprocess.run(upgrade + ["--show", subject], cwd=str(left), capture_output=True, text=True)
+            (left / subject).write_text(rendered.stdout, encoding="utf-8")
+            run(["git", "-C", str(left), "commit", "-qam", "adopter: port"], cwd=left)
+            _, rerun = run(upgrade, cwd=left)
+            if ref_of(left) != head_ref:
+                carry_problems.append(
+                    f"a plain re-run after porting left the base at {ref_of(left)}, not {head_ref}: every "
+                    f"changed file is carried, nothing is listed, and nothing advances\n{rerun[-900:]}"
+                )
+            elif "📌" not in rerun:
+                carry_problems.append(f"the base advanced to {head_ref} and the run did not say so\n{rerun[-900:]}")
+
     return [
         Result(
             f"ported-only: a lone conflict holds the base, --ported moves it to {head_ref}",
             not problems,
             time.time() - started,
             "\n".join(problems) or f"diverged on {subject}",
-        )
+        ),
+        Result(
+            f"ported-only: a held-back tree whose conflict was ported advances on a plain re-run",
+            not problems and not carry_problems,
+            0.0,
+            "\n".join(carry_problems or problems),
+        ),
     ]
 
 

@@ -5460,3 +5460,34 @@ said a named tree's host lacked an interpreter; it had it. The claim came from
 that tree's own note, through a relay, into a file every tree ships. Template
 prose names what was measured and by whom, never a standing fact about somebody
 else's machine — that is a value this repository cannot re-read.
+
+## Skipping a merge is also a decision about the record
+
+v0.32.0 kept already-applied files out of the merge, which fixed the duplicated
+class and quietly changed two things nobody had written down as depending on it.
+
+**The advance.** A base moved when something was added, updated, merged, left
+pending or re-argued. A carried file is none of those, so a tree whose first run
+held the base back — and whose conflicts were then ported — had every changed
+file carried, listed nothing, and could never advance without `--ref`. proto.pilot
+read the risk; it was real, and built by hand here it held a tree at v0.32.0 over
+a render it fully matched. `carried` is a reason to advance now, reported as its
+own line, and `ported_only_conflict_gate` holds the port-then-plain-re-run path —
+planted without `carried` it goes red naming the stuck ref.
+
+**The relabel's argument.** The `--ref` branch argued its write was safe because
+reaching it meant the renders were identical. With carried files excluded from
+every list, reaching it no longer meant that, and it printed "the two renders are
+identical" over renders that differed. With `carried` counted, the branch is only
+reached when the argument is true again, which is better than rewording it.
+
+**And the announcement belongs to the deed.** The line saying a base moved sat in
+the one branch that lists nothing, and neither real advance in the round reached
+it. It prints where the manifest is copied now — the rule this file already
+states about `advanced`, not applied to the sentence that reported it.
+
+**A helper's return shape is released API.** `default_range()` returned three git
+arguments in a string for one release, and sky.boss's own script, importing it,
+broke at run time. It is one argument again — `<boundary>..HEAD`, exact when one
+boundary dominates — and a tree test pins the contract by what `git log` of the
+value lists, not by the spelling.
