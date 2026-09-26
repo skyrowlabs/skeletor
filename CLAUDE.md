@@ -1036,7 +1036,7 @@ heading until the appends are inside the region.
 Three ways the check for it did not bite, and the first is Rule 2 eating itself.
 The tree's test named `scripts/paths.py` and five `paths.py`-shaped regexes while
 the generator discovered its seams — *the generator discovers its seams and the
-adopter is handed a list of one*, dream.doll, who measured `SCAN_ROOTS += ["src"]`
+adopter is handed a list of one*, Dream Doll, who measured `SCAN_ROOTS += ["src"]`
 above the other seam's marker and got a green suite. Both ends are discovered
 now: seams by the same invitation predicate the gate uses, the constants from each
 seam's own documented examples, and the appends by an `ast` walk, with one
@@ -1063,7 +1063,7 @@ what discriminates.
 **A floor is a list with one number.** The seam population was `invitation AND
 terminator`, so a seam shipping the invitation *without* its rule left the
 population rather than failing, and the only thing before silence was
-`least=2` — today's seam count. dream.doll priced it: stripping a terminator fails
+`least=2` — today's seam count. Dream Doll priced it: stripping a terminator fails
 today through the floor, and with a third seam a fourth arriving bare leaves
 `3 >= 2` and goes quiet, so honesty would mean bumping an integer per seam, which
 is the list the discovery rewrite had just deleted. Population and assertion are
@@ -1073,7 +1073,7 @@ separate now.
 seam test execs the source above the opening rule, so an append on the wrong side
 joins that namespace and can satisfy the documented `PRESENT_TENSE.pop(...)`
 example in advance, making it a no-op. The coupling is in the test's docstring:
-fix the placement first. dream.doll met it.
+fix the placement first. Dream Doll met it.
 
 **The one thing a scaffold hands over broken, and it is not in any file.**
 Release Please opens a pull request, and `can_approve_pull_request_reviews` — a
@@ -1164,7 +1164,7 @@ that fires through every grid run is one nobody reads.
 three trees hit the same thing in one round.** What gets stamped is `git
 describe` of whatever was rendered, so an operator sitting one commit past a
 release hands every adopter `v0.24.0-1-g6f4a54e` — resolvable while that commit
-is pushed and unrewritten, and a version nobody chose. node-zero, dream.doll and
+is pushed and unrewritten, and a version nobody chose. node-zero, Dream Doll and
 stash.flow each recorded one, and none of them could pin it: `.skeletor.json`
 says *do not hand-edit* on its first line, correctly. `--ref v0.24.0` renders
 `ours` from a detached worktree at that ref, so the stamp is the tag exactly,
@@ -1226,7 +1226,7 @@ the flow this tool documents: run, port by hand, re-run `--ported`. On that
 second run everything the first run wrote still differs from a base not yet
 replaced, so it is all listed under a heading asserting each entry is a decision
 the reader made. node-zero measured 15 names with 11 of them the previous run's
-output; dream.doll watched the list evaporate on the next dry run, which is the
+output; Dream Doll watched the list evaporate on the next dry run, which is the
 tell. Neither was a data bug — both verified the manifest and it was correct.
 The bytes were right and the sentence over them was wrong.
 
