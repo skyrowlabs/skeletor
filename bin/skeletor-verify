@@ -5246,7 +5246,7 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
     an upgrade renders from the operator's working checkout. So an operator one
     commit past a release hands every adopter a manifest stamped
     `v0.24.0-1-g6f4a54e` — resolvable while that commit is pushed and
-    unrewritten, and a version nobody chose. node-zero, dream.doll and
+    unrewritten, and a version nobody chose. node-zero, Dream Doll and
     stash.flow each recorded one in the same round and none could pin it:
     `.skeletor.json` says *do not hand-edit* on its first line, correctly.
 
@@ -5756,7 +5756,7 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
         #
         # It did, under a heading asserting each entry is a decision the reader
         # made — node-zero measured 15 named with 11 of them the previous run's
-        # output, dream.doll watched the same list evaporate on the next dry
+        # output, Dream Doll watched the same list evaporate on the next dry
         # run. The cause is that the list was measured against the base the run
         # was about to replace, which is right for a dry run and wrong here.
         #
@@ -6675,7 +6675,7 @@ def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
     # box that wrote this that is no `black` at all and an `isort` from
     # `~/.local/bin` at 8.0.1 against a tree pinning 9.0.1. So every assertion
     # below was passing while one side of a three-way merge went through a
-    # formatter a major version off the pin, which is the defect dream.doll and
+    # formatter a major version off the pin, which is the defect Dream Doll and
     # proto.pilot reported and the reason the version check exists. proto.pilot
     # could not observe it because their PATH isort happened to match; this one
     # did not.
@@ -6796,7 +6796,7 @@ def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
     # `--normalise` resolves each declared formatter from the tree's `.venv` and
     # falls back to PATH. Binding a different version and putting ONE SIDE of a
     # three-way merge through it manufactures the divergence the flag exists to
-    # remove. dream.doll and proto.pilot both read it out of `_executable`;
+    # remove. Dream Doll and proto.pilot both read it out of `_executable`;
     # proto.pilot could not observe it, because the isort they saw bind from
     # `~/.local/bin` happened to match the pin.
     #
@@ -6874,7 +6874,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     `delete the entry` in as many words.
 
     So the seam's own documentation routed its reader into the divergence the
-    seam exists to prevent. dream.doll's `present-tense-ships-a-seeded-entry`
+    seam exists to prevent. Dream Doll's `present-tense-ships-a-seeded-entry`
     is the same defect approached from the fixture: a seeded entry is only
     harmless once removal is append-shaped too.
 
@@ -7055,7 +7055,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
         **The control, and it has to be this spelling rather than an adjacent
         one.** An adjacent append conflicts on the FIRST merge — measured, and
         correctly — so it never reaches a second and cannot be the control for a
-        re-run. The population dream.doll and proto.pilot found is the adopter who
+        re-run. The population Dream Doll and proto.pilot found is the adopter who
         followed the documented rule: one blank line, a clean first merge, and a
         re-conflict on the next run because the two insertion points coincide once
         the template's new lines are on disk beside the append.
@@ -7201,7 +7201,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     #
     # Editing the last line of the seam's own prose is what this repository really
     # does there: v0.26.0 inserted a 28-line removal-idiom block into exactly that
-    # gap, which is how dream.doll's append ended up sharing an insertion point
+    # gap, which is how Dream Doll's append ended up sharing an insertion point
     # with the template's. The edit inside the literal is ~35 lines away and
     # creates no adjacency with anybody's append, which is why it alone left the
     # region's clean re-run proving nothing.
@@ -7257,7 +7257,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
 
     # ## The re-run, which is the merge a round actually performs more than once
     #
-    # Everything above asks the FIRST merge. dream.doll's finding is that the
+    # Everything above asks the FIRST merge. Dream Doll's finding is that the
     # seam's guarantee was a first-merge guarantee: after one clean merge the
     # tree holds the template's new lines *and* the adopter's append at one
     # anchor, so the next merge sees two changes at one insertion point. Every
@@ -7294,7 +7294,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     # These used to be one predicate joined with `and`, so a seam shipping the
     # invitation and no rule left the population rather than failing, and the only
     # thing between that and silence was the `< 2` floor — a copy of today's seam
-    # count. dream.doll priced it: with a third seam, a fourth arriving without its
+    # count. Dream Doll priced it: with a third seam, a fourth arriving without its
     # rule leaves 3 >= 2 and goes quiet, and keeping the floor honest means bumping
     # an integer per seam, which is the list the discovery rewrite removed wearing
     # a number. The tree ships the same split in its own test.
@@ -7518,7 +7518,7 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
     """A definition the template moved out of a file the tree kept.
 
     `importers_of` faces one direction — a file written cleanly that imports a
-    conflicted one. dream.doll named the other, and it is the one with no red
+    conflicted one. Dream Doll named the other, and it is the one with no red
     anywhere: **the template moves a definition out of A and into B**, B applies
     cleanly because nobody had touched it, and A is a file this run did not
     take. Every line the tool prints is true, and none of them says the symbol
@@ -9269,7 +9269,7 @@ def template_comment_names_gate() -> Result:
 
     That is the generator's half, asked here against this repository's history of
     `template/`: the same pattern, the same resolution (a definition now, or a
-    module's filename), the same predicate. dream.doll's rename — three names for
+    module's filename), the same predicate. Dream Doll's rename — three names for
     one test in three releases — is the population it exists for.
     """
     started = time.time()

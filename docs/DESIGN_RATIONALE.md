@@ -4514,7 +4514,7 @@ hand, re-run with `--ported`: on that second run every file the first run wrote
 still differs from the base the second run has not yet replaced, so all of it is
 listed under a heading asserting each entry is a decision the reader made.
 node-zero measured 15 names with 11 of them the previous run's own output;
-dream.doll watched the same list vanish on the next dry run, which is the tell —
+Dream Doll watched the same list vanish on the next dry run, which is the tell —
 standing state does not evaporate.
 
 Both were separate trees, and neither reported a data bug: both verified the
@@ -4612,7 +4612,7 @@ shipped its own `PRESENT_TENSE` dict carrying the same ruling with the same
 reason. So the invitation was answerable only by editing a template-owned literal
 inside a shipped test — the exact divergence the append seam exists to prevent,
 one file over — and the test said so, in a failure message reading *delete the
-entry*. dream.doll hit the classification half and stash.flow the staleness half,
+entry*. Dream Doll hit the classification half and stash.flow the staleness half,
 independently, from real runs, on the same day.
 
 Both halves of the partition now live beside each other in `scripts/paths.py`,
@@ -4787,7 +4787,7 @@ The v0.25.0 upgrade began naming *"divergences this release also changed"* under
 the label *worth re-asking whether your version is still needed, or was the thing
 we took*. Six trees split two-and-two, and they were not disagreeing about the
 same thing: proto.pilot named five with two genuine adoptions and asked for it not
-to be tightened, dream.doll saw four of fourteen with no false positives, and
+to be tightened, Dream Doll saw four of fourteen with no false positives, and
 sky.boss saw four with zero adoptions and read it as noise.
 
 All four are one predicate behaving correctly. It computes *file you diverged on
@@ -4894,8 +4894,8 @@ that found it are the three that conflicted zero times.
 The claim was that an existing append which merges cleanly ends up *below* the
 arriving marker, so nobody has to move anything. git orders two additions at a
 shared anchor rather than colliding on them, and which side yours lands on depends
-on exactly where it sat. dream.doll merged cleanly and landed **above**; mind.head
-found the same from a tree that did conflict. dream.doll's own sentence is the
+on exactly where it sat. Dream Doll merged cleanly and landed **above**; mind.head
+found the same from a tree that did conflict. Dream Doll's own sentence is the
 indictment:
 
 > The six-tree measurement behind the cost estimate would not have caught this,
@@ -4924,7 +4924,7 @@ Three things this repository already knew, arriving together:
   a first-merge probe cannot distinguish the layouts, because the region buys
   nothing on a first merge. It buys the re-run, and only the re-run.
 - **A claim a tree can check should not be a claim a tree is asked to believe.**
-  dream.doll asked for a test rather than a corrected sentence, which is the right
+  Dream Doll asked for a test rather than a corrected sentence, which is the right
   trade and the one this file keeps arriving at from other directions. Placement is
   a fact about the adopter's own file, so
   `tests/test_narrative_covers_lifecycle_folders.py` settles it locally and no
@@ -4993,7 +4993,7 @@ restated as a bill.
 
 - **It covered one seam of two.** The test hardcoded `scripts/paths.py` and five
   `paths.py`-shaped regexes, while the generator discovered its seams by their
-  invitation. dream.doll's line: *the generator discovers its seams and the adopter
+  invitation. Dream Doll's line: *the generator discovers its seams and the adopter
   is handed a list of one.* They measured `SCAN_ROOTS += ["src"]` immediately above
   `check_doc_links.py`'s marker and got 211 passed. Rule 2 says never introduce a
   list where a pattern will do, and the artifact that had one was the artifact
@@ -5231,7 +5231,7 @@ file that shipped the invitation *without* its rule simply **left the population
 — and the only thing standing between that and total silence was `scanned(...,
 least=2)`, which is today's seam count written down.
 
-dream.doll priced it exactly: stripping a terminator today fails through the floor
+Dream Doll priced it exactly: stripping a terminator today fails through the floor
 (2 → 1), and with a third seam in the tree a fourth arriving without its rule
 leaves 3 ≥ 2 and goes quiet. Keeping the floor honest would mean bumping an
 integer every time a seam is added — **the hardcoded list the discovery rewrite
@@ -5248,7 +5248,7 @@ The seam test execs the file's source **above** the opening rule, so an append t
 landed on the wrong side of the boundary joins that namespace and can satisfy the
 template's own documented `PRESENT_TENSE.pop(...)` example in advance, turning it
 into a no-op. One misplaced line reddens the placement check *and* the
-example-does-something check, and only the first names the cause. dream.doll met
+example-does-something check, and only the first names the cause. Dream Doll met
 it and the coupling is written into the test's docstring, because the cost is not
 the second failure — it is the half hour spent debugging it as a separate problem.
 
@@ -5377,7 +5377,7 @@ The v0.31.0 round confirmed eleven fixes by planting each defect again — and
 filed five defects in the fix code itself, three of them one shape.
 
 **`test_scratch_is_not_linted` read spelling.** It accepted eslint's ignore only
-as the literal `'tmp/**'`, and dream.doll's `'tmp'` — which eslint honours; they
+as the literal `'tmp/**'`, and Dream Doll's `'tmp'` — which eslint honours; they
 planted a file with errors and it was skipped — failed the tree whose incident the
 test was written for, after that tree had fixed it. It keyed black on
 `pyproject.toml` existing, and failed mind.head's ruff-and-mypy tree, where both
@@ -5430,3 +5430,33 @@ matrix from `ci.yml` instead. The blank-line control in `append_seam_gate`
 stopped re-conflicting too, which was the fix working: that re-conflict *was* a
 re-merge of an applied change. The control now asserts the re-run leaves the file
 alone, and the discrimination moved to the gate that requires the hazard first.
+
+## The rewrite measured the linters it found, and found them by reading text
+
+v0.32.0 made the scratch check run each walker rather than read its config. The
+round then found the same gap one layer out: which tools walk was discovered from
+`run([tool, ..., "."])`, so pyright — which walks by `--project` and never names
+a directory — was never asked (stash.flow, read); and `PROBES` was held in both
+directions, so a ruff tree had to add a row and delete three, making a vendored
+literal a permanent merge point (mind.head, measured, and still declining).
+
+The file is an append seam now — the fourth — and it cost nothing new: the
+invitation predicate enrols it in every seam gate, the frozen blocks, the prose
+record and the example executor. Shipped probes are no longer held to "something
+here walks with it"; appended ones are. pyright is discovered by `--project` and
+run, with a labelled reading of `pyrightconfig.json` where it cannot be.
+
+Planting it found two more, both the loop's oldest shape. The pyright fallback
+called `json.loads` on a config that explains itself in `//` comments, so the
+branch that exists for when pyright cannot answer would have crashed instead. And
+a probe for a tool that is not installed came back green: `python -m ruff` fails,
+its output does not name the probe, and that read as *skips scratch*. A tool that
+could not run is now reported as unasked, which fails — *"I could not measure" is
+not "the budget is respected"*, written in this document long before this test
+existed and missed by it anyway.
+
+Two lines of template prose were adopter facts, and one was false: `cli/check.py`
+said a named tree's host lacked an interpreter; it had it. The claim came from
+that tree's own note, through a relay, into a file every tree ships. Template
+prose names what was measured and by whom, never a standing fact about somebody
+else's machine — that is a value this repository cannot re-read.

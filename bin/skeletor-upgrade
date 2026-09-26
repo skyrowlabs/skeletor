@@ -290,7 +290,7 @@ def refuse_an_unpinned_head(head_ref: str, writing: str) -> None:
     a separate session with no shared channel.
 
     So the harm is sticky and silent, which is the profile a guard is owed. Three
-    trees recorded a describe string in one round — node-zero, dream.doll and
+    trees recorded a describe string in one round — node-zero, Dream Doll and
     stash.flow — and not one of them could pin it from their side, because the
     only cheap moment is the run that writes it.
 
@@ -569,7 +569,7 @@ def head_checkout(ref: str, workdir: Path) -> Path:
     records is `git describe` of whatever it rendered from, so an operator whose
     checkout sits one commit past a tag hands every adopter a manifest stamped
     `v0.24.0-1-g6f4a54e`. That is resolvable — while that commit is pushed and
-    unrewritten — and it is not a version anybody chose. node-zero, dream.doll
+    unrewritten — and it is not a version anybody chose. node-zero, Dream Doll
     and stash.flow all recorded it in the same round, and none of them could pin
     it: `.skeletor.json` says *do not hand-edit* on its first line, correctly.
 
@@ -871,7 +871,7 @@ def stale_against_head(
     """What a file the tree KEPT now disagrees with in the tree around it.
 
     `importers_of` faces one direction: a file written cleanly that imports a
-    file left behind. This is the other, and dream.doll named it — **the
+    file left behind. This is the other, and Dream Doll named it — **the
     template moves a definition out of A and into B, and A is a file this run
     did not take.** B arrives, A keeps the old copy, and nothing is conflicted
     about B at all, so every line this tool prints about A is true and none of
@@ -1443,7 +1443,7 @@ class Normaliser:
     # remove, and `__call__`'s docstring two screens below says so in as many
     # words about a different failure.
     #
-    # dream.doll and proto.pilot both landed on it. proto.pilot flagged their own
+    # Dream Doll and proto.pilot both landed on it. proto.pilot flagged their own
     # evidence as the weaker of the two and were right to: they watched isort bind
     # from `~/.local/bin` and its version matched the pin, so the failing case
     # never actually ran. It is a reading rather than an observed mismatch.
@@ -2110,7 +2110,7 @@ def main() -> int:
         #: Conflicts that a run of the tree's own formatters over both rendered
         #: sides would have resolved. Reported, never acted on without the flag.
         formatting_only: List[str] = []
-        #: Conflicted files where the template changed comments alone. See `touches_code`.
+        #: Merged or conflicted files where the template changed comments alone. See `touches_code`.
         comment_only: List[str] = []
         #: What `render_dirt` found in the checkout that renders `ours` — the
         #: same predicate the warning and the refusal use, published so a
@@ -2162,7 +2162,7 @@ def main() -> int:
         # Everything the first run applied still differs from the base the
         # second run has not yet replaced, so it is listed as the reader's own
         # divergence — node-zero measured 15 named, 11 of them the previous
-        # run's output; dream.doll saw the same list evaporate on the next dry
+        # run's output; Dream Doll saw the same list evaporate on the next dry
         # run, which is the tell that it was never standing state.
         #
         # So it is computed twice, from one function, and the second call is
@@ -2353,6 +2353,8 @@ def main() -> int:
                     patch.write_text(unified(base, ours, rel), encoding="utf-8")
             else:
                 merged.append(rel)
+                if normaliser.applies(rel) and not touches_code(base, ours):
+                    comment_only.append(rel)
                 if not args.dry_run:
                     live_path.write_text(resolved, encoding="utf-8")
 
@@ -2764,13 +2766,24 @@ def main() -> int:
             say("⚠️ ", f"{len(normaliser.unsupported)} declared formatter(s) could not be run here")
             for hook in normaliser.unsupported:
                 item(hook)
-            touched = [rel for rel in merged + conflicted if normaliser.applies(rel)]
-            if touched:
-                detail("So these were merged without them — the formatters that did run, ran:")
-                for rel in touched:
-                    item(rel)
-            else:
-                detail("No file this run merged is one those formatters read, so nothing was affected.")
+            # **Scoped by the same predicate as the plain path, and it was not.**
+            # node-zero's v0.32.0 replay: a comment-only `paths.py` conflict was listed
+            # here as "merged without them" while the run without the flag, on the
+            # same clone, said the formatter did not bear on it — two paths
+            # disagreeing about one file, and this one saying "merged" about a file
+            # it had just reported as conflicted. `comment_only` is what both read.
+            bearing = [rel for rel in merged + conflicted if normaliser.applies(rel) and rel not in comment_only]
+            for label, group in (
+                ("Merged without them, so formatting there is unnormalised:", [r for r in bearing if r in merged]),
+                ("Conflicted, and they may be part of why:", [r for r in bearing if r in conflicted]),
+            ):
+                if group:
+                    detail(label)
+                    for rel in group:
+                        item(rel)
+            if not bearing:
+                detail("None of them bears on this run: no file it merged or left conflicted is one those")
+                detail("formatters would change beyond comments.")
             detail("A version above is a pin in .pre-commit-config.yaml against the binary this run")
             detail("found — the tree's .venv/bin first, then PATH. A .venv rebuilt from")
             detail("scripts/requirements.txt, at the pinned versions, makes them runnable.")
@@ -2871,7 +2884,7 @@ def main() -> int:
             # of a file somebody edited on purpose and false of one that simply
             # never received a template change — the ordinary state of a tree
             # scaffolded over an existing app, where the adopter's file was there
-            # first. dream.doll's forked `eslint.config.js` lacked the `tmp/**`
+            # first. Dream Doll's forked `eslint.config.js` lacked the `tmp/**`
             # ignore the template has shipped since v0.1.0; following the report
             # meant trusting it, and their lint gate failed. A sidecar is written
             # only on conflict, so a file the template did not touch this release
@@ -2962,7 +2975,7 @@ def main() -> int:
             #
             # Six trees split exactly along that seam. proto.pilot named five
             # with two genuine adoptions and asked for it not to be tightened;
-            # dream.doll named four of fourteen with no false positives; sky.boss
+            # Dream Doll named four of fourteen with no false positives; sky.boss
             # named four with zero adoptions and read it as noise. All four are
             # the same predicate behaving correctly and one label being wrong for
             # two of them.
@@ -3149,7 +3162,17 @@ def main() -> int:
             # the most reassuring one this tool prints. Reported by stash.flow,
             # at base v0.6.0 against skeletor v0.6.1, which is exactly the pair
             # the sentence could not distinguish.
-            say("✅", f"already current with skeletor @ {head_ref} — nothing to carry over")
+            if advanced:
+                # **The run that moved the record says it moved it.** Since v0.32.0 a
+                # re-run leaves already-applied files out of every list, so a
+                # `--ported` run whose work was all done by the run before it has
+                # nothing to list — and printed "already current … nothing to carry
+                # over" on the same run that rewrote the manifest. proto.pilot saw it
+                # replaying v0.30.0: true about the files, silent about the record.
+                say("✅", f"recorded: this tree's base is now skeletor @ {head_ref} — nothing further to carry")
+                detail("The files already carried this release; this run moved the manifest to match.")
+            else:
+                say("✅", f"already current with skeletor @ {head_ref} — nothing to carry over")
             if not _WARNED_DIRTY and head_ref.endswith("-dirty"):
                 # The suffix without the hazard. `-dirty` is the most prominent
                 # token in the one line this round agrees reads as a settled
