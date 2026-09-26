@@ -5491,3 +5491,22 @@ arguments in a string for one release, and sky.boss's own script, importing it,
 broke at run time. It is one argument again — `<boundary>..HEAD`, exact when one
 boundary dominates — and a tree test pins the contract by what `git log` of the
 value lists, not by the spelling.
+
+## The values were right and everything explaining them was not
+
+Three trees ran `default_range()` in v0.34.0 and every return value was correct
+for the case they ran. What they filed was the prose around it: a docstring still
+calling `HEAD --not --remotes` exactly what a first push sends, after the code
+stopped returning it; a comment describing the all-pushed case as the unrelated
+one; and a bare `HEAD` for a remote with no shared history — all of history,
+printed as though it were one commit, in exactly the scaffold-over-an-app case
+the same docstring said should get HEAD alone. The code answered the question and
+the words answered the previous version of it. Both ends are tested now, by what
+`git log` of the value lists.
+
+And two exemptions that each worked alone did not compose: a file with a seam
+append *and* formatter-only drift was listed as edited, because each check saw
+the other's difference and gave up (mind.head, measured). They are one comparison
+now — normalise, then cut the space — asked of the base render and the head render
+both, since before a base advances only the head render can see past the
+template's own change.

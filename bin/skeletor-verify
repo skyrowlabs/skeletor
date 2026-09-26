@@ -100,6 +100,21 @@ def load_tool(path: Path, name: str):
     return module
 
 
+def must_scaffold(cmd: List[str], cwd: Path) -> None:
+    """Run a fixture scaffold, and stop with the scaffolder's own words if it refused.
+
+    Seven fixture scaffolds discarded `skeletor-new`'s exit code. A refusal —
+    correct, in the case that surfaced this: a template line one column past the
+    line-length floor — then left no tree, and the next command in the gate died
+    with `FileNotFoundError` on a temp path, taking the verifier down and saying
+    nothing about why. `dirty_ref_gate` hit it; the sweep that found the other six
+    is an `ast` walk for `run([... skeletor-new ...])` whose value is dropped.
+    """
+    code, output = run(cmd, cwd=cwd)
+    if code != 0:
+        raise SystemExit(f"❌ a fixture scaffold was refused, so the gate using it cannot run:\n{output[-2000:]}")
+
+
 def load_scaffolder():
     """Import ``bin/skeletor-new`` for its TIERS and LANGUAGE_OVERLAYS maps."""
     return load_tool(SCAFFOLDER, "skeletor_new")
@@ -5281,7 +5296,7 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
 
     target = workdir / "pinned-ref" / "probe"
     if not target.exists():
-        run(
+        must_scaffold(
             [sys.executable, str(clean / "bin" / "skeletor-new"), str(target),
              "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--force"],
             cwd=SKELETOR,
@@ -5433,7 +5448,7 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
     stamped = workdir / "pinned-ref-stamped-tree" / "probe"
     if stamped.exists():
         shutil.rmtree(stamped.parent)
-    run(
+    must_scaffold(
         [sys.executable, str(stamped_scratch / "bin" / "skeletor-new"), str(stamped),
          "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--force"],
         cwd=SKELETOR,
@@ -5895,12 +5910,17 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
             marker.write_text(marker.read_text(encoding="utf-8") + "\n# scratch\n", encoding="utf-8")
 
             target = workdir / f"dirty-scaffold-{index}"
-            run(
+            # A tag that refuses these arguments is not a candidate — try the next,
+            # and say so, as `pending_ref_gate`'s search does.
+            refused_code, refused_output = run(
                 [sys.executable, str(old_checkout / "bin" / "skeletor-new"), str(target),
                  "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
                  "--tier", tier, "--language", language, "--force"],
                 cwd=SKELETOR,
             )
+            if refused_code != 0:
+                attempts.append(f"{tag}: its skeletor-new refused this configuration — {refused_output.strip()[-160:]}")
+                continue
             manifest = target / scaffolder.MANIFEST_NAME
             before = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
 
@@ -5959,11 +5979,18 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
     shipped.write_text(shipped.read_text(encoding="utf-8") + "\n<!-- uncommitted -->\n", encoding="utf-8")
 
     second = workdir / "dirty-scaffold-refusal"
-    run(
+    scaffolded, scaffold_output = run(
         [sys.executable, str(clean / "bin" / "skeletor-new"), str(second),
          "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--force"],
         cwd=SKELETOR,
     )
+    # **Read, like every other fixture scaffold now.** An unchecked exit here took
+    # the whole verifier down with a `FileNotFoundError` on this directory — which
+    # is how a template line one column past the floor, refused correctly by the
+    # scaffolder, first surfaced: as a crash naming a temp path.
+    if scaffolded != 0 or not second.exists():
+        return results + [Result("dirty ref: could not scaffold the refusal fixture", False,
+                                 time.time() - started, scaffold_output[-1500:])]
     code, refused = run([sys.executable, str(dirty_clone / "bin" / "skeletor-upgrade"), str(second)], cwd=second)
     dry_code, _ = run(
         [sys.executable, str(dirty_clone / "bin" / "skeletor-upgrade"), str(second), "--dry-run"], cwd=second
@@ -6460,7 +6487,7 @@ def dirty_signals_gate(workdir: Path) -> List[Result]:
         tree = workdir / name / "probe"
         if tree.exists():
             shutil.rmtree(tree.parent)
-        run(
+        must_scaffold(
             [sys.executable, str(checkout / "bin" / "skeletor-new"), str(tree),
              "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
              "--tier", tier, "--language", "python", "--force"],
@@ -6664,7 +6691,7 @@ def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
     tree = workdir / "normalise-tree" / "probe"
     if tree.exists():
         shutil.rmtree(tree.parent)
-    run(
+    must_scaffold(
         [sys.executable, str(scratch / "bin" / "skeletor-new"), str(tree),
          "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--language", "python", "--force"],
         cwd=SKELETOR,
@@ -8218,7 +8245,7 @@ def entangled_gate(workdir: Path) -> List[Result]:
     run(["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(old_checkout), tag], cwd=SKELETOR)
     try:
         target = workdir / "entangled-tree"
-        run(
+        must_scaffold(
             [sys.executable, str(old_checkout / "bin" / "skeletor-new"), str(target),
              "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--force"],
             cwd=SKELETOR,

@@ -628,6 +628,17 @@ def outside_space(text: str) -> str:
     return "".join(lines[: opening[0]] + lines[closing[0] + 1 :])
 
 
+def _same_but_exempt(mine: str, theirs: Optional[str], rel: str, normaliser: Optional["Normaliser"]) -> bool:
+    """Equal once formatting (under `--normalise`) and the seam's own space are set aside."""
+    if theirs is None:
+        return False
+    if normaliser and normaliser.applies(rel):
+        mine, theirs = normaliser(mine, rel), normaliser(theirs, rel)
+    if mine == theirs:
+        return True
+    return SEAM_OPENING in theirs and outside_space(mine) == outside_space(theirs)
+
+
 def standing_divergence(
     target: Path,
     reference: Dict[str, str],
@@ -700,17 +711,22 @@ def standing_divergence(
         head = (head_files or {}).get(rel)
         if head is not None and disk == sha256(head):
             continue
-        source = (render or {}).get(rel)
-        if source is not None:
-            here, there = read(live), read(source)
-            if here is not None and there is not None and SEAM_OPENING in there:
-                if outside_space(here) == outside_space(there):
-                    continue
-        if normaliser and source is not None and normaliser.applies(rel):
-            here, there = read(live), read(source)
-            if here is not None and there is not None:
-                if normaliser(here, rel) == normaliser(there, rel):
-                    continue
+        # **One comparison, with both exemptions applied to both sides**, rather than
+        # two checks that each look past one kind of difference. mind.head measured
+        # the gap: a seam-only append was not listed, formatter-only output was not
+        # listed under `--normalise`, and a file with BOTH was — each check saw the
+        # other's difference and gave up. Normalise first, then cut the space: the
+        # formatter runs on whole files, which is what it would do in the tree.
+        #
+        # Asked of the base render and of the head render both. Before a base
+        # advances, a file this tree already carries differs from the base by the
+        # template's own change, and only the head render can see past that — the
+        # exact-hash check above does it for an untouched file and nothing did it
+        # for one that also holds an append.
+        mine = read(live)
+        candidates = [path for path in ((render or {}).get(rel), (head_files or {}).get(rel)) if path is not None]
+        if mine is not None and any(_same_but_exempt(mine, read(path), rel, normaliser) for path in candidates):
+            continue
         out.append(rel)
     return out
 
