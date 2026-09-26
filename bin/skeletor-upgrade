@@ -1592,6 +1592,60 @@ def unified(base: str, ours: str, rel: str) -> str:
     )
 
 
+def already_applied(base: str, ours: str, theirs: str) -> bool:
+    """Whether `theirs` already carries the template's change from `base` to `ours`.
+
+    Asked before re-merging a file that differs from the base, because a re-run
+    before the base advances meets every file the previous run applied: it was
+    merged into the tree, so it is neither render, so it reads as edited and goes
+    back through the three-way merge. The comment that lived where the merge is
+    called said that merge is clean because both sides already share the hunks.
+    **It is clean, and it is wrong.** `git merge-file` given an insertion one side
+    already contains, next to an edit of the adopter's, inserts it again —
+    sky.boss's `tests/repo_files.py` came out of a `--ported` run with `class
+    GitRefused` defined twice, reported as "merged cleanly", and only pyright's
+    redeclaration check saw it. Reproduced here from the real v0.30.0→v0.31.0
+    change with one adopter edit to the import line above it.
+
+    **Context-free, and the first version was not.** It asked whether the
+    template's patch reverse-applies with exact context — and the adopter edit
+    that makes the merge duplicate is, by construction, in that context, so the
+    check answered no in exactly the case it existed for. What is asked instead:
+    every block the template added is present at least as often as the template
+    has it, and every line it removed is down to the template's count. Additions
+    are blocks because placement is what an insertion is; removals are lines,
+    because an edit inside a deleted block must not hide the rest of it. Blank-only
+    changes say nothing either way; a change made only of them is merged.
+    """
+    import difflib
+
+    if base == ours:
+        return False
+    old, new = base.splitlines(keepends=True), ours.splitlines(keepends=True)
+    decided = False
+    for tag, low, high, low2, high2 in difflib.SequenceMatcher(a=old, b=new, autojunk=False).get_opcodes():
+        if tag in ("insert", "replace"):
+            added = "".join(new[low2:high2])
+            if added.strip():
+                decided = True
+                if theirs.count(added) < ours.count(added):
+                    return False
+        if tag in ("delete", "replace"):
+            # **Line by line, never as a block.** An adopter who edited one line
+            # inside a block the template deletes leaves the rest of that block in
+            # their file, and an exact-block search then finds nothing and calls
+            # the removal done. That is the false positive that costs most — a
+            # real conflict skipped in silence — and `moved_symbol_gate` caught it
+            # on the first grid: the adopter annotated a `def`, the template moved
+            # the function out, and the kept copy stopped being reported.
+            theirs_lines, ours_lines = theirs.splitlines(keepends=True), new
+            for line in {line for line in old[low:high] if line.strip()}:
+                decided = True
+                if theirs_lines.count(line) > ours_lines.count(line):
+                    return False
+    return decided
+
+
 def touches_code(base: str, ours: str) -> bool:
     """Whether the template's change to a python file touches anything but comments.
 
@@ -2193,7 +2247,7 @@ def main() -> int:
                     # different hash is an edit, no entry at all is a collision.
                     if theirs != ours:
                         collided.append(rel)
-                        if not args.dry_run:
+                        if not (args.dry_run or args.ported):
                             sidecar = patches / f"{rel}.new"
                             sidecar.parent.mkdir(parents=True, exist_ok=True)
                             sidecar.write_text(ours, encoding="utf-8")
@@ -2246,7 +2300,7 @@ def main() -> int:
                         live_path.write_text(ours, encoding="utf-8")
                     continue
                 conflicted.append(rel)
-                if not args.dry_run:
+                if not (args.dry_run or args.ported):
                     sidecar = patches / f"{rel}.new"
                     sidecar.parent.mkdir(parents=True, exist_ok=True)
                     sidecar.write_text(ours, encoding="utf-8")
@@ -2268,6 +2322,13 @@ def main() -> int:
                     live_path.write_text(ours, encoding="utf-8")
                 continue
 
+            # Already there, so there is nothing to carry. The first is a file an
+            # earlier run replaced wholesale — sky.boss's seven untouched files were
+            # listed as "merged cleanly" while equal to the template. The second is a
+            # file an earlier run MERGED, which re-merging can duplicate into.
+            if theirs == ours or already_applied(base, ours, theirs):
+                continue
+
             resolved = merge(base, theirs, ours, workdir)
             if resolved is None:
                 conflicted.append(rel)
@@ -2281,7 +2342,12 @@ def main() -> int:
                 if normaliser and not args.normalise and normaliser.applies(rel):
                     if merge(normaliser(base, rel), theirs, normaliser(ours, rel), workdir) is not None:
                         formatting_only.append(rel)
-                if not args.dry_run:
+                # **Not on `--ported`.** That run records these as resolved, so a
+                # fresh sidecar beside one is a plan for work already done — and the
+                # tree's seam check reads any sidecar as pending and says port it
+                # first, which would send somebody to redo a finished merge.
+                # proto.pilot measured the write and read the consequence.
+                if not (args.dry_run or args.ported):
                     patch = patches / f"{rel}.patch"
                     patch.parent.mkdir(parents=True, exist_ok=True)
                     patch.write_text(unified(base, ours, rel), encoding="utf-8")
@@ -2585,10 +2651,9 @@ def main() -> int:
                 item(rel)
             detail()
             detail("These were listed above as taken on trust. They still differ from the")
-            detail("template, which is expected: that is the port. What tmp/upgrade/ holds for")
-            detail("each is the template's change you resolved against — a record of what you")
-            detail("already decided, not work still owed. Re-running will NOT regenerate it, and")
-            detail("the next real run clears the directory.")
+            detail("template, which is expected: that is the port. No sidecar was written for")
+            detail("them — tmp/upgrade/ is cleared by every real run, and a fresh plan beside a")
+            detail("file you have already ported would read as work still owed.")
         elif conflicted:
             say("❌", f"{len(conflicted)} file(s) that differ from the template — merge conflicts, LEFT ALONE")
             for rel in conflicted:
@@ -2686,25 +2751,35 @@ def main() -> int:
                 detail()
                 detail("These patches are the only copy. tmp/ is not tracked, and the next real")
                 detail("run clears this directory before writing its own.")
-                if advanced:
-                    detail("--ported already advanced the base past them, so re-running will NOT")
-                    detail("regenerate these: what is in tmp/upgrade/ now is the last copy there is.")
-                else:
-                    detail("Port them before then, or re-run to regenerate them. The base stays")
-                    detail("where it is until they are gone, so nothing expires while you decide.")
+                # Only the held-back half can reach here: a run that advanced
+                # reports its conflicts as recorded, above, and writes no sidecar.
+                detail("Port them before then, or re-run to regenerate them. The base stays")
+                detail("where it is until they are gone, so nothing expires while you decide.")
 
         if args.normalise and normaliser.unsupported:
+            # **The same two fixes the path without the flag got in v0.31.0, which
+            # stopped there.** node-zero ran it: with `--normalise` and an old venv
+            # this said "those files were merged unnormalised" with no file named, no
+            # scoping and no way out. "Those" had no referent.
             say("⚠️ ", f"{len(normaliser.unsupported)} declared formatter(s) could not be run here")
             for hook in normaliser.unsupported:
                 item(hook)
-            detail("Those files were merged unnormalised. Silence about a tool is not coverage by it.")
+            touched = [rel for rel in merged + conflicted if normaliser.applies(rel)]
+            if touched:
+                detail("So these were merged without them — the formatters that did run, ran:")
+                for rel in touched:
+                    item(rel)
+            else:
+                detail("No file this run merged is one those formatters read, so nothing was affected.")
+            detail("A version above is a pin in .pre-commit-config.yaml against the binary this run")
+            detail("found — the tree's .venv/bin first, then PATH. A .venv rebuilt from")
+            detail("scripts/requirements.txt, at the pinned versions, makes them runnable.")
 
         if collided and advanced:
             say("✅", f"{len(collided)} collided file(s) recorded as resolved — the base advanced past them")
             for rel in collided:
                 item(rel)
-            detail("Yours stands where it was; the template's is in tmp/upgrade/<path>.new, as a")
-            detail("record of what you chose between rather than a decision still open.")
+            detail("Yours stands where it was. No sidecar was written: the choice is recorded.")
         elif collided:
             say("❌", f"{len(collided)} file(s) you already had where the template now ships one")
             for rel in collided:
@@ -3225,7 +3300,11 @@ def main() -> int:
                 )
         else:
             say("✅", "nothing was committed. Read the diff, then commit as one `chore(skeletor):` change")
-        return 1 if (conflicted or collided) else 0
+        # A `--ported` run that advanced has recorded its conflicts as resolved, which
+        # is the success it exists for; exiting 1 there reported the port as a
+        # failure to every caller that reads a status. mind.head saw it: a run that
+        # did record the value, and exited 1.
+        return 1 if (conflicted or collided) and not advanced else 0
     finally:
         for leftover in cleanup_worktrees:
             subprocess.run(

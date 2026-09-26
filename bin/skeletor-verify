@@ -7485,18 +7485,27 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
                 f"the adopter's line is never at the template's insertion point, and the run before this "
                 f"one merged the same file cleanly. conflicted={again.get('conflicted')}"
             )
-        if label == "blank-line" and not reconflicted:
+        # **The control changed sides in v0.32.0, and the reason is the tool, not the
+        # fixture.** The blank-line append used to re-conflict here, which is what
+        # made the pair discriminate — and that re-conflict was a re-merge of a
+        # change the first run had already applied. `already_applied` now answers
+        # before the merge, so a re-run neither conflicts on nor re-merges a file
+        # that carries the change, wherever the adopter's line sits. The region
+        # still owns the first merge and the static promise asserted above; this
+        # tree now asserts the re-run half on a real upgrade, and
+        # `already_applied_gate` owns the discrimination — it requires the hazard
+        # to reproduce before it believes the predicate.
+        if label == "blank-line" and (reconflicted or paths_rel in (again.get("merged") or [])):
             rerun_problems.append(
-                f"the one-blank-line append did NOT re-conflict, so this pair does not discriminate: "
-                f"the "
-                f"region's clean re-run proves nothing when the spelling it replaces is also clean. "
-                f"Upstream's edit is not landing where the adopter's line sits. "
-                f"conflicted={again.get('conflicted')}"
+                f"the blank-line tree's re-run touched {paths_rel} again, which the first run had already "
+                f"merged cleanly: a change that is already there was merged a second time, the shape that "
+                f"duplicated `class GitRefused` in sky.boss's tree. conflicted={again.get('conflicted')} "
+                f"merged={again.get('merged')}"
             )
 
     results.append(
         Result(
-            f"append seam: a region append survives a re-run before the base advances, a blank-line one does not",
+            f"append seam: a re-run before the base advances does not re-merge what the first run applied",
             not rerun_problems,
             0.0,
             "\n".join(rerun_problems),
@@ -9177,6 +9186,77 @@ def shared_helper_api_gate() -> List[Result]:
     return results
 
 
+def already_applied_gate() -> Result:
+    """A re-run does not merge a template change into a file that already has it.
+
+    sky.boss's `--ported` run wrote `class GitRefused` into `tests/repo_files.py`
+    twice and reported "merged cleanly": the previous run had merged v0.31.0's
+    change in, the base had not advanced, and the second three-way merge put the
+    insertion in again. `bin/skeletor-upgrade`'s `already_applied` now answers
+    first. Two claims, each needing its own evidence:
+
+    * **the hazard is real in this fixture** — the real v0.30.0→v0.31.0 change to
+      `tests/repo_files.py`, with one adopter edit on the import line above it,
+      merged once and then again, must duplicate. Without that, a green
+      `already_applied` here proves nothing, since a file nobody could duplicate
+      into is one any predicate passes;
+    * **it never skips a change that is not there.** Over every consecutive pair
+      of released tags, the old render of each changed template file must NOT
+      read as already carrying the new one. A false positive is the expensive
+      direction — a template change silently not delivered — so it is swept over
+      every change this repository has released, not sampled.
+    """
+    started = time.time()
+    upgrader = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade_applied")
+    rel = "template/core/tests/repo_files.py"
+    shown = {tag: run(["git", "show", f"{tag}:{rel}"], cwd=SKELETOR) for tag in ("v0.30.0", "v0.31.0")}
+    if any(code != 0 for code, _ in shown.values()):
+        return Result("already-applied: the v0.30.0/v0.31.0 fixture is not in this checkout's tags", False,
+                      time.time() - started, "")
+    base, ours = shown["v0.30.0"][1], shown["v0.31.0"][1]
+    anchor = "from scripts.paths import NARRATIVE, PROJECT_ROOT  # noqa: E402"
+    theirs = base.replace(anchor, anchor.replace("PROJECT_ROOT", "PROJECT_ROOT, TMP_DIR"), 1)
+    problems = []
+    if theirs == base:
+        problems.append("the adopter edit did not land: the anchor line is not in the v0.30.0 render")
+    with tempfile.TemporaryDirectory(prefix="skeletor-applied-") as scratch:
+        once = upgrader.merge(base, theirs, ours, Path(scratch))
+        twice = upgrader.merge(base, once, ours, Path(scratch)) if once else None
+    if not once or not twice or twice.count("class GitRefused") < 2:
+        problems.append("the hazard did not reproduce — a second merge no longer duplicates — so the "
+                        "assertion below would pass on a fixture nothing can go wrong in")
+    elif not upgrader.already_applied(base, ours, once):
+        problems.append("already_applied says no to a file the previous run merged v0.31.0 into")
+    # The removal half, which the first version got wrong: an adopter edit INSIDE a
+    # block the template deletes must not hide the rest of it. moved_symbol_gate
+    # found it — an annotated `def` whose function the template moved out.
+    old_def = "import os\n\n\ndef moved(x):\n    y = x + 1\n    return y\n\n\nkept = 1\n"
+    removed = "import os\n\n\nkept = 1\n"
+    annotated = old_def.replace("def moved(x):", "def moved(x):  # adopter: ours")
+    if upgrader.already_applied(old_def, removed, annotated):
+        problems.append("a file still holding an edited copy of a block the template deleted reads as applied")
+    if not upgrader.already_applied(old_def, removed, removed):
+        problems.append("a file the deletion was applied to does not read as applied")
+    tags = [tag for tag in run(["git", "tag", "--sort=v:refname"], cwd=SKELETOR)[1].split() if tag.startswith("v")]
+    swept = 0
+    for old, new in zip(tags, tags[1:]):
+        for path in run(["git", "diff", "--name-only", old, new, "--", "template"], cwd=SKELETOR)[1].split():
+            before, after = run(["git", "show", f"{old}:{path}"], cwd=SKELETOR), run(["git", "show", f"{new}:{path}"], cwd=SKELETOR)
+            if before[0] or after[0]:
+                continue
+            swept += 1
+            if upgrader.already_applied(before[1], after[1], before[1]):
+                problems.append(f"{old}→{new} {path}: the old render reads as already carrying the new one")
+    if swept < 50:
+        problems.append(f"swept only {swept} released changes; the sweep is not finding the history")
+    return Result(
+        f"already-applied: a merged change is recognised, and no released change is skipped ({swept} swept)",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
+
+
 def template_comment_names_gate() -> Result:
     """No template comment cites a name the template once defined and no longer does.
 
@@ -9211,7 +9291,12 @@ def template_comment_names_gate() -> Result:
     for where, symbol in cites:
         if symbol in live:
             continue
-        _, history = run(["git", "log", "--all", "-S", f"def {symbol}", "--oneline", "--", "template"], cwd=SKELETOR)
+        # Anchored, as the tree's own predicate is: `-S "def str"` matches
+        # `def structured`. proto.pilot hit that in the tree.
+        history = "".join(
+            run(["git", "log", "--all", "-G", pattern, "--oneline", "--", "template"], cwd=SKELETOR)[1]
+            for pattern in (f"def {symbol}\\(", f"class {symbol}[(:]")
+        )
         if history.strip():
             stale.append(f"{where}: `{symbol}` — defined once in template/, and nowhere now")
     return Result(
@@ -10095,6 +10180,7 @@ def main() -> int:
         results.append(identity_gate())
         results += checkout_path_literal_gate()
         results.append(template_comment_names_gate())
+        results.append(already_applied_gate())
         results += upstream_record_gate()
         results += shared_helper_api_gate()
         results += maintain_summary_gate()

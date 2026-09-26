@@ -5370,3 +5370,63 @@ note went into the closing block — which the opening block promises skeletor n
 rewrites, and which sits at the lower edge of every adopter's space. It went into
 the ordinary prose above instead, with the reason. A promise of immutability is
 also a promise to be wrong in place.
+
+## The fix code had the shape it was written to fix
+
+The v0.31.0 round confirmed eleven fixes by planting each defect again — and
+filed five defects in the fix code itself, three of them one shape.
+
+**`test_scratch_is_not_linted` read spelling.** It accepted eslint's ignore only
+as the literal `'tmp/**'`, and dream.doll's `'tmp'` — which eslint honours; they
+planted a file with errors and it was skipped — failed the tree whose incident the
+test was written for, after that tree had fixed it. It keyed black on
+`pyproject.toml` existing, and failed mind.head's ruff-and-mypy tree, where both
+tools measurably skip `tmp/`. And black skips `tmp/` because it honours
+`.gitignore`, so the `extend-exclude` line it required was not the deciding value
+either. Three readings of a declaration, three wrong answers, with the behaviour
+one call away each time. It now runs each walker over a planted probe and asks
+whether the output names it. Which tools walk is discovered from the tree's own
+`check lint`; eslint is asked where it is installed and *read* — labelled as a
+reading — where it is not.
+
+**`was_ever_ours` matched a prefix.** `-S "def str"` found `def structured`. The
+self-test could not have seen it: `os.getenv` is a prefix of nothing in its
+fixture — *the example you reach for first cannot discriminate*, again. `-G`,
+anchored on what follows a definition, and the self-test now carries the prefix.
+
+**`--ported` re-merged what the previous run had merged.** The comment beside the
+merge said a re-merge is clean because both sides share the hunks. It is clean,
+and it duplicated `class GitRefused` in sky.boss's tree, which only pyright saw.
+Reproduced here from the real v0.30.0→v0.31.0 change with one adopter edit on
+the import line. The first `already_applied` asked whether the template's patch
+reverse-applies with exact context, and the adopter edit that makes the merge
+duplicate is *in that context by construction* — so it said no in exactly the
+case it existed for. The one that shipped is context-free: every block the
+template added is present at least as often, every block it removed is gone.
+`already_applied_gate` holds both directions — the hazard must reproduce, and no
+change across 303 released file changes may read as already applied, because a
+false positive is a template change silently not delivered.
+
+The same run also wrote fresh sidecars for files it was recording as resolved,
+which the seam check then read as pending. A `--ported` run writes none now, and
+exits 0 when it advances — mind.head saw exit 1 on a run that had recorded.
+
+**And the retraction sweep missed twice.** Two pin files still called
+`.pre-commit-config.yaml` canonical (node-zero, sky.boss), and *a frozen rule with
+nothing below it* survived above its own retraction (proto.pilot, by searching the
+claim's words rather than the sentence it had quoted). Both were sweeps over the
+enforcing sites and the quoted text. The sweep that finds them is over the
+**claim**, in every file a reader opens to act on it.
+
+**The first grid over that work caught two more, both in it.** `already_applied`
+compared a deleted block as one string, so an adopter who had annotated one line
+of a function the template moved out read as already carrying the removal —
+the expensive direction, a real conflict skipped in silence. `moved_symbol_gate`
+went red on it, a gate written for a different defect. Removals are per line now,
+and `already_applied_gate` carries that case. And rendering the CI matrix into
+`cli/check.py` for the interpreter notice made `--python-ceiling` reach a second
+file; `set-arg`'s declined-every-file gate went red, and the notice reads the
+matrix from `ci.yml` instead. The blank-line control in `append_seam_gate`
+stopped re-conflicting too, which was the fix working: that re-conflict *was* a
+re-merge of an applied change. The control now asserts the re-run leaves the file
+alone, and the discrimination moved to the gate that requires the hazard first.
