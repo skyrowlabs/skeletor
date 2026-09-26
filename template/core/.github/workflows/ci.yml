@@ -213,8 +213,8 @@ jobs:
         with:
           python-version: '{{PY}}'
 
-      # Pinned to the SAME versions as .pre-commit-config.yaml, which is the
-      # source of truth. tests/test_lint_tool_parity.py fails if they diverge.
+      # Pinned to the SAME versions as .pre-commit-config.yaml; neither file is
+      # canonical. tests/test_lint_tool_parity.py fails if they diverge.
       - name: Install lint toolchain
         run: pip install -r scripts/requirements.txt
 

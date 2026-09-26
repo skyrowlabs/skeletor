@@ -5321,3 +5321,52 @@ a gate that could not report its own inability to reach a branch.
 `template/` or `bin/` edit made *while the grid runs* is picked up by the
 configurations scaffolded after it and not by the ones before. The verdict is then
 mixed, and a mixed green is indistinguishable from a clean one. Edit, then run.
+
+## Half of an invitation, checked by parsing
+
+v0.30.0 gave adopters a bounded space and told them what goes in it: *"appends,
+and any prose you write about them."* The check that holds it parses the file, and
+a comment is not in a parse — so the release held half of its own sentence.
+proto.pilot planted a paragraph directly above the opening rule and their 732-test
+suite passed; stash.flow moved a whole comment block out of the space and 227
+passed, the third time they filed the shape. Prose is not decoration here. A
+paragraph against the template's last line is what cost proto.pilot a conflict per
+release for three releases, while their appends were fine throughout.
+
+**A tree cannot tell its comment from the template's by reading it.** Both are `#`
+lines. Who wrote a line is a fact only the scaffolder holds, at the one moment it
+is writing — so it records it: `scripts/seams.py --write` runs as a post-copy step
+and digests every comment line outside each seam's space into
+`scripts/seam_prose.json`, and the tree's test names each comment it does not
+recognise. That record is a second home for a fact, which this project normally
+refuses; it earns the place the way `.skeletor.json`'s hashes do, by being checked
+against its source on every run, and by never being written by hand.
+
+Two things fell out of the same record. A seam file an upgrade could not merge
+holds the previous release's prose, which now reads as *not the template's* — so
+the test looks for an upgrade sidecar beside the file and, when there is one, says
+port that first. That was proto.pilot's `seam-gate-omits-the-port-remedy`, and the
+same helper now fronts the missing-rules message it was filed against. And the
+fixture problem: both sides of the comparison come from one call on one tree, so a
+fresh scaffold is green by construction. `check_seam_prose_is_held` in
+`bin/skeletor-verify` is the independent end — a comment planted above the opening
+rule must be named by line, the same comment inside the space must pass, and a
+planted sidecar must bring the port remedy.
+
+**The instructions had the same defect one level up, found from both ends.** The
+enforcing assertions interpolated both rules; the instructing messages — the ones
+that say where to put a line — interpolated the opening rule alone, and the seam
+prose still said *below the rule* in four places, one of them sitting above the
+closing rule's retraction of exactly that claim. stash.flow followed a test message
+literally and was failed by the placement check for obeying it; proto.pilot found
+the prose. stash.flow's sentence is the one to keep: *interpolating a constant
+makes a value un-stale and says nothing about completeness. When a mechanism gains
+a boundary, the sweep is over every consumer of the old one, not just the
+enforcing ones.*
+
+**A frozen block cannot carry a correction.** proto.pilot showed the lower edge was
+live in their tree, not latent as the closing block says. The first draft of that
+note went into the closing block — which the opening block promises skeletor never
+rewrites, and which sits at the lower edge of every adopter's space. It went into
+the ordinary prose above instead, with the reason. A promise of immutability is
+also a promise to be wrong in place.

@@ -682,6 +682,7 @@ def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     results += pyright_gate(tree, venv_python, pyright_ok)
     results += actionlint_gate(tree, venv_python.parent)
     results += informational_step_gate(tree, venv_python.parent)
+    results.append(check_seam_prose_is_held(tree, venv_python))
     # Last, because it is the only gate here that WRITES into the tree — a
     # module and a test of its own, to move the one variable the refusal turns
     # on. It puts them back, and running it after everything else means a
@@ -2125,6 +2126,99 @@ def check_empty_suite_is_not_red(tree: Path, venv_python: Path) -> List[Result]:
         code, output = run([f"./{CLI_NAME}", "test", marker], cwd=tree)
         results.append(Result(f"test {marker} on an empty suite", code == 0, time.time() - started, output))
     return results
+
+
+def check_seam_prose_is_held(tree: Path, venv_python: Path) -> Result:
+    """A comment outside a seam's space is reported, one inside it is not — in every seam.
+
+    The tree's `test_your_prose_is_inside_your_own_space` compares the seam files
+    against `scripts/seam_prose.json`, and **both sides of that comparison come
+    from one call on one tree**: the scaffolder ran `scripts/seams.py --write` over
+    the files the test then reads. A fresh tree is green by construction, so its
+    green says nothing about whether the check can see anything. The plants are
+    the independent end of the chain.
+
+    Three per seam file, found from the record rather than named, so a third seam
+    is planted in by arriving:
+
+    * a comment directly above the opening rule — the position proto.pilot
+      planted, sitting against the template's last line of prose — must turn the
+      test red **and name that line**, because red for another reason is a plant
+      caught by something else;
+    * the same comment inside the space must leave it green, or the check is
+      refusing the thing the invitation asks for;
+    * the first plant again with an upgrade's patch sidecar beside the file must
+      name the port remedy, which is what proto.pilot's pending-conflict state
+      needs instead of an instruction to move lines that are the template's.
+
+    Each plant asserts it landed before believing the verdict.
+    """
+    started = time.time()
+    record = tree / "scripts" / "seam_prose.json"
+    if not record.exists():
+        return Result("seam prose: scripts/seam_prose.json was not written", False, time.time() - started, "")
+    seams = sorted(json.loads(record.read_text(encoding="utf-8"))["seams"])
+    opening = "# ── " + " ".join(("Nothing below", "this line is", "skeletor's"))
+    problems: List[str] = []
+
+    def verdict() -> Tuple[int, str]:
+        return run(
+            [str(venv_python), "-m", "pytest", "-q", "tests/test_narrative_covers_lifecycle_folders.py",
+             "-k", "prose"],
+            cwd=tree, env_extra={"PYTHONPATH": str(tree)},
+        )
+
+    for rel in seams:
+        path = tree / rel
+        original = path.read_text(encoding="utf-8")
+        lines = original.splitlines(keepends=True)
+        rule = next((i for i, line in enumerate(lines) if line.startswith(opening)), None)
+        if rule is None:
+            problems.append(f"{rel}: recorded as a seam and carries no opening rule")
+            continue
+        space = rule
+        while space < len(lines) and lines[space].startswith("#"):
+            space += 1
+        note = "# skeletor-verify: an adopter's note about their append\n"
+        sidecar = tree / "tmp" / "upgrade" / f"{rel}.patch"
+        for label, at, pending, want_red in (
+            ("above the opening rule", rule, False, True),
+            ("inside the space", space + 1, False, False),
+            ("above the opening rule, upgrade pending", rule, True, True),
+        ):
+            planted = lines[:at] + [note] + lines[at:]
+            try:
+                path.write_text("".join(planted), encoding="utf-8")
+                if note not in path.read_text(encoding="utf-8"):
+                    problems.append(f"{rel} {label}: the plant did not land")
+                    continue
+                if pending:
+                    sidecar.parent.mkdir(parents=True, exist_ok=True)
+                    sidecar.write_text("planted\n", encoding="utf-8")
+                code, output = verdict()
+                named = f"{rel}:{at + 1}:" in output
+                if want_red and (code == 0 or not named):
+                    problems.append(f"{rel} {label}: expected red naming line {at + 1}, got rc={code}\n{output[-800:]}")
+                if not want_red and code != 0:
+                    problems.append(f"{rel} {label}: expected green, got rc={code}\n{output[-800:]}")
+                if pending and "port first" not in output:
+                    problems.append(f"{rel} {label}: the port remedy was not named\n{output[-800:]}")
+            finally:
+                path.write_text(original, encoding="utf-8")
+                if sidecar.exists():
+                    sidecar.unlink()
+    # Only what this gate created: a directory left empty by the unlinks above.
+    for leftover in sorted((tree / "tmp" / "upgrade").rglob("*"), reverse=True) if (tree / "tmp" / "upgrade").exists() else []:
+        if leftover.is_dir() and not any(leftover.iterdir()):
+            leftover.rmdir()
+    if not seams:
+        problems.append("the record names no seam file, so every plant above covered nothing")
+    return Result(
+        f"seam prose: a comment outside the space is named, inside it is not ({len(seams)} seam(s))",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
 
 
 def check_the_baseline_is_refused_on_a_fresh_tree(tree: Path, venv_python: Path) -> List[Result]:
@@ -7913,21 +8007,34 @@ def ported_only_conflict_gate(workdir: Path) -> List[Result]:
     if not scratch.exists():
         run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(scratch)], cwd=workdir)
 
+    refused: List[str] = []
+
     def scaffold(name: str) -> Path:
         tree = workdir / name / "probe"
         if tree.exists():
             shutil.rmtree(tree.parent)
-        run(
+        # **The exit code is read.** It was not, and a refused scaffold surfaced
+        # as a `FileNotFoundError` on `.skeletor.json` naming a temp path — the
+        # whole verifier down, forty checks lost, and nothing saying the
+        # scaffolder had refused or why. `pending_ref_gate` had the same shape
+        # fixed a round earlier; the unchecked-subprocess class is
+        # `post_copy_steps`'s, met again inside the instrument.
+        code, output = run(
             [sys.executable, str(scratch / "bin" / "skeletor-new"), str(tree),
              "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
              "--tier", tier, "--language", language, "--force"],
             cwd=SKELETOR,
         )
+        if code != 0 or not (tree / scaffolder.MANIFEST_NAME).exists():
+            refused.append(f"{name}: skeletor-new exited {code}\n{output[-1500:]}")
         return tree
 
     # Both trees are scaffolded BEFORE the scratch commit, so their recorded ref
     # is the pre-scratch HEAD and the base render resolves to it.
     taken, left = scaffold("ported-only-taken"), scaffold("ported-only-left")
+    if refused:
+        return [Result("ported-only: could not scaffold the fixture trees", False, time.time() - started,
+                       "\n".join(refused))]
 
     # The file to diverge on is derived, not named: any markdown the core overlay
     # ships that this configuration renders. A path written into this gate would
@@ -7974,8 +8081,11 @@ def ported_only_conflict_gate(workdir: Path) -> List[Result]:
     # happened to add a file as well would put an `added` in the batch, the guard
     # would be true for the ordinary reason, and every assertion below would pass
     # against the scenario this gate exists to avoid.
-    if "LEFT ALONE" not in with_flag:
-        problems.append(f"the plant did not conflict — {subject} was not left alone:\n{with_flag}")
+    # A `--ported` run reports its conflicts as recorded rather than as LEFT ALONE
+    # — the same file named twice in contradictory terms read as a lost port — so
+    # the plant is confirmed by the trust line that lists it.
+    if "on trust" not in with_flag or subject not in with_flag.split("on trust", 1)[1]:
+        problems.append(f"the plant did not conflict — {subject} was not taken on trust:\n{with_flag}")
     for word in ("added", "updated", "merged cleanly"):
         if f") {word}" in with_flag:
             problems.append(f"the plant applied something — {word} — so the guard is true for the ordinary reason")
@@ -7985,7 +8095,7 @@ def ported_only_conflict_gate(workdir: Path) -> List[Result]:
                 f"--ported left the manifest at {before} with a conflict as the only pending work; "
                 f"the head render is {head_ref} and the run said it had advanced"
             )
-        if "already advanced the base" in with_flag and ref_of(taken) == before:
+        if "the base advanced past them" in with_flag and ref_of(taken) == before:
             problems.append("the claim and the deed disagree: it announced an advance it did not perform")
         # The other half of the same defect. The instruction naming `--ported`
         # lives on the branch that holds the base back, which before this fix
@@ -8516,9 +8626,13 @@ def declined_gate(tier: str, workdir: Path) -> List[Result]:
     sidecars = tree / "tmp" / "upgrade"
     results.append(
         Result(
-            "declined: a decline the template has moved past is itemised, the rest are not",
-            "the template has changed since" in human
-            and moved in human.split("the template has changed since")[1]
+            "declined: every decline is named, and only the one the template moved past is marked",
+            # Every name, because the steady state is where a decline's reason
+            # expires and there the moved subset is empty by construction
+            # (sky.boss); the mark and the sidecar are still the moved one alone.
+            f"{moved}   (the template has changed it since)" in human
+            and dropped in human
+            and f"{dropped}   (the template has changed it since)" not in human
             and (sidecars / f"{moved}.new").exists()
             and not (sidecars / f"{dropped}.new").exists(),
             time.time() - started,
@@ -9061,6 +9175,51 @@ def shared_helper_api_gate() -> List[Result]:
         )
     )
     return results
+
+
+def template_comment_names_gate() -> Result:
+    """No template comment cites a name the template once defined and no longer does.
+
+    The tree's `test_no_source_comment_names_a_callable_we_removed` asks its own
+    git history whether a cited name *was ever ours*. In an adopter's tree the
+    template's history is part of theirs — every upgrade commit carried it — so a
+    template comment still naming a test this repository renamed would turn every
+    adopter red on the upgrade that renamed it, for a line they never wrote. A
+    fresh scaffold has one commit and cannot see it, so no tree in this grid can.
+
+    That is the generator's half, asked here against this repository's history of
+    `template/`: the same pattern, the same resolution (a definition now, or a
+    module's filename), the same predicate. dream.doll's rename — three names for
+    one test in three releases — is the population it exists for.
+    """
+    started = time.time()
+    commented = re.compile(r"`(test_\w+)`|`([A-Za-z_][\w.]*)\(\)`")
+    definition = re.compile(r"^\s*(?:async\s+)?(?:def|class)\s+(\w+)", re.M)
+    sources = sorted((SKELETOR / "template").rglob("*.py"))
+    live = {path.stem for path in sources}
+    cites = []
+    for path in sources:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        live |= set(definition.findall(text))
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                cites += [
+                    (f"{path.relative_to(SKELETOR)}:{lineno}", (m.group(1) or m.group(2)).rsplit(".", 1)[-1])
+                    for m in commented.finditer(line)
+                ]
+    stale = []
+    for where, symbol in cites:
+        if symbol in live:
+            continue
+        _, history = run(["git", "log", "--all", "-S", f"def {symbol}", "--oneline", "--", "template"], cwd=SKELETOR)
+        if history.strip():
+            stale.append(f"{where}: `{symbol}` — defined once in template/, and nowhere now")
+    return Result(
+        f"template comments name no callable the template removed ({len(cites)} cited)",
+        bool(cites) and not stale,
+        time.time() - started,
+        "\n".join(stale) or ("" if cites else "no citation found — the pattern matched nothing, so this checked nothing"),
+    )
 
 
 def checkout_path_literal_gate() -> List[Result]:
@@ -9935,6 +10094,7 @@ def main() -> int:
         results += unlinted_source_gate(workdir)
         results.append(identity_gate())
         results += checkout_path_literal_gate()
+        results.append(template_comment_names_gate())
         results += upstream_record_gate()
         results += shared_helper_api_gate()
         results += maintain_summary_gate()

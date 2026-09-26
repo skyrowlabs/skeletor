@@ -149,7 +149,7 @@ def new(path: str, branch: str, base: str) -> None:
             item("linked .venv (the primary's)")
         else:
             item("did NOT link .venv — this branch's requirements differ from the primary's")
-            detail("  python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt")
+            detail("  python{{PY}} -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt")
 
     (target / "tmp").mkdir(exist_ok=True)
 

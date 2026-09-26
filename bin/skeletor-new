@@ -703,6 +703,20 @@ def post_copy_steps(tree: Path, values: Dict[str, str]) -> None:
     # claimed their keys. A static file in `template/core/` would be right for
     # one tier and quietly wrong for the rest.
     subprocess.run([sys.executable, "scripts/gen_vscode_queries.py"], cwd=str(tree), capture_output=True)
+    # Which comment lines around each append seam are skeletor's. Only this moment
+    # knows — afterwards the tree's own prose and the template's are both `#`
+    # lines — and the tree's seam test needs it to tell an adopter's paragraph
+    # outside the space from the template's. It must run after every overlay has
+    # landed, which is why it is here and not a rendered placeholder.
+    #
+    # **Checked, unlike the two above.** Those ship markers or an index whose
+    # emptiness a tree's own checks catch; a missing record would make the seam
+    # test fail on arrival for a reason no reader could trace to this step.
+    recorded = subprocess.run(
+        [sys.executable, "scripts/seams.py", "--write"], cwd=str(tree), capture_output=True, text=True
+    )
+    if recorded.returncode != 0:
+        raise SystemExit(f"scripts/seams.py --write failed in {tree}:\n{recorded.stdout}{recorded.stderr}")
 
 
 def pristine_post_copy(target: Path, written: List[str], values: Dict[str, str]) -> Dict[str, str]:
