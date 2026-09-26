@@ -205,6 +205,17 @@ hand over an untagged render, `--ref <some-tag>` pins the stamp and
 `--allow-untagged` records the description anyway; both are deliberate, and
 neither is the normal path.
 
+### The runner label moves under every tree, on purpose
+
+Every scaffold's workflows say `runs-on: ubuntu-latest`, and GitHub moves that
+label to **Ubuntu 26 from 2026-10-19** (sky.boss saw the deprecation notice in
+the v0.31.0 round). Left as `latest` by decision, 2026-09-26: a pinned
+`ubuntu-24.04` would be a version nothing here reports — `bin/skeletor-check-pins`
+does not read runner labels — and a pin nobody refreshes ages worse than a label
+that moves. So the pass after 2026-10-19 checks CI across the adopters for a red
+that arrived with the image, not with a commit. If one did, that is the moment to
+decide whether to pin, and to teach `check-pins` about it in the same change.
+
 ---
 
 ## What an agent running this must not do
