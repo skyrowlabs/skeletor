@@ -195,18 +195,20 @@ gh api -X PUT repos/<org>/<slug>/branches/develop/protection \
   -f 'required_status_checks[strict]=false' \
   -f 'required_status_checks[contexts][]=CI Gate' \
   -f 'required_status_checks[contexts][]=Node' \
-  -f 'required_status_checks[contexts][]=pytest 3.12' \
+  -f 'required_status_checks[contexts][]=pytest' \
   -f 'required_status_checks[contexts][]=Integration Tests' \
   -F 'enforce_admins=false' -F 'restrictions=null' \
   -F 'required_pull_request_reviews=null'
 ```
 
-- **The unit-test contexts are named for the interpreter**, one per leg of
-  `ci.yml`'s matrix — `pytest 3.12` above assumes you scaffolded with the
-  default `--python`. If you passed `--python-ceiling`, there are two, and both
-  belong here. Read the names off a run rather than from this page: a required
-  context that never reports blocks every pull request forever, and a typo here
-  is indistinguishable from a job that is not running.
+- **Require `pytest`, never `pytest <version>`.** The matrix legs are named for
+  their interpreter, and on a docs-only change the matrix is skipped before
+  GitHub expands it — so the per-version names never report, and a protection
+  requiring `pytest 3.12` blocks every docs-only pull request forever with every
+  check green. stash.flow's were. `pytest` is one job that `needs:` the matrix
+  and reports whatever it holds: pass when every leg passed or the gate chose
+  docs-only, fail otherwise. **A tree set up from an earlier version of this page
+  requires the per-version names** — change that setting; no file in the tree can.
 - **`Node` is a context on every tree**, including one with no `package.json` —
   it reports, prints a notice and skips its own steps. That is deliberate, and
   it is why requiring it costs nothing.

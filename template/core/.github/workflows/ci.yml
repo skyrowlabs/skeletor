@@ -528,6 +528,40 @@ jobs:
       - name: Skip budget
         run: python scripts/check_skip_budget.py --suite unit
 
+  # ── The unit suite's one name ─────────────────────────────────────────
+  # The matrix above reports once per leg, as `pytest <version>` — and only when
+  # it runs. Skipped by the job-level `if` on a docs-only change, GitHub never
+  # expands the matrix, so it reports ONE check named `pytest ${{ matrix.python }}`
+  # with the expression unexpanded, and a branch protection that requires
+  # `pytest 3.12` waits on it forever. stash.flow's docs-only pull requests were
+  # BLOCKED with every check green or skipped; the other gated jobs are not
+  # matrices, so they report skipped under their real names and pass.
+  #
+  # So protection requires THIS: one static name whatever the matrix holds, which
+  # also ends "read the leg names off a run" in the setup guide. It passes when
+  # the matrix passed, or was skipped because the gate chose docs-only; it fails
+  # when a leg failed or was cancelled, and when the gate itself did not pass —
+  # a skip caused by a failed classifier is not a docs-only skip.
+  unit-tests-result:
+    name: pytest
+    needs: [gate, unit-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: The matrix passed, or was skipped for a docs-only change
+        env:
+          GATE: ${{ needs.gate.result }}
+          UNIT: ${{ needs.unit-tests.result }}
+        run: |
+          if [ "$GATE" != "success" ]; then
+            echo "::error::the gate did not pass ($GATE), so the unit suite's skip means nothing"
+            exit 1
+          fi
+          case "$UNIT" in
+            success|skipped) echo "unit suite: $UNIT" ;;
+            *) echo "::error::unit suite: $UNIT"; exit 1 ;;
+          esac
+
   # ── Integration ─────────────────────────────────────────────────────────
   # Gated on full_suite. When it is skipped it still REPORTS `skipped`, which
   # branch protection accepts — that is why it is skipped at the job level and
