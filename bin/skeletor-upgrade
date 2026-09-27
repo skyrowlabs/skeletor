@@ -1757,7 +1757,7 @@ def unified(base: str, ours: str, rel: str) -> str:
     )
 
 
-def already_applied(base: str, ours: str, theirs: str) -> bool:
+def already_applied(base: str, ours: str, theirs: str, prose: bool = False) -> bool:
     """Whether `theirs` already carries the template's change from `base` to `ours`.
 
     Asked before re-merging a file that differs from the base, because a re-run
@@ -1788,12 +1788,27 @@ def already_applied(base: str, ours: str, theirs: str) -> bool:
         return False
     old, new = base.splitlines(keepends=True), ours.splitlines(keepends=True)
     decided = False
+
+    # **Prose is compared with its whitespace collapsed; code is not.** A diverged
+    # markdown file is the one somebody reflows to their own width, and a port
+    # reflowed that way matched nothing here — stash.flow rewrapped the template's
+    # AGENTS.md sentence into theirs, ran --ported, and was told the file still
+    # LACKS the change. In code, whitespace is meaning (indentation), so it stays
+    # exact.
+    def flat(text: str) -> str:
+        return " ".join(text.split())
+
+    if prose:
+        theirs_flat, ours_flat = flat(theirs), flat(ours)
     for tag, low, high, low2, high2 in difflib.SequenceMatcher(a=old, b=new, autojunk=False).get_opcodes():
         if tag in ("insert", "replace"):
             added = "".join(new[low2:high2])
             if added.strip():
                 decided = True
-                if theirs.count(added) < ours.count(added):
+                if prose:
+                    if theirs_flat.count(flat(added)) < ours_flat.count(flat(added)):
+                        return False
+                elif theirs.count(added) < ours.count(added):
                     return False
         if tag in ("delete", "replace"):
             # **Line by line, never as a block.** An adopter who edited one line
@@ -1806,7 +1821,10 @@ def already_applied(base: str, ours: str, theirs: str) -> bool:
             theirs_lines, ours_lines = theirs.splitlines(keepends=True), new
             for line in {line for line in old[low:high] if line.strip()}:
                 decided = True
-                if theirs_lines.count(line) > ours_lines.count(line):
+                if prose:
+                    if theirs_flat.count(flat(line)) > ours_flat.count(flat(line)):
+                        return False
+                elif theirs_lines.count(line) > ours_lines.count(line):
                     return False
     return decided
 
@@ -2554,7 +2572,7 @@ def main() -> int:
             # earlier run replaced wholesale — sky.boss's seven untouched files were
             # listed as "merged cleanly" while equal to the template. The second is a
             # file an earlier run MERGED, which re-merging can duplicate into.
-            if theirs == ours or already_applied(base, ours, theirs):
+            if theirs == ours or already_applied(base, ours, theirs, prose=rel.endswith(".md")):
                 carried.append(rel)
                 continue
 
@@ -2921,11 +2939,11 @@ def main() -> int:
             for rel in conflicted:
                 item(rel)
             detail()
-            detail("Taken on trust, as --ported asserts. Each still LACKS the template's change —")
-            detail("a file that carried it would have been skipped as already applied — so what is")
-            detail("owed is in tmp/upgrade/<path>.patch. If you kept yours on purpose, that patch is")
-            detail("the record of what you declined. If not, port it now: the base has advanced and")
-            detail("this change will not be offered again, and the next real run clears the directory.")
+            detail("Taken on trust, as --ported asserts. In each, this run could not find the template's")
+            detail("change — reflowed prose is looked past, other rewording is not — so the change is")
+            detail("in tmp/upgrade/<path>.patch. If you ported it in your own words, or kept yours on")
+            detail("purpose, that patch is a record. If not, port it now: the base has advanced and this")
+            detail("change will not be offered again, and the next real run clears the directory.")
         elif conflicted:
             say("❌", f"{len(conflicted)} file(s) that differ from the template — merge conflicts, LEFT ALONE")
             for rel in conflicted:
@@ -3427,7 +3445,14 @@ def main() -> int:
             detail("stays where it is. Resolve the conflicts, then re-run with the same --set-arg and")
             detail("--ported: that run records the name and moves the wrapper together.")
         elif renamed_from and already_moved:
-            say("↪️ ", f"wrapper already at {renamed_to}; this run {'would record' if args.dry_run else 'records'} the name")
+            # Says what this run does, which depends on the rest of it: an already-moved
+            # wrapper has nothing to hold, but the RECORD still waits on pending work,
+            # and this line said "records the name" on a run that printed "NOT recorded"
+            # above it (stash.flow, measured).
+            if pending and not args.ported:
+                say("↪️ ", f"wrapper already at {renamed_to}; the record keeps the old name until --ported")
+            else:
+                say("↪️ ", f"wrapper already at {renamed_to}; this run {'would record' if args.dry_run else 'records'} the name")
         elif renamed_from:
             say("↪️ ", f"wrapper {'would move' if args.dry_run else 'moved'}: {renamed_from} → {renamed_to}")
         if renamed_from and not move_held:

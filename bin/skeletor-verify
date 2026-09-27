@@ -9295,6 +9295,16 @@ def already_applied_gate() -> Result:
         problems.append("a file still holding an edited copy of a block the template deleted reads as applied")
     if not upgrader.already_applied(old_def, removed, removed):
         problems.append("a file the deletion was applied to does not read as applied")
+    # Prose reflowed to the adopter's width is still the change — stash.flow's port,
+    # read as "LACKS" — and in code the same reflow is not, because whitespace there
+    # is meaning.
+    prose_base = "# Guide\n\nIntro.\n"
+    prose_ours = "# Guide\n\nIntro.\n\nRun the checks before you push, and read what they say.\n"
+    reflowed = "# Guide\n\nIntro.\n\nRun the checks before you push,\nand read what they say.\n"
+    if not upgrader.already_applied(prose_base, prose_ours, reflowed, prose=True):
+        problems.append("a reflowed prose port does not read as applied")
+    if upgrader.already_applied(prose_base, prose_ours, reflowed, prose=False):
+        problems.append("outside prose, a reflow reads as applied — whitespace is meaning in code")
     tags = [tag for tag in run(["git", "tag", "--sort=v:refname"], cwd=SKELETOR)[1].split() if tag.startswith("v")]
     swept = 0
     for old, new in zip(tags, tags[1:]):
@@ -9303,7 +9313,7 @@ def already_applied_gate() -> Result:
             if before[0] or after[0]:
                 continue
             swept += 1
-            if upgrader.already_applied(before[1], after[1], before[1]):
+            if upgrader.already_applied(before[1], after[1], before[1], prose=path.endswith(".md")):
                 problems.append(f"{old}→{new} {path}: the old render reads as already carrying the new one")
     if swept < 50:
         problems.append(f"swept only {swept} released changes; the sweep is not finding the history")

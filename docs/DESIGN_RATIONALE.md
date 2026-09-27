@@ -5584,3 +5584,19 @@ different answers with nothing saying which tool spoke — the run names its own
 version beside the head now when they differ. And the merge reaches only what
 skeletor renders, so a rename lists the tracked files it cannot reach that still
 say the old name.
+
+**"Owed" was true in one tree and false in the next, with the same sentence.** The
+v0.38.0 round's first real `--ported` sidecar printed that a file still *lacks*
+the template's change, and it was right in Dream Doll, which had declined it, and
+wrong in stash.flow, which had ported it rewrapped to its own line width.
+`already_applied` compared added blocks byte for byte, and the files that get
+reflowed are exactly the diverged prose files a port lands in. Markdown is compared
+with its whitespace collapsed now; code is not, since there whitespace is meaning.
+The sweep over released changes runs in the same mode per file and still finds no
+false positive in 333. And the sentence claims less: the run *could not find* the
+change, which is what it knows, rather than that the file lacks it, which it does
+not — a port in the adopter's own words is invisible to any comparison.
+
+The same report found a message that ignored the rest of its run: a wrapper already
+moved by hand has nothing to hold, so the line said "this run records the name" on
+a run that had printed "NOT recorded" above it.
