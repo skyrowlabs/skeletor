@@ -5542,3 +5542,45 @@ refused it as "already exists". A root symlink to the old wrapper is an alias of
 it, so the move replaces the alias with the file; anything else at the new name is
 the adopter's own and is still refused. `cli_rename_gate` carries both, and three
 planted defects — no repoint, no version check, no alias case — each turn it red.
+
+**A move and a record are one act, and v0.37.0 made them two.** The wrapper moved
+inside the merge loop on every run, and the record moved only when nothing was left
+pending. stash.flow's real tree has a permanently diverged `AGENTS.md`, so its first
+rename conflicted there: the wrapper moved, the record held, and the `--ported`
+re-run the tool itself advised refused — "no wrapper at stash to move", "sf already
+exists". A tree rendered under one name with a record naming the other, reached by
+following the output's own instructions. The move is computed in the loop now and
+written after it, only by a run that also records the name; a held run says the
+move is held too. And a tree already stranded that way is accepted rather than
+refused, since the move it wanted is already made. `cli_rename_gate` carries both:
+a README line the rename rewrites, edited by the adopter, is the conflict.
+
+Three smaller findings from the same round. `--fix` refused an exact repair because
+a shorter heading shared the anchor's prefix and tied with it; an exact token match
+is not ambiguous, so it wins now (mind.head). The dead-anchor failure never named
+`--fix`, while a release that tightens the checker strands anchors on purpose. And
+GitHub drops HTML from a heading — `Phase 1 — <name>` is `phase-1--`, and
+`# <Human Title>` gets no anchor at all — which the 351-heading sweep missed because
+the one template file that does it was the one that would not pair (stash.flow). A
+re-score over every heading captured from GitHub is 0 wrong, with that file now
+pairing.
+
+**And the advice I relayed as a workaround lost a change.** Until the held move
+shipped, the safe-looking route was the rename with `--ported` in the same run. On
+the run that *produces* a conflict, `--ported` recorded it as resolved and wrote no
+sidecar — a rule written in v0.33.0 for a re-run after a hand port, when an
+already-ported file still re-conflicted. `already_applied` changed that premise a
+release later and the rule stayed: a file that still conflicts under `--ported` now
+genuinely lacks the change, so the sidecar is what is owed, not a stale plan.
+stash.flow's `AGENTS.md` kept eleven `./stash` with every gate green, the base past
+it for good, found only by grepping. The sidecar is written again, the report says
+*owed* instead of *ported*, and `cli_rename_gate` requires the patch to survive the
+run that advanced past it. **A rule's premise can be retired by a later fix in the
+same file, and the rule does not notice.**
+
+Two more from the same report. `--ref` pins the render and not the tool, and the
+same command from a dirty checkout and from a clean worktree at the tag gave
+different answers with nothing saying which tool spoke — the run names its own
+version beside the head now when they differ. And the merge reaches only what
+skeletor renders, so a rename lists the tracked files it cannot reach that still
+say the old name.

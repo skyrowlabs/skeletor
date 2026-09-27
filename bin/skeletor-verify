@@ -10011,6 +10011,49 @@ def cli_rename_gate(workdir: Path) -> List[Result]:
     if code == 0 or "already exists" not in output or (taken / new).read_text(encoding="utf-8") != "#!/bin/sh\necho mine\n":
         problems.append(f"a rename onto a name the tree uses was not refused cleanly:\n{output[-900:]}")
 
+    # **The move goes with the record.** A conflict elsewhere holds the record back,
+    # and v0.37.0 moved the wrapper anyway — then refused the --ported re-run it had
+    # advised (stash.flow, measured). An adopter edit on a README line the rename
+    # rewrites makes the conflict; the first run must leave the wrapper where it is,
+    # and the --ported run must move it and record the name together.
+    held = scaffold("cli-rename-held")
+    readme = held / "README.md"
+    line = next((l for l in readme.read_text(encoding="utf-8").splitlines() if f"./{CLI_NAME}" in l), None)
+    if line is None:
+        problems.append(f"no README line names ./{CLI_NAME}, so the held-move fixture cannot make its conflict")
+    else:
+        readme.write_text(readme.read_text(encoding="utf-8").replace(line, line + "  <!-- adopter: ours -->", 1),
+                          encoding="utf-8")
+        git_in(held, "commit", "--quiet", "-am", "adopter: edit a line the rename rewrites")
+        code, first = run([*upgrade, str(held), "--set-arg", f"cli={new}", "--allow-untagged"], cwd=held)
+        conflicted_readme = "LEFT ALONE" in first and "README.md" in first.split("LEFT ALONE", 1)[1]
+        if not conflicted_readme:
+            problems.append(f"the held-move fixture did not conflict on README.md:\n{first[-900:]}")
+        elif (held / new).exists() or not (held / CLI_NAME).exists():
+            problems.append("a run that held the record back moved the wrapper anyway — the v0.37.0 trap")
+        else:
+            code, second = run([*upgrade, str(held), "--set-arg", f"cli={new}", "--ported", "--allow-untagged"],
+                               cwd=held)
+            recorded = json.loads((held / load_scaffolder().MANIFEST_NAME).read_text(encoding="utf-8"))["args"]
+            if code != 0 or not (held / new).is_file() or (held / CLI_NAME).exists() or \
+                    recorded[recorded.index("--cli") + 1] != new:
+                problems.append(f"the --ported run did not move and record together:\n{second[-900:]}")
+            # The conflict was never ported here, so what is owed must survive the
+            # run that advanced past it — the only copy, since it will not be offered
+            # again. stash.flow's same-run --ported lost exactly this.
+            elif not (held / "tmp" / "upgrade" / "README.md.patch").exists():
+                problems.append("the --ported run advanced past an unported conflict and kept no copy of what is owed")
+
+    # **A tree already stranded by v0.37.0 recovers.** Rendered under the new name,
+    # record naming the old: the re-run must record the name, not refuse.
+    stranded = scaffold("cli-rename-stranded")
+    git_in(stranded, "mv", CLI_NAME, new)
+    git_in(stranded, "commit", "--quiet", "-m", "the state v0.37.0 could leave behind")
+    code, output = run([*upgrade, str(stranded), "--set-arg", f"cli={new}", "--allow-untagged"], cwd=stranded)
+    recorded = json.loads((stranded / load_scaffolder().MANIFEST_NAME).read_text(encoding="utf-8"))["args"]
+    if code != 0 or recorded[recorded.index("--cli") + 1] != new:
+        problems.append(f"a tree whose wrapper was already moved could not record the name:\n{output[-900:]}")
+
     # The alias case: the new name IS a root symlink to the old wrapper, which is
     # exactly stash.flow's tree (`sf -> stash`, renaming to `sf`). The link becomes
     # the file; nothing else is at that name to protect.

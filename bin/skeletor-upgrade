@@ -683,8 +683,11 @@ def plan_cli_rename(
     recorded_ref: str,
     head_ref: str,
     workdir: Path,
-) -> None:
+) -> bool:
     """Refuse a `--cli` rename that cannot be made cleanly, before anything is written.
+
+    Returns True when the move was already made — the old wrapper gone and the new
+    name a real file — so the run only has to merge and record, not move.
 
     Four conditions, each a way the move would be dishonest:
 
@@ -702,6 +705,16 @@ def plan_cli_rename(
       written nothing, rather than half-renaming the tree.
     """
     problems = []
+    # **A move already made is accepted, not refused.** stash.flow's first rename
+    # hit a conflict on a permanently diverged AGENTS.md: the run moved the wrapper,
+    # held the record back, and advised re-running with --ported — and that re-run
+    # refused both ways ("no wrapper at stash", "sf already exists"), stranding a
+    # tree rendered under one name with a record naming the other. The move is
+    # deferred to the recording run now, so a new run cannot reach that state; this
+    # is for any tree that already has.
+    if not (target / old).exists() and (target / new).is_file() and not (target / new).is_symlink():
+        if head_ref.removesuffix("-dirty") == recorded_ref.removesuffix("-dirty") and new in head_files:
+            return True
     if head_ref.removesuffix("-dirty") != recorded_ref.removesuffix("-dirty"):
         problems.append(
             f"this render is skeletor @ {head_ref} and the tree records {recorded_ref}. A rename is made at the "
@@ -727,6 +740,7 @@ def plan_cli_rename(
             )
     if problems:
         die("the --cli rename cannot be made here, and nothing was written:\n   " + "\n   ".join(problems))
+    return False
 
 
 def standing_divergence(
@@ -2080,6 +2094,21 @@ def main() -> int:
             notes.append(f"{unpushed} not on {tracking}")
         standing = f"head: skeletor @ {head_ref}" + (f" ({', '.join(notes)})" if notes else "")
         say("→", standing)
+        # **`--ref` pins the render, not the tool.** stash.flow ran the same command
+        # from this live checkout and from a clean worktree at the tag, got two
+        # different answers — one of them unreleased behaviour — and neither output
+        # said which tool was speaking. The code deciding the merge is this file's.
+        if args.ref:
+            tool_ref = subprocess.run(
+                ["git", "-C", str(SKELETOR), "describe", "--tags", "--always", "--dirty"],
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            if tool_ref and tool_ref != head_ref:
+                say("⚠️ ", f"this tool is skeletor @ {tool_ref}; --ref pinned the render to {head_ref}, not the tool")
+                detail("How this run merges and reports is the tool's behaviour. For a run that is")
+                detail(f"{head_ref} end to end, run bin/skeletor-upgrade from a worktree at that ref:")
+                detail(f"  git -C <skeletor> worktree add --detach /tmp/skeletor-{head_ref} {head_ref}")
         # **After the standing line, so the reader sees what would be stamped before
         # being told it is refused.** The refusal reads the ref out of the head
         # render's own manifest rather than from `--ref` or from `git describe` here
@@ -2345,9 +2374,16 @@ def main() -> int:
         diverged = standing_divergence(target, *divergence_inputs, normalising)
 
         renamed_from, renamed_to = cli_rename_paths(set_args_applied)
+        already_moved = False
         if renamed_from:
-            plan_cli_rename(target, base_files, head_files, renamed_from, renamed_to, ref, head_ref, workdir)
+            already_moved = plan_cli_rename(
+                target, base_files, head_files, renamed_from, renamed_to, ref, head_ref, workdir
+            )
         repointed: List[str] = []
+        #: The wrapper's merged content, computed in the loop and written only after
+        #: it, by a run that also records the new name. See the move below.
+        wrapper_move: Optional[str] = None
+        move_held = False
 
         for rel in sorted(set(base_files) | set(head_files)):
             if rel in GENERATED or rel == MANIFEST_NAME:
@@ -2358,25 +2394,22 @@ def main() -> int:
             base = read(base_files.get(rel))
             live_path = target / rel
             theirs = read(live_path) if live_path.exists() else None
-            if rel == renamed_to:
+            if rel == renamed_to and already_moved:
+                # The move was made by an earlier run; this file is the wrapper now,
+                # and its base is the old name's render. The ordinary merge below
+                # does the rest, in place.
+                base = read(base_files.get(renamed_from))
+            elif rel == renamed_to:
                 # The move. `theirs` is the adopter's copy under the OLD name and
                 # `base` the old render of it, so an edit to the wrapper travels with
                 # it through the ordinary merge. `plan_cli_rename` already proved
-                # this merge is clean, so nothing is written unless all of it is.
+                # this merge is clean. **Computed here, written after the loop** —
+                # only by a run that will also record the new name.
                 base = read(base_files.get(renamed_from))
                 theirs = read(target / renamed_from)
-                live_path = target / rel
-                moved = theirs if base == ours else merge(base, theirs, ours, workdir)
-                if moved is None:  # unreachable after the plan; kept as a guard
+                wrapper_move = theirs if base == ours else merge(base, theirs, ours, workdir)
+                if wrapper_move is None:  # unreachable after the plan; kept as a guard
                     die(f"the wrapper move {renamed_from} → {renamed_to} no longer merges cleanly")
-                merged.append(rel)
-                if not args.dry_run:
-                    if live_path.is_symlink():
-                        live_path.unlink()  # the alias the move replaces — see plan_cli_rename
-                    live_path.write_text(moved, encoding="utf-8")
-                    shutil.copymode(head_files[rel], live_path)
-                    (target / renamed_from).unlink()
-                    repointed = repoint_symlinks(target, renamed_from, renamed_to)
                 continue
 
             if ours is None:
@@ -2442,7 +2475,7 @@ def main() -> int:
                     # different hash is an edit, no entry at all is a collision.
                     if theirs != ours:
                         collided.append(rel)
-                        if not (args.dry_run or args.ported):
+                        if not args.dry_run:
                             sidecar = patches / f"{rel}.new"
                             sidecar.parent.mkdir(parents=True, exist_ok=True)
                             sidecar.write_text(ours, encoding="utf-8")
@@ -2495,7 +2528,7 @@ def main() -> int:
                         live_path.write_text(ours, encoding="utf-8")
                     continue
                 conflicted.append(rel)
-                if not (args.dry_run or args.ported):
+                if not args.dry_run:
                     sidecar = patches / f"{rel}.new"
                     sidecar.parent.mkdir(parents=True, exist_ok=True)
                     sidecar.write_text(ours, encoding="utf-8")
@@ -2538,12 +2571,17 @@ def main() -> int:
                 if normaliser and not args.normalise and normaliser.applies(rel):
                     if merge(normaliser(base, rel), theirs, normaliser(ours, rel), workdir) is not None:
                         formatting_only.append(rel)
-                # **Not on `--ported`.** That run records these as resolved, so a
-                # fresh sidecar beside one is a plan for work already done — and the
-                # tree's seam check reads any sidecar as pending and says port it
-                # first, which would send somebody to redo a finished merge.
-                # proto.pilot measured the write and read the consequence.
-                if not (args.dry_run or args.ported):
+                # **Written on `--ported` too — and for one release it was not.** The
+                # suppression reasoned that a `--ported` run records a port already
+                # made, so a fresh sidecar would read as work still owed. That was true
+                # before `already_applied`: a hand-ported file used to re-conflict here.
+                # Now a file that carries the change is skipped as carried, so a file
+                # that still CONFLICTS on a `--ported` run genuinely lacks it — and on
+                # the run that produced the conflict, the sidecar is the only copy of
+                # what is owed. stash.flow's same-run rename recorded AGENTS.md as
+                # ported with nothing written, eleven `./stash` left in it, every gate
+                # green, and the base advanced past the change for good.
+                if not args.dry_run:
                     patch = patches / f"{rel}.patch"
                     patch.parent.mkdir(parents=True, exist_ok=True)
                     patch.write_text(unified(base, ours, rel), encoding="utf-8")
@@ -2562,6 +2600,23 @@ def main() -> int:
 
         # The generated docs are rebuilt, never merged.
         pending = conflicted + collided
+        # **The move goes with the record, or not at all.** v0.37.0 moved the wrapper
+        # inside the loop, on every run; a conflict elsewhere then held the record
+        # back, leaving a tree rendered under the new name whose record named the
+        # old one — and the re-run it advised refused, because the move it expected
+        # to make was already made. A run that holds the base back now holds the
+        # move too, and the one that records the name makes it.
+        if wrapper_move is not None and renamed_from and renamed_to:
+            if pending and not args.ported:
+                move_held = True
+            elif not args.dry_run:
+                live_path = target / renamed_to
+                if live_path.is_symlink():
+                    live_path.unlink()  # the alias the move replaces — see plan_cli_rename
+                live_path.write_text(wrapper_move, encoding="utf-8")
+                shutil.copymode(head_files[renamed_to], live_path)
+                (target / renamed_from).unlink()
+                repointed = repoint_symlinks(target, renamed_from, renamed_to)
         if not args.dry_run and (added or updated or merged):
             regen = target / "scripts" / "docs" / "regen.py"
             if regen.exists():
@@ -2862,14 +2917,15 @@ def main() -> int:
             # the run whose whole purpose is recording that it was not. sky.boss
             # nearly filed it as exactly that and checked `.skeletor.json` instead.
             # It fired hardest on the correct path.
-            say("✅", f"{len(conflicted)} conflicted file(s) recorded as ported — the base advanced past them")
+            say("⚠️ ", f"{len(conflicted)} conflicted file(s) recorded as resolved — the base advanced past them")
             for rel in conflicted:
                 item(rel)
             detail()
-            detail("These were listed above as taken on trust. They still differ from the")
-            detail("template, which is expected: that is the port. No sidecar was written for")
-            detail("them — tmp/upgrade/ is cleared by every real run, and a fresh plan beside a")
-            detail("file you have already ported would read as work still owed.")
+            detail("Taken on trust, as --ported asserts. Each still LACKS the template's change —")
+            detail("a file that carried it would have been skipped as already applied — so what is")
+            detail("owed is in tmp/upgrade/<path>.patch. If you kept yours on purpose, that patch is")
+            detail("the record of what you declined. If not, port it now: the base has advanced and")
+            detail("this change will not be offered again, and the next real run clears the directory.")
         elif conflicted:
             say("❌", f"{len(conflicted)} file(s) that differ from the template — merge conflicts, LEFT ALONE")
             for rel in conflicted:
@@ -3003,10 +3059,11 @@ def main() -> int:
             detail("scripts/requirements.txt, at the pinned versions, makes them runnable.")
 
         if collided and advanced:
-            say("✅", f"{len(collided)} collided file(s) recorded as resolved — the base advanced past them")
+            say("⚠️ ", f"{len(collided)} collided file(s) recorded as resolved — the base advanced past them")
             for rel in collided:
                 item(rel)
-            detail("Yours stands where it was. No sidecar was written: the choice is recorded.")
+            detail("Yours stands where it was. The template's version is in tmp/upgrade/<path>.new —")
+            detail("the only copy, since the base has advanced past it.")
         elif collided:
             say("❌", f"{len(collided)} file(s) you already had where the template now ships one")
             for rel in collided:
@@ -3364,8 +3421,33 @@ def main() -> int:
         # a condition whose term set does not match the question it is asking.
         # There the set was too small and excluded a conflict; here it is too
         # large and includes two things that are not work.
-        if renamed_from:
+        if renamed_from and move_held:
+            say("⏸️ ", f"wrapper move {renamed_from} → {renamed_to} held — it goes with the record")
+            detail("Something above is still pending, so the record keeps the old name and the wrapper")
+            detail("stays where it is. Resolve the conflicts, then re-run with the same --set-arg and")
+            detail("--ported: that run records the name and moves the wrapper together.")
+        elif renamed_from and already_moved:
+            say("↪️ ", f"wrapper already at {renamed_to}; this run {'would record' if args.dry_run else 'records'} the name")
+        elif renamed_from:
             say("↪️ ", f"wrapper {'would move' if args.dry_run else 'moved'}: {renamed_from} → {renamed_to}")
+        if renamed_from and not move_held:
+            # The merge reaches what skeletor renders and nothing else. stash.flow
+            # swept `docs/rules/collection.md` and a test docstring by hand after
+            # theirs; listing the rest costs one grep. Word-matched, so a common word
+            # used as a wrapper name lists false hits — this is a list to read.
+            mentions = subprocess.run(
+                ["git", "-C", str(target), "grep", "-l", "-w", "-I", "--", renamed_from],
+                capture_output=True,
+                text=True,
+            ).stdout.split()
+            stale = [rel for rel in mentions if rel not in head_files and rel not in (renamed_from, renamed_to)]
+            if stale:
+                detail(f"{len(stale)} tracked file(s) skeletor does not write still mention `{renamed_from}` — yours to")
+                detail("reword; the merge does not reach them:")
+                for rel in stale[:15]:
+                    item(rel)
+                if len(stale) > 15:
+                    detail(f"… and {len(stale) - 15} more")
             detail("Merged from your copy of the old name, so an edit to it travels with the move;")
             detail(f"the old file {'would be' if args.dry_run else 'is'} removed, as `git mv` would. Nothing is staged.")
             links = repointed if not args.dry_run else [l for l in symlinks_to(target, renamed_from) if l != renamed_to]
