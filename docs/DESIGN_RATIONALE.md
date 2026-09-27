@@ -4177,7 +4177,8 @@ with another value is undistinguished, not confirmed.* The asymmetry is what
 makes it worth writing down — a hardcoded name in a **gate** does not fail as
 "this gate is wrong", it fails as "the tree is broken."
 
-**The flag is refused by `--set-arg`, and `--cli` with it.** An upgrade renders
+**The flag is refused by `--set-arg`** — and `--cli` was too, until v0.37.0 (see
+*A rename of one file is a move*, below). An upgrade renders
 two trees and merges them file by file, which is the wrong instrument for a
 rename: the head render writes every file under the new name, so they arrive as
 *new* files while the old ones are reported as no longer shipped and left where
@@ -5510,3 +5511,34 @@ the other's difference and gave up (mind.head, measured). They are one compariso
 now — normalise, then cut the space — asked of the base render and the head render
 both, since before a base advances only the head render can see past the
 template's own change.
+
+## A rename of one file is a move, and a move is something this tool can make
+
+`--set-arg` refused every argument that renames a path, on the argument that
+rendering two trees and merging file by file is the wrong instrument for a rename:
+the new name arrives as a new file and the old one is left where it is. For
+`--shell-package`, a whole package, that holds. For `--cli` it was over-broad —
+`copy_overlay` consumes that value as a destination name exactly once, for the root
+wrapper, and everything else it touches is text inside files, which the merge
+already handles.
+
+stash.flow asked for a supported route when its product claimed the wrapper's name.
+The only one available was a `--force` re-scaffold, measured here: it recorded the
+new name, and overwrote 130 files in place — the adopter's edits with them, git the
+only copy — and left the old wrapper behind for a committed `sf -> stash` symlink
+to keep pointing at. Correct in its record and destructive in its method.
+
+`--set-arg cli=<name>` is that move now, with four refusals that write nothing: the
+render must be the tree's own recorded version (`--ref <recorded>`), so a rename
+never arrives tangled with a release; the old wrapper must be there and the new
+name free; the new name must be the render's wrapper; and the adopter's edits to
+the wrapper must merge cleanly into the renamed render. Then the wrapper moves —
+merged, so an edit travels with it — the old file is removed as `git mv` would,
+and a root symlink that named the old wrapper is repointed.
+
+**The adopter's own name was the first case the design did not cover.** stash.flow
+chose `sf`, which was already its symlink to the wrapper, and the first draft
+refused it as "already exists". A root symlink to the old wrapper is an alias of
+it, so the move replaces the alias with the file; anything else at the new name is
+the adopter's own and is still refused. `cli_rename_gate` carries both, and three
+planted defects — no repoint, no version check, no alias case — each turn it red.

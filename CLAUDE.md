@@ -500,7 +500,11 @@ line — no predicate over a notation can see out of prose about the notation �
 and it is why the predicate is `ast` and not `grep`: an import statement is
 syntax, so the exemption is structural and the list is empty.
 
-**`--set-arg` refuses it, and `--cli` with it.** An upgrade renders two trees and
+**`--set-arg` refuses it.** It refused `--cli` too until v0.37.0; `--cli` renames
+exactly one file, the root wrapper, and `CLI_RENAME` in `bin/skeletor-upgrade` now
+makes that move at the tree's own version — merge the adopter's copy into the new
+name, remove the old, repoint root symlinks to it — held by `cli_rename_gate`. The
+rest of this paragraph is `--shell-package`'s. An upgrade renders two trees and
 merges them file by file, which is the wrong instrument for a rename: the head
 render writes every file under the new name, so they arrive as new files while
 the old ones are reported as no longer shipped and — correctly, since this tool

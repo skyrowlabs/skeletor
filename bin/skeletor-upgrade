@@ -79,6 +79,7 @@ import argparse
 import ast
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -637,6 +638,95 @@ def _same_but_exempt(mine: str, theirs: Optional[str], rel: str, normaliser: Opt
     if mine == theirs:
         return True
     return SEAM_OPENING in theirs and outside_space(mine) == outside_space(theirs)
+
+
+def cli_rename_paths(applied: Dict[str, Tuple[str, str]]) -> Tuple[Optional[str], Optional[str]]:
+    """`(old wrapper, new wrapper)` when this run changes `--cli`, else `(None, None)`."""
+    if CLI_RENAME not in applied:
+        return None, None
+    was, now = applied[CLI_RENAME]
+    return (was, now) if was != now else (None, None)
+
+
+def symlinks_to(target: Path, name: str) -> List[str]:
+    """Symlinks at the tree's root whose target is exactly the wrapper `name`."""
+    found = []
+    for path in sorted(target.iterdir()):
+        if path.is_symlink() and os.readlink(path) in (name, f"./{name}"):
+            found.append(path.name)
+    return found
+
+
+def repoint_symlinks(target: Path, old: str, new: str) -> List[str]:
+    """Point every root symlink at `old` at `new` instead; return their names.
+
+    stash.flow's tree committed `sf -> stash` with its scaffold. A move that left it
+    dangling would break the one alias somebody chose, silently — and repointing a
+    link that named exactly the old wrapper is the rename's own consequence, not a
+    decision about the adopter's file. Anything else a link points at is theirs.
+    """
+    moved = []
+    for name in symlinks_to(target, old):
+        link = target / name
+        link.unlink()
+        link.symlink_to(new)
+        moved.append(name)
+    return moved
+
+
+def plan_cli_rename(
+    target: Path,
+    base_files: Dict[str, Path],
+    head_files: Dict[str, Path],
+    old: str,
+    new: str,
+    recorded_ref: str,
+    head_ref: str,
+    workdir: Path,
+) -> None:
+    """Refuse a `--cli` rename that cannot be made cleanly, before anything is written.
+
+    Four conditions, each a way the move would be dishonest:
+
+    * **The render is the tree's own version.** A rename carried together with a
+      release is two changes whose diffs cannot be told apart afterwards, and a
+      conflict in one blocks the other. `--ref <recorded>` makes the render the
+      version the tree records, so the run is the rename and nothing else.
+    * **The old wrapper is there and the new name is free.** A new name the tree
+      already uses for something of its own — stash.flow's product is a command of
+      that exact shape — would be overwritten by a move.
+    * **The old name is recorded and the new one renders.** Otherwise this is not
+      the wrapper, and there is nothing to move.
+    * **The wrapper merges cleanly.** An adopter edit that conflicts with the
+      rename leaves no honest way to move the file, so the run stops here, having
+      written nothing, rather than half-renaming the tree.
+    """
+    problems = []
+    if head_ref.removesuffix("-dirty") != recorded_ref.removesuffix("-dirty"):
+        problems.append(
+            f"this render is skeletor @ {head_ref} and the tree records {recorded_ref}. A rename is made at the "
+            f"tree's own version, so it arrives alone: re-run with --ref {recorded_ref}, then upgrade separately."
+        )
+    if not (target / old).is_file():
+        problems.append(f"there is no wrapper at {old} to move")
+    # An alias of the old wrapper under the new name is the case stash.flow is in:
+    # `sf -> stash` committed at scaffold, and `sf` the name chosen. That link IS
+    # the wrapper already; the move replaces it with the file. Anything else at
+    # the new name is the adopter's own, and a move would overwrite it.
+    alias = (target / new).is_symlink() and os.readlink(target / new) in (old, f"./{old}")
+    if ((target / new).exists() or (target / new).is_symlink()) and not alias:
+        problems.append(f"{new} already exists in this tree; a move would overwrite it")
+    if old not in base_files or new not in head_files:
+        problems.append(f"{old} is not the rendered wrapper of this tree's record, so this is not a rename")
+    if not problems:
+        base, theirs, ours = read(base_files[old]), read(target / old), read(head_files[new])
+        if base != theirs and merge(base, theirs, ours, workdir) is None:
+            problems.append(
+                f"your edits to {old} conflict with the renamed render. Rename by hand — `git mv {old} {new}` — "
+                f"port the template's change into it, then re-run with --ported."
+            )
+    if problems:
+        die("the --cli rename cannot be made here, and nothing was written:\n   " + "\n   ".join(problems))
 
 
 def standing_divergence(
@@ -1281,6 +1371,12 @@ def join_set_arg(argv: List[str]) -> List[str]:
 #: `--shell-package` is a tree whose own `scripts/paths.py` refuses to say which
 #: directory is the shell.
 #:
+#: **`--cli` left this set in v0.37.0**, because it renames exactly one path — the
+#: root wrapper `CLI_WRAPPER` becomes — and one file is a move this tool can make
+#: honestly: merge the adopter's copy into the new name and remove the old one,
+#: the way `git mv` would. See `CLI_RENAME` below. `--shell-package` renames a whole
+#: package and stays here.
+#:
 #: The predicate is not "flags somebody thought of", and sky.boss put it better
 #: than the mechanical version did: **`--set-arg` is safe for an argument whose
 #: effect is WITHIN files, and unsafe for one whose effect is the SET OF PATHS.**
@@ -1292,7 +1388,15 @@ def join_set_arg(argv: List[str]) -> List[str]:
 #: `bin/skeletor-verify`'s `shell_package_gate` asserts each entry is still
 #: refused and still recorded by a scaffold, so one that stopped renaming
 #: anything fails rather than sitting here as a decision nobody re-made.
-RENAMES_A_PATH = {"--shell-package", "--cli"}
+RENAMES_A_PATH = {"--shell-package"}
+
+#: The one path-renaming argument this tool handles itself: `--cli` names the root
+#: wrapper and nothing else on disk (`copy_overlay` renames `CLI_WRAPPER` to it), so
+#: its rename is one file. stash.flow asked for a supported route after its product
+#: claimed the wrapper's name; the measured alternative was a `--force` re-scaffold,
+#: which overwrote 130 files in place, adopter edits included, and left the old
+#: wrapper behind for a committed symlink to keep pointing at.
+CLI_RENAME = "--cli"
 
 
 def set_args(recorded: List[str], args) -> Tuple[List[str], Dict[str, Tuple[str, str]]]:
@@ -1375,6 +1479,8 @@ def set_args(recorded: List[str], args) -> Tuple[List[str], Dict[str, Tuple[str,
                 "   node-zero, who took the first route on a throwaway clone and measured it.\n"
                 "   A three-way merge is for a value inside a file; a name is what git is for."
             )
+        if flag == CLI_RENAME and not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", value):
+            die(f"--cli {value!r} is not a name a wrapper file can take: lowercase letters, digits, - and _")
         if flag not in updated:
             die(
                 f"{flag} is not among this tree's recorded arguments, so there is nothing to change.\n"
@@ -2238,13 +2344,40 @@ def main() -> int:
         divergence_inputs = (hashes or {}, head_files, base_files)
         diverged = standing_divergence(target, *divergence_inputs, normalising)
 
+        renamed_from, renamed_to = cli_rename_paths(set_args_applied)
+        if renamed_from:
+            plan_cli_rename(target, base_files, head_files, renamed_from, renamed_to, ref, head_ref, workdir)
+        repointed: List[str] = []
+
         for rel in sorted(set(base_files) | set(head_files)):
             if rel in GENERATED or rel == MANIFEST_NAME:
                 continue
+            if rel == renamed_from:
+                continue  # moved, below — never reported as dropped
             ours = read(head_files.get(rel))
             base = read(base_files.get(rel))
             live_path = target / rel
             theirs = read(live_path) if live_path.exists() else None
+            if rel == renamed_to:
+                # The move. `theirs` is the adopter's copy under the OLD name and
+                # `base` the old render of it, so an edit to the wrapper travels with
+                # it through the ordinary merge. `plan_cli_rename` already proved
+                # this merge is clean, so nothing is written unless all of it is.
+                base = read(base_files.get(renamed_from))
+                theirs = read(target / renamed_from)
+                live_path = target / rel
+                moved = theirs if base == ours else merge(base, theirs, ours, workdir)
+                if moved is None:  # unreachable after the plan; kept as a guard
+                    die(f"the wrapper move {renamed_from} → {renamed_to} no longer merges cleanly")
+                merged.append(rel)
+                if not args.dry_run:
+                    if live_path.is_symlink():
+                        live_path.unlink()  # the alias the move replaces — see plan_cli_rename
+                    live_path.write_text(moved, encoding="utf-8")
+                    shutil.copymode(head_files[rel], live_path)
+                    (target / renamed_from).unlink()
+                    repointed = repoint_symlinks(target, renamed_from, renamed_to)
+                continue
 
             if ours is None:
                 # The template stopped shipping it. Never delete somebody's file.
@@ -2424,7 +2557,7 @@ def main() -> int:
         for rel in sorted(set(base_files)):
             if rel in head_files or rel in GENERATED:
                 continue
-            if (target / rel).exists() and rel not in dropped:
+            if (target / rel).exists() and rel not in dropped and rel != renamed_from:
                 dropped.append(rel)
 
         # The generated docs are rebuilt, never merged.
@@ -3231,6 +3364,13 @@ def main() -> int:
         # a condition whose term set does not match the question it is asking.
         # There the set was too small and excluded a conflict; here it is too
         # large and includes two things that are not work.
+        if renamed_from:
+            say("↪️ ", f"wrapper {'would move' if args.dry_run else 'moved'}: {renamed_from} → {renamed_to}")
+            detail("Merged from your copy of the old name, so an edit to it travels with the move;")
+            detail(f"the old file {'would be' if args.dry_run else 'is'} removed, as `git mv` would. Nothing is staged.")
+            links = repointed if not args.dry_run else [l for l in symlinks_to(target, renamed_from) if l != renamed_to]
+            for link in links:
+                item(f"{link} → {renamed_to}  ({'would be ' if args.dry_run else ''}repointed; it pointed at the old name)")
         if carried:
             say("✓ ", f"{len(carried)} file(s) the template changed already carry the change — nothing to write")
             detail("A previous run applied them, or you ported them. Merging them again can insert")

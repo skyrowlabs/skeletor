@@ -9922,6 +9922,116 @@ def product_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok
     return results
 
 
+def cli_rename_gate(workdir: Path) -> List[Result]:
+    """An adopted tree renames its wrapper with `--set-arg cli=`, and the move is honest.
+
+    stash.flow asked for a supported route once its product claimed the wrapper's
+    name. The measured alternative was a `--force` re-scaffold, which overwrote 130
+    files in place — adopter edits included — and left the old wrapper behind for a
+    committed `sf -> stash` symlink to keep pointing at. So the fixture carries
+    exactly those two things: an adopter edit INSIDE the wrapper, and a root
+    symlink to it. What must hold:
+
+    * the wrapper moves: new name present, executable, carrying the adopter's edit;
+      old name gone; the symlink repointed;
+    * the record moves: `--cli` recorded as the new name, and a second run says
+      `already current`;
+    * the rendered prose moves: the README names the new wrapper;
+    * and two refusals write nothing — a render that is not the tree's own version,
+      and a new name the tree already uses.
+    """
+    started = time.time()
+    clean = clean_skeletor(workdir)
+    upgrade = [sys.executable, str(clean / "bin" / "skeletor-upgrade")]
+    new = "renamed"
+
+    def scaffold(name: str) -> Path:
+        tree = workdir / name / "probe"
+        if tree.exists():
+            shutil.rmtree(tree.parent)
+        must_scaffold(
+            [sys.executable, str(clean / "bin" / "skeletor-new"), str(tree),
+             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", "core", "--language", "python"],
+            cwd=SKELETOR,
+        )
+        wrapper = tree / CLI_NAME
+        wrapper.write_text(wrapper.read_text(encoding="utf-8") + "# adopter: ours\n", encoding="utf-8")
+        (tree / "al").symlink_to(CLI_NAME)
+        git_in(tree, "add", "-A")
+        git_in(tree, "commit", "--quiet", "-m", "adopter: wrapper edit and an alias")
+        return tree
+
+    problems: List[str] = []
+    tree = scaffold("cli-rename")
+    code, output = run([*upgrade, str(tree), "--set-arg", f"cli={new}", "--allow-untagged"], cwd=tree)
+    moved = tree / new
+    if code != 0:
+        problems.append(f"the rename run exited {code}:\n{output[-1500:]}")
+    else:
+        if not moved.is_file() or not os.access(moved, os.X_OK):
+            problems.append(f"{new} is missing or not executable after the move")
+        elif "# adopter: ours" not in moved.read_text(encoding="utf-8"):
+            problems.append("the adopter's edit to the wrapper did not travel with the move")
+        if (tree / CLI_NAME).exists():
+            problems.append(f"the old wrapper {CLI_NAME} is still there — the tree now has both")
+        if not (tree / "al").is_symlink() or os.readlink(tree / "al") != new:
+            problems.append(f"the alias was not repointed: al -> {os.readlink(tree / 'al') if (tree / 'al').is_symlink() else 'missing'}")
+        recorded = json.loads((tree / load_scaffolder().MANIFEST_NAME).read_text(encoding="utf-8"))["args"]
+        if recorded[recorded.index("--cli") + 1] != new:
+            problems.append(f"the record still says --cli {recorded[recorded.index('--cli') + 1]}")
+        if f"./{new}" not in (tree / "README.md").read_text(encoding="utf-8"):
+            problems.append("the README does not name the new wrapper")
+        git_in(tree, "add", "-A")
+        git_in(tree, "commit", "--quiet", "-m", "rename")
+        _, again = run([*upgrade, str(tree), "--dry-run", "--allow-untagged"], cwd=tree)
+        if "already current" not in again:
+            problems.append(f"the run after the rename is not `already current`:\n{again[-900:]}")
+
+    # Refusal 1: a render that is not the tree's own version must write nothing.
+    other = workdir / "cli-rename-ahead"
+    if other.exists():
+        shutil.rmtree(other)
+    run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(other)], cwd=workdir)
+    git_in(other, "commit", "--quiet", "--allow-empty", "-m", "scratch: a commit past the recorded ref")
+    behind = scaffold("cli-rename-behind")
+    code, output = run(
+        [sys.executable, str(other / "bin" / "skeletor-upgrade"), str(behind), "--set-arg", f"cli={new}",
+         "--allow-untagged"],
+        cwd=behind,
+    )
+    if code == 0 or "nothing was written" not in output or (behind / new).exists():
+        problems.append(f"a rename at a different version than the record was not refused cleanly:\n{output[-900:]}")
+
+    # Refusal 2: a new name the tree already uses must write nothing.
+    taken = scaffold("cli-rename-taken")
+    (taken / new).write_text("#!/bin/sh\necho mine\n", encoding="utf-8")
+    git_in(taken, "add", "-A")
+    git_in(taken, "commit", "--quiet", "-m", "adopter: a command of their own")
+    code, output = run([*upgrade, str(taken), "--set-arg", f"cli={new}", "--allow-untagged"], cwd=taken)
+    if code == 0 or "already exists" not in output or (taken / new).read_text(encoding="utf-8") != "#!/bin/sh\necho mine\n":
+        problems.append(f"a rename onto a name the tree uses was not refused cleanly:\n{output[-900:]}")
+
+    # The alias case: the new name IS a root symlink to the old wrapper, which is
+    # exactly stash.flow's tree (`sf -> stash`, renaming to `sf`). The link becomes
+    # the file; nothing else is at that name to protect.
+    aliased = scaffold("cli-rename-alias")
+    code, output = run([*upgrade, str(aliased), "--set-arg", "cli=al", "--allow-untagged"], cwd=aliased)
+    became = aliased / "al"
+    if code != 0 or became.is_symlink() or not became.is_file() or (aliased / CLI_NAME).exists():
+        problems.append(f"renaming onto an alias of the wrapper did not turn the alias into the file:\n{output[-900:]}")
+    elif "# adopter: ours" not in became.read_text(encoding="utf-8"):
+        problems.append("renaming onto the alias lost the adopter's wrapper edit")
+
+    return [
+        Result(
+            f"cli rename: the wrapper, its alias and the record move together; two refusals write nothing",
+            not problems,
+            time.time() - started,
+            "\n".join(problems),
+        )
+    ]
+
+
 def shell_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     """`--shell-package` renames the shell's package, and the tree must not
     notice.
@@ -10300,6 +10410,7 @@ def main() -> int:
         # costs a full `gates()` run on a tree of its own.
         for gate in shell_package_gate(fullest, workdir, venv_python, pyright_ok):
             results.append(gate)
+        results += cli_rename_gate(workdir)
 
         # Beside it, and the one that would have stopped v0.22.0: a tree that
         # also contains the ADOPTER's own `python -m` package. Every other
