@@ -9932,6 +9932,42 @@ def product_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok
     return results
 
 
+def newest_floor_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """A tree whose `--python` floor is the newest python this grid runs is lint-clean too.
+
+    `--python` renders black's `target-version`, and black formats differently per
+    target: at `py314` it rewrites `except (A, B):` into PEP 758's `except A, B:`,
+    which only 3.14 parses. Every other configuration here renders the default
+    floor, so a template that is black-clean there and not at the newest floor
+    ships green — stash.flow's tree moved its floor to 3.14 and failed `check lint`
+    on ten template handlers with nothing changed of its own.
+
+    The floor is the grid's own interpreter rather than a spelled version, so it
+    follows the newest python the toolchain actually runs, and the fullest tier is
+    scaffolded so every overlay's python is formatted. The lint gates are the
+    tree's own, read from its config, exactly as every other configuration runs
+    them.
+    """
+    started = time.time()
+    floor = f"{sys.version_info.major}.{sys.version_info.minor}"
+    tree = workdir / f"newest-floor-{floor}" / "tree"
+    if tree.exists():
+        shutil.rmtree(tree.parent)
+    code, output = run(
+        [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-new"), str(tree), "--name", "Probe",
+         "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--language", "python",
+         "--python", floor, "--python-ceiling", floor],
+        cwd=SKELETOR,
+    )
+    if code != 0:
+        return [Result(f"python {floor} floor: scaffold", False, time.time() - started, output[-1500:])]
+    (tree / ".venv").symlink_to(venv_python.parents[1])
+    return [
+        Result(f"python {floor} floor: {gate.label}", gate.ok, gate.seconds, gate.output)
+        for gate in lint_gates(tree, venv_python)
+    ]
+
+
 def cli_rename_gate(workdir: Path) -> List[Result]:
     """An adopted tree renames its wrapper with `--set-arg cli=`, and the move is honest.
 
@@ -10464,6 +10500,7 @@ def main() -> int:
         for gate in shell_package_gate(fullest, workdir, venv_python, pyright_ok):
             results.append(gate)
         results += cli_rename_gate(workdir)
+        results += newest_floor_gate(fullest, workdir, venv_python)
 
         # Beside it, and the one that would have stopped v0.22.0: a tree that
         # also contains the ADOPTER's own `python -m` package. Every other

@@ -5600,3 +5600,27 @@ not — a port in the adopter's own words is invisible to any comparison.
 The same report found a message that ignored the rest of its run: a wrapper already
 moved by hand has nothing to hold, so the line said "this run records the name" on
 a run that had printed "NOT recorded" above it.
+
+## Two consumers skeletor cannot run: GitHub's matrix naming, and black at another target
+
+**A skipped matrix has no names.** The unit suite is a matrix job gated by a
+job-level `if` on docs-only changes, and the setup guide told adopters to require
+`pytest 3.12`. When the `if` skips a matrix job GitHub never expands it, so it
+reports once as the literal `pytest ${{ matrix.python }}` and the required context
+never arrives — stash.flow's docs-only pull requests were BLOCKED with every check
+green. The non-matrix jobs report `skipped` under their real names and pass, which
+is why nothing else looked wrong. A `pytest` job now `needs:` the matrix and always
+reports, passing on success or on a skip the gate chose, and the guide requires that
+one name. This is the account-level class again — which contexts are required is in
+no file — and the fix is unmeasured here for the same reason: nothing in this
+repository runs the template's workflow on GitHub. Every tree set up from the old
+guide also needs its protection changed by hand; no file can do it.
+
+**`--python` renders black's target, and black formats per target.** At `py314`
+black rewrites `except (A, B):` into PEP 758's `except A, B:`, valid only on 3.14,
+and at every other target keeps it. Ten template handlers had that shape, so a tree
+whose floor moved to 3.14 failed its own `check lint` with nothing of its own
+changed (stash.flow). Each is a named tuple now, which formats the same everywhere,
+and `newest_floor_gate` scaffolds the fullest tier at the grid's own interpreter
+version and runs the tree's lint gates on it — every other configuration renders the
+default floor, so no gate had ever asked. Planting one handler back turns it red.

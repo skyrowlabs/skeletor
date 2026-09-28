@@ -99,6 +99,13 @@ def _path(pid: int, kind: str) -> Path:
     return LOCK_DIR / f"{kind}-{pid}.json"
 
 
+#: A name rather than a parenthesised tuple in the `except`: at a 3.14 target black
+#: rewrites `except (A, B):` into PEP 758's `except A, B:` and at every other target
+#: keeps it, so the literal is not black-clean at every `--python` this renders. A
+#: name formats the same everywhere. stash.flow, from a tree with a 3.14 floor.
+_UNREADABLE_LOCK = (json.JSONDecodeError, TypeError, OSError)
+
+
 def sweep() -> int:
     """Drop records whose process is gone. A crashed holder must never wedge
     the tree — an unattended system that can deadlock itself gets switched off."""
@@ -106,7 +113,7 @@ def sweep() -> int:
     for path in LOCK_DIR.glob("*.json"):
         try:
             hold = Hold(**json.loads(path.read_text(encoding="utf-8")))
-        except (json.JSONDecodeError, TypeError, OSError):
+        except _UNREADABLE_LOCK:
             path.unlink(missing_ok=True)
             removed += 1
             continue
@@ -151,7 +158,7 @@ def holders(root: Optional[Path] = None) -> List[Hold]:
     for path in lock_dir.glob("*.json"):
         try:
             out.append(Hold(**json.loads(path.read_text(encoding="utf-8"))))
-        except (json.JSONDecodeError, TypeError, OSError):
+        except _UNREADABLE_LOCK:
             continue
     return sorted((h for h in out if h.alive), key=lambda h: -h.started)
 
