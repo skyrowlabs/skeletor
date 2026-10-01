@@ -119,9 +119,21 @@ Full rules: [`docs/rules/testing.md`](rules/testing.md).
 
 Three things about this table are load-bearing:
 
-1. **A required context that reports `skipped` satisfies branch protection.**
-   So gating is done with `if:` on the job, never `paths-ignore` on the trigger
-   — a required check that never reports at all blocks the PR forever.
+1. **A required context that reports `skipped` satisfies branch protection** —
+   under its real name. So gating is done with `if:` on the job, never
+   `paths-ignore` on the trigger: a required check that never reports at all
+   blocks the PR forever.
+
+   **A matrix job is the exception, and `pytest` is why.** The unit suite runs
+   once per interpreter, as `pytest <version>`, and when its `if:` skips it on a
+   docs-only change GitHub never expands the matrix: one check reports, named
+   `pytest ${{ matrix.python }}` with the expression unexpanded, so a
+   protection requiring `pytest <version>` waits forever on a pull request
+   whose every check is green. **Require `pytest`, never `pytest <version>`.**
+   `pytest` is one job that `needs:` the matrix and always reports — pass when
+   every leg passed or the gate chose docs-only, fail otherwise. A protection
+   set up before that job existed names the per-version contexts; no file in
+   this tree can change that setting, so check it.
 2. **Requiring a context costs nothing; only running a job does.** Size the
    required list for what must gate. Never trim it to save minutes.
 3. **The Dependabot exemption is a mechanism, not a courtesy.** Auto-merge fires

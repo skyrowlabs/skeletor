@@ -9,6 +9,10 @@ name: CI
 #      protection, so size the required list for what must gate — never trim it
 #      to save money. The savings come from job-level gating, below.
 #
+#      **Except a matrix job**, which skipped reports under its UNEXPANDED name,
+#      so its per-leg contexts never report at all. Require `pytest`, never
+#      `pytest <version>` — the reason is at `unit-tests-result`.
+#
 #      **That fact has a sharp edge, and `gate` is where it cuts.** Every job
 #      below carries `needs: gate`, so if `gate` fails they do not run — they
 #      report `skipped`, which protection ACCEPTS. Requiring only the jobs and
@@ -401,12 +405,12 @@ jobs:
   # Ungated by full_suite: the host-side suite is minutes, and it is the check
   # most likely to catch the thing a docs-only detector got wrong.
   unit-tests:
-    # The interpreter is in the NAME on purpose, and the cost is real: a
-    # required status context is named, not discovered, so changing this string
-    # costs anybody with branch protection an edit and a window where the old
-    # context never reports. It is here because the matrix makes one job report
-    # as several, and a matrix whose legs share a name is a matrix you cannot
-    # require individually — which is the whole point of running two.
+    # The interpreter is in the NAME so a run says which leg failed: the matrix
+    # makes one job report as several, and legs sharing a name are
+    # indistinguishable on the checks list. **Do not require these names.** They
+    # report only when the matrix runs — skipped, it reports once under the
+    # unexpanded expression — so a protection naming `pytest <version>` blocks
+    # every docs-only pull request. Protection requires `pytest`, the job below.
     name: pytest ${{ matrix.python }}
     needs: gate
     if: needs.gate.outputs.docs_only != 'true'
@@ -537,8 +541,10 @@ jobs:
   # BLOCKED with every check green or skipped; the other gated jobs are not
   # matrices, so they report skipped under their real names and pass.
   #
-  # So protection requires THIS: one static name whatever the matrix holds, which
-  # also ends "read the leg names off a run" in the setup guide. It passes when
+  # So protection requires THIS: one static name whatever the matrix holds, so
+  # nobody has to read the leg names off a run to set it up, and a change to the
+  # matrix costs no protection edit. `docs/DEVELOPMENT.md` says the same to a
+  # reader deciding what to require, which is where one looks. It passes when
   # the matrix passed, or was skipped because the gate chose docs-only; it fails
   # when a leg failed or was cancelled, and when the gate itself did not pass —
   # a skip caused by a failed classifier is not a docs-only skip.

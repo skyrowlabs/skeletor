@@ -164,3 +164,51 @@ def test_no_reason_outlives_its_job():
         "Delete the line rather than re-justifying it — a reason nothing depends on is one the next "
         "reader has to disprove before touching the job."
     )
+
+
+_JOB_IF = re.compile(r"^    if:", re.MULTILINE)
+_JOB_NAME = re.compile(r"^    name:\s*(?P<name>.+)$", re.MULTILINE)
+_JOB_NEEDS = re.compile(r"^    needs:\s*(?P<needs>.+)$", re.MULTILINE)
+_ALWAYS = re.compile(r"^    if:\s*always\(\)\s*$", re.MULTILINE)
+
+
+def _job_name(body: str) -> str:
+    match = _JOB_NAME.search(body)
+    return match.group("name").strip() if match else ""
+
+
+def test_a_skippable_matrix_has_one_name_to_require():
+    """A matrix job its own `if:` can skip needs a static-named job summarising it.
+
+    Skipped, a matrix is never expanded, so it reports ONE check named after the
+    unexpanded `${{ matrix.* }}` expression and none of its per-leg names. A
+    protection requiring a leg's name then waits forever on a docs-only pull
+    request with every check green — stash.flow's were blocked exactly so. The
+    remedy is a job that `needs:` the matrix, runs `if: always()`, and carries a
+    name with no expression in it; that name is what protection requires.
+
+    Discovered rather than listed: any job whose `name:` interpolates the
+    matrix and which carries a job-level `if:` is enrolled, so a second matrix
+    added later is held without an edit here.
+    """
+    blocks = job_blocks()
+    matrices = [job for job, body in blocks.items() if "${{ matrix." in _job_name(body) and _JOB_IF.search(body)]
+    scanned(matrices, f"skippable matrix jobs in {CI.name}")
+
+    def summarises(body: str, matrix: str) -> bool:
+        needs = _JOB_NEEDS.search(body)
+        return (
+            bool(needs)
+            and bool(re.search(rf"(?<![A-Za-z0-9_-]){re.escape(matrix)}(?![A-Za-z0-9_-])", needs.group("needs")))
+            and bool(_ALWAYS.search(body))
+            and "${{" not in _job_name(body)
+            and bool(_job_name(body))
+        )
+
+    unsummarised = [matrix for matrix in matrices if not any(summarises(body, matrix) for body in blocks.values())]
+    assert not unsummarised, (
+        f"{unsummarised} can be skipped by its own `if:` and has no job that `needs:` it, runs "
+        "`if: always()` and has a static `name:`. Skipped, a matrix reports only its unexpanded "
+        "name, so a branch protection requiring any leg blocks every docs-only pull request. "
+        "Add that job and require its name — `unit-tests-result` is the worked example."
+    )
