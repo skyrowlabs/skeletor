@@ -225,6 +225,15 @@ def test_a_skippable_matrix_has_one_name_to_require():
     case from being a tautology is the next test, which proves the predicate on
     a tree built to have every shape, and `test_the_scan_finds_the_jobs`, which
     proves this file read a workflow at all.
+
+    **It checks the graph, not what the summary does with a skip.** Any job
+    that `needs:` the matrix, runs `always()` and has a static name qualifies —
+    including an all-checks verdict that fails on anything but `success`.
+    Measured in sky.boss's tree with a docs-only `if:` restored on its matrix:
+    this passed, and every docs-only pull request would have gone red. That
+    failure is loud on the first such pull request, which is why it is written
+    down here rather than guarded by a reading of shell. The summary must pass
+    `skipped` for the matrix, as `unit-tests-result` does.
     """
     unsummarised = unsummarised_matrices(job_blocks())
     assert not unsummarised, (
