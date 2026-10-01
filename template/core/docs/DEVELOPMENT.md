@@ -134,6 +134,14 @@ Three things about this table are load-bearing:
    every leg passed or the gate chose docs-only, fail otherwise. A protection
    set up before that job existed names the per-version contexts; no file in
    this tree can change that setting, so check it.
+
+   **Change it one branch at a time, and only once that branch carries the
+   job.** A pull request runs the `ci.yml` of its merge commit, so a required
+   context reaches it only if the base or the head has the job that reports it.
+   Require `pytest` on a branch whose `ci.yml` predates it and every pull request
+   into that branch from a branch cut from it — a hotfix, typically — waits
+   forever on a check nothing will run. The release branch is the one that
+   lags: it gets the job only when the base branch is next merged into it.
 2. **Requiring a context costs nothing; only running a job does.** Size the
    required list for what must gate. Never trim it to save minutes.
 3. **The Dependabot exemption is a mechanism, not a courtesy.** Auto-merge fires

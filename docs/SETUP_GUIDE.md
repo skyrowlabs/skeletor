@@ -209,6 +209,10 @@ gh api -X PUT repos/<org>/<slug>/branches/develop/protection \
   and reports whatever it holds: pass when every leg passed or the gate chose
   docs-only, fail otherwise. **A tree set up from an earlier version of this page
   requires the per-version names** — change that setting; no file in the tree can.
+  **Change it per branch, and only once that branch's `ci.yml` has the job.** A
+  pull request runs its merge commit's workflow, so on a branch that predates the
+  job, a hotfix cut from it waits forever on a `pytest` nothing runs. The release
+  branch gets the job only when the base branch is next merged into it.
 - **`Node` is a context on every tree**, including one with no `package.json` —
   it reports, prints a notice and skips its own steps. That is deliberate, and
   it is why requiring it costs nothing.
