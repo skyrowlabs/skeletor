@@ -66,3 +66,46 @@ def test_a_reason_is_not_optional(tmp_path, monkeypatch):
     monkeypatch.setattr(drift, "ALLOWLIST", allowlist)
 
     assert drift._allowlist() == {}
+
+
+def test_this_tree_has_no_drift(monkeypatch, capsys):
+    """The checker, against this tree's own workflows, on every pull request.
+
+    Until this test it ran in one place: the last step of `coverage-nightly.yml`,
+    after the suite. So it could only report on the nightly once the nightly was
+    already broken, and when the suite failed first — proto.pilot's, at
+    collection, every night from 2026-09-26 — the step never ran at all. A static
+    check of the workflows does not need a schedule; the unit suite is where a
+    pull request that drops a setup step meets it.
+    """
+    monkeypatch.setattr(sys, "argv", ["check_workflow_drift.py"])
+    status = drift.main()
+    # Findings are for a human, so they are on stderr — see scripts/output.py.
+    assert status == 0, f"check_workflow_drift.py found drift in this tree:\n{capsys.readouterr().err}"
+
+
+def test_a_suite_job_without_the_project_install_is_drift(tmp_path, monkeypatch, capsys):
+    """The rule, on a workflow built to break it — so the test above cannot pass
+    by enrolling nothing, which is how this checker spent its first life."""
+    workflows = tmp_path / "workflows"
+    workflows.mkdir()
+    (workflows / "nightly.yml").write_text(
+        "jobs:\n"
+        "  bare:\n"
+        "    steps:\n"
+        "      - run: pip install -r scripts/requirements.txt\n"
+        "      - run: python -m pytest tests/ -m unit\n"
+        "  installed:\n"
+        "    steps:\n"
+        "      - run: pip install -e .\n"
+        "      - run: python -m pytest tests/ -m unit\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(drift, "WORKFLOWS", workflows)
+    monkeypatch.setattr(drift, "ALLOWLIST", tmp_path / "none.yaml")
+    monkeypatch.setattr(sys, "argv", ["check_workflow_drift.py"])
+
+    status = drift.main()
+    out = capsys.readouterr().err
+    assert status == 1, f"a job running pytest with no project install passed:\n{out}"
+    assert "nightly.yml:bare" in out and "nightly.yml:installed" not in out, out

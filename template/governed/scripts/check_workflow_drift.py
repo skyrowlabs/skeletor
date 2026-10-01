@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
-"""Every job that stands up the stack carries the steps that make it work.
+"""Every job that stands up the stack, or runs the suite, carries the steps that make it work.
 
 The bug this exists for: two workflows both booted the stack, one of them was
 missing a setup step the other had, and three tests failed **every** run for two
 days while the same tests passed in the other workflow. Nobody looked, because
 each job's history was internally consistent.
 
-**Read `REQUIRED_STEPS` before trusting this.** It is the whole of what is
-compared, and it is deliberately short — this asks whether each enrolled job
-carries the steps below, not whether the jobs are identical. A field outside
-that dict can diverge silently and this stays green.
+**Read `RULES` before trusting this.** It is the whole of what is compared,
+and it is deliberately short — this asks whether each enrolled job carries the
+steps its rule requires, not whether the jobs are identical. A field outside
+those dicts can diverge silently and this stays green.
+
+**For its first life it enrolled nothing in any tree it shipped to.** The only
+rule was the stack's, a fresh tree stands no stack up, and the one workflow
+whose header sent its reader here — `coverage-nightly.yml`, *"It must use the
+SAME stack setup as ci.yml — see check_workflow_drift.py"* — runs pytest and
+never touches docker. So when `ci.yml` learned to install the project and the
+nightly did not, nothing compared them: proto.pilot's nightly failed at
+collection on its own dependencies every night from 2026-09-26, while its pull
+requests were green. The second rule enrols by what a job *runs*, which is the
+thing the two jobs actually shared.
 
 That distinction is not pedantry. A gate answering a narrower question than its
 name is worse than no gate, because the green is read as covering the wider one
@@ -54,7 +64,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Pattern, Tuple
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
 # owns every path below — can be imported. See scripts/paths.py.
@@ -68,19 +78,26 @@ from scripts.yaml_text import uncommented  # noqa: E402
 WORKFLOWS = GITHUB_DIR / "workflows"
 ALLOWLIST = SCRIPTS_DIR / "workflow_drift_allowlist.yaml"
 
-#: A job is enrolled if its text matches ANY of these — i.e. if it stands the
-#: stack up at all, however it does it.
-ENROLMENT_PATTERNS = [
-    re.compile(r"docker\s+compose\s+up"),
-    re.compile(r"uses:\s*\./\.github/actions/\S*stack"),
+#: `(what the rule is about, enrolment patterns, required steps)`. A job is
+#: enrolled in a rule if its text matches ANY of that rule's patterns, and must
+#: then contain every step the rule names. Each step names the failure it
+#: prevents — an entry with no stated failure gets deleted by the next person
+#: who finds it inconvenient.
+RULES: List[Tuple[str, List[Pattern[str]], Dict[str, str]]] = [
+    (
+        "stands the stack up",
+        [re.compile(r"docker\s+compose\s+up"), re.compile(r"uses:\s*\./\.github/actions/\S*stack")],
+        {"actions/setup-python": "without it the job runs on the runner's default interpreter, not the pinned one"},
+    ),
+    (
+        "runs the suite",
+        [re.compile(r"python\s+-m\s+pytest\b")],
+        {
+            "pip install -e": "without it a tree that is a package cannot import its own dependencies, and "
+            "the suite fails at collection — see ci.yml's 'Install the project, if it is one'",
+        },
+    ),
 ]
-
-#: What every enrolled job must contain. Each entry names the step and the
-#: failure it prevents — an entry with no stated failure gets deleted by the
-#: next person who finds it inconvenient.
-REQUIRED_STEPS: Dict[str, str] = {
-    "actions/setup-python": "without it the job runs on the runner's default interpreter, not the pinned one",
-}
 
 
 def key_for(workflow: str, job_id: str) -> str:
@@ -148,11 +165,17 @@ def main() -> int:
 
     for workflow in sorted(WORKFLOWS.glob("*.yml")):
         for job_id, body in _jobs(workflow).items():
-            if not any(pattern.search(body) for pattern in ENROLMENT_PATTERNS):
+            rules = [(about, steps) for about, patterns, steps in RULES if any(p.search(body) for p in patterns)]
+            if not rules:
                 continue
             key = key_for(workflow.name, job_id)
             enrolled.append(key)
-            missing = [f"{key}: missing '{step}' — {why}" for step, why in REQUIRED_STEPS.items() if step not in body]
+            missing = [
+                f"{key}: {about}, and is missing '{step}' — {why}"
+                for about, steps in rules
+                for step, why in steps.items()
+                if step not in body
+            ]
             divergence[key] = missing
             if key not in exempt:
                 findings.extend(missing)
