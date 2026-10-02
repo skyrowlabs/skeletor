@@ -4057,29 +4057,37 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
 
 
 def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
-    """An upgrade reports what the adopter's OWN linter will say about what it writes.
+    """An upgrade reports what the adopter's OWN lint hook will say about what it writes.
 
     mind.head sets ruff's `max-complexity` at 12, this template's `.flake8` at 15.
     v0.40.1 took a function in a file they had never touched from 12 to 13; the
     upgrade replaced the file exactly as designed and their lint gate went red on
-    arrival, after a dry run and a workspace forecast that both said clean. Every
-    gate here lints the template under the template's settings, which is the one
-    configuration that cannot disagree with it.
+    arrival, after a dry run and a workspace forecast that both said clean.
 
-    So the gate tightens the tree's own `.flake8` and makes the upgrade write a
-    file. The write is manufactured through `--no-base`: the file on disk is
-    replaced and its recorded hash set to match, so the tool sees *untouched by
-    you, moved by the template* and forecasts a replacement — no second checkout,
-    no version skew to arrange, and a dry run, since the forecast is the point.
+    The write is manufactured through `--no-base`: the file on disk is replaced
+    and its recorded hash set to match, so the tool sees *untouched by you, moved
+    by the template* and forecasts a replacement — no second checkout, no version
+    skew, and a dry run, since the forecast is the point.
 
-    Three cases, because each of the two obvious mistakes passes the first alone:
+    **The plant is in the hook's `args:`, not in `.flake8`**, and the first
+    version of this gate had it the other way. The template's flake8 hook passes
+    `--select=E9,F63,F7,F82,F401`, so what blocks a commit is that selection and
+    not `.flake8`'s complexity limit — and v0.41.0's forecast ran bare flake8,
+    reading `.flake8`, so this gate was asserting the forecast agreed with a
+    setting the commit hook never consulted. stash.flow named the dangerous
+    direction: hook args that WIDEN past the config file forecast clean and fail
+    the gate. Widening them is therefore the case, and it discriminates: without
+    the args passed through, `.flake8` allows 15 and nothing is forecast.
 
-    * **stricter** — the forecast names the file and a `C901`;
-    * **the template's own settings** — nothing, or this reports the template's
-      lint as the adopter's and every upgrade warns;
+    Four cases, each the one a plausible mistake passes:
+
+    * **widened hook** — the forecast names the file and a `C901`;
+    * **the shipped hook** — nothing new, but the envelope says what was asked
+      and of how many files, because v0.41.0's clean forecast and a forecast
+      that never ran were byte-identical (four trees, one round);
     * **debt already there** — the same complex text before and after, nothing:
-      a finding the file carried before this run is not news this run delivers,
-      and dropping the before/after comparison is the version that floods.
+      dropping the before/after comparison is the version that floods;
+    * **no `.pre-commit-config.yaml`** — a reason, and nothing claimed as asked.
     """
     results: List[Result] = []
     started = time.time()
@@ -4101,23 +4109,27 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
          and re.search(r"^def \w+\(", (tree / rel).read_text(encoding="utf-8"), re.MULTILINE)),
         None,
     )
-    config = tree / ".flake8"
+    config = tree / ".pre-commit-config.yaml"
     shipped = config.read_text(encoding="utf-8") if config.exists() else ""
-    if subject is None or not re.search(r"^max-complexity = \d+$", shipped, re.MULTILINE):
-        results.append(Result("lint forecast: the fixture has a scripts/ module and a complexity limit", False,
-                              time.time() - started, f"subject={subject}, .flake8 present={config.exists()}"))
+    hook_args = re.search(r"(- id: flake8\n(?:[ \t]+#.*\n|[ \t]*\n)*[ \t]+args: )\[[^\]]*\]", shipped)
+    if subject is None or not hook_args:
+        results.append(Result("lint forecast: the fixture has a scripts/ module and a flake8 hook with args", False,
+                              time.time() - started, f"subject={subject}, hook args found={bool(hook_args)}"))
         return results
+    widened = shipped.replace(hook_args.group(0), hook_args.group(1) + "['--select=C901', '--max-complexity=1']")
     rendered = (tree / subject).read_text(encoding="utf-8")
     pristine = manifest_path.read_text(encoding="utf-8")
 
-    def forecast(disk: str, complexity: Optional[int]) -> Tuple[dict, str]:
+    def forecast(disk: str, hooks: Optional[str]) -> Tuple[dict, str]:
+        """`hooks` is the `.pre-commit-config.yaml` text, or `None` for no file at all."""
         (tree / subject).write_text(disk, encoding="utf-8")
         record = json.loads(pristine)
         record["files"][subject] = hashlib.sha256(disk.encode("utf-8")).hexdigest()
         manifest_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-        if complexity is not None:
-            config.write_text(re.sub(r"^max-complexity = \d+$", f"max-complexity = {complexity}", shipped,
-                                     flags=re.MULTILINE), encoding="utf-8")
+        if hooks is None:
+            config.unlink()
+        else:
+            config.write_text(hooks, encoding="utf-8")
         try:
             done = subprocess.run(
                 [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--no-base", "--dry-run",
@@ -4134,26 +4146,32 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
             manifest_path.write_text(pristine, encoding="utf-8")
             config.write_text(shipped, encoding="utf-8")
 
+    def asked(payload: dict) -> bool:
+        return bool(payload.get("lint_consulted")) and (payload.get("lint_files") or 0) >= 1
+
     cases = [
-        ("a stricter adopter limit is forecast, naming the file", "x = 1\n", 1,
-         lambda new: any(f.startswith("C901") for f in new.get(subject, []))),
-        ("the template's own settings forecast nothing", "x = 1\n", None, lambda new: new == {}),
-        ("debt the file already carried is not reported as new", rendered + "\n# yours\n", 1,
-         lambda new: subject not in new),
+        ("hook args that widen past .flake8 are forecast, naming the file", "x = 1\n", widened,
+         lambda new, payload: asked(payload) and any(f.startswith("C901") for f in new.get(subject, []))),
+        ("the shipped hook forecasts nothing, and says what it asked", "x = 1\n", shipped,
+         lambda new, payload: new == {} and asked(payload)),
+        ("debt the file already carried is not reported as new", rendered + "\n# yours\n", widened,
+         lambda new, payload: asked(payload) and subject not in new),
+        ("no hook config is a stated reason, not a clean forecast", "x = 1\n", None,
+         lambda new, payload: new == {} and not payload.get("lint_consulted") and bool(payload.get("lint_reason"))),
     ]
-    for label, disk, complexity, holds in cases:
+    for label, disk, hooks, holds in cases:
         started = time.time()
-        payload, output = forecast(disk, complexity)
+        payload, output = forecast(disk, hooks)
         # The write has to be in the plan, or every case passes on a run that
         # linted nothing — a plant that did not land.
         planned = subject in payload.get("updated", [])
         new = payload.get("lint_new")
-        ok = planned and isinstance(new, dict) and holds(new) and not payload.get("lint_unanswered")
+        ok = planned and isinstance(new, dict) and holds(new, payload) and not payload.get("lint_unanswered")
         results.append(Result(
             f"lint forecast: {label}", ok, time.time() - started,
-            "" if ok else f"subject {subject}, planned={planned}, lint_new={new}, "
-                          f"unanswered={payload.get('lint_unanswered')}, unsupported={payload.get('lint_unsupported')}"
-                          f"\n{output[-1500:]}",
+            "" if ok else f"subject {subject}, planned={planned}, "
+                          + str({k: v for k, v in payload.items() if k.startswith("lint_")})
+                          + f"\n{output[-1500:]}",
         ))
     return results
 

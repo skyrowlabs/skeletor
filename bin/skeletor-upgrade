@@ -1727,10 +1727,34 @@ class Normaliser:
 #: makes the answer the adopter's: their config, their per-file ignores, their
 #: excludes — none of which survive a copy into a scratch directory, where a
 #: `per-file-ignores` keyed on `scripts/*` matches nothing.
+#:
+#: The hook's own `args:` go in too, **before** ours, so a hook that passes
+#: `--fix` is overridden by the `--no-fix` after it rather than editing anything.
+#: Without them this asked a different question from the gate it forecasts:
+#: stash.flow's hook narrows flake8 to `--select=E9,F63,F7,F82,F401`, so a bare
+#: run over-reported — and a hook whose args WIDEN past the config file would
+#: have been forecast clean and failed on arrival.
+#:
+#: A flag this sets itself is dropped from the hook's copy: ruff refuses
+#: `--no-fix` twice, and mind.head's hook passes it, so the first version of
+#: this crashed on exactly the tree that asked for it. `--fix` then `--no-fix` is
+#: an override ruff accepts, so a fixing hook still runs read-only.
+OWNED_FLAGS = {
+    "flake8": ("--stdin-display-name",),
+    "ruff": ("--no-fix", "--force-exclude", "--output-format", "--stdin-filename"),
+}
+
+
+def _theirs(hook: str, args: List[str]) -> List[str]:
+    owned = OWNED_FLAGS[hook.split("-")[0]]
+    return [arg for arg in args if arg.split("=")[0] not in owned]
+
+
 LINTERS = {
-    "flake8": lambda exe, rel: [exe, "--stdin-display-name", rel, "-"],
-    "ruff": lambda exe, rel: [
-        exe, "check", "--no-fix", "--force-exclude", "--output-format", "concise", "--stdin-filename", rel, "-"
+    "flake8": lambda exe, args, rel: [exe, *_theirs("flake8", args), "--stdin-display-name", rel, "-"],
+    "ruff": lambda exe, args, rel: [
+        exe, "check", *_theirs("ruff", args), "--no-fix", "--force-exclude", "--output-format", "concise",
+        "--stdin-filename", rel, "-",
     ],
 }
 LINTERS["ruff-check"] = LINTERS["ruff"]
@@ -1766,13 +1790,18 @@ class Linter:
 
     def __init__(self, target: Path) -> None:
         self.target = target
-        self.steps: List[Tuple[str, str]] = []
+        self.steps: List[Tuple[str, str, List[str]]] = []
         self.unsupported: List[str] = []
+        #: Why nothing was asked, when nothing was. Printed: a forecast that did
+        #: not run and one that found nothing must not read the same.
+        self.reason = ""
         config = target / ".pre-commit-config.yaml"
         if not config.exists():
+            self.reason = "the tree declares no .pre-commit-config.yaml"
             return
         text = config.read_text(encoding="utf-8")
         pins = Normaliser._pins(text)
+        hook_args = self._args(text)
         for hook in dict.fromkeys(re.findall(r"^\s*-?\s*id:\s*([\w.-]+)", text, re.MULTILINE)):
             if hook not in LINTERS:
                 continue
@@ -1784,7 +1813,60 @@ class Linter:
             if pinned and not Normaliser._matches(pinned, running):
                 self.unsupported.append(f"{hook} (tree pins {pinned}, {exe} reports {Normaliser._shown(running)})")
                 continue
-            self.steps.append((hook, exe))
+            self.steps.append((hook, exe, hook_args.get(hook, [])))
+        if not self.steps and not self.unsupported:
+            self.reason = "the tree declares no linter hook this knows how to run (" + ", ".join(LINTERS) + ")"
+
+    @staticmethod
+    def _args(text: str) -> Dict[str, List[str]]:
+        """`{hook id: its args}`, from either YAML spelling of the list.
+
+        Positional, like `Normaliser._pins`: an `args:` belongs to the hook above
+        it until the next `- id:` or `- repo:`. A hook declared twice keeps the
+        first, which is the one `dict.fromkeys` above runs.
+        """
+        found: Dict[str, List[str]] = {}
+        hook: Optional[str] = None
+        block: Optional[int] = None  # indent of a block-form `args:` being read
+        for line in text.splitlines():
+            if line.lstrip().startswith("#"):
+                continue  # a comment line neither ends a block list nor belongs to it
+            if block is not None:
+                item = re.match(r"^(\s*)-\s*(.+?)\s*$", line)
+                if item and len(item.group(1)) > block and hook:
+                    found.setdefault(hook, []).append(item.group(2).strip("\'\""))
+                    continue
+                if line.strip():
+                    block = None
+            if re.match(r"^\s*-\s*repo:", line):
+                hook = None
+                continue
+            declared = re.match(r"^\s*-\s*id:\s*([\w.-]+)", line)
+            if declared:
+                hook = declared.group(1) if declared.group(1) not in found else None
+                continue
+            inline = re.match(r"^(\s*)args:\s*\[(.*)\]\s*(#.*)?$", line)
+            if inline and hook:
+                # Quote-aware: `'--select=E9,F63'` is ONE argument, and a plain
+                # split on commas made it five — every adopter's flake8 hook.
+                found[hook] = [
+                    next(g for g in m.groups() if g is not None).strip()
+                    for m in re.finditer(r"'([^']*)'|\"([^\"]*)\"|([^,\s][^,]*)", inline.group(2))
+                ]
+                continue
+            opened = re.match(r"^(\s*)args:\s*$", line)
+            if opened and hook:
+                found[hook] = []
+                block = len(opened.group(1))
+        return found
+
+    def consulted(self) -> List[str]:
+        """What was asked, as a reader should see it: hook, and the binary that answered."""
+        def shown(exe: str) -> str:
+            path = Path(exe)
+            return str(path.relative_to(self.target)) if path.is_relative_to(self.target) else exe
+
+        return [f"{hook} ({shown(exe)})" for hook, exe, _ in self.steps]
 
     def applies(self, rel: str) -> bool:
         return rel.endswith(".py")
@@ -1796,10 +1878,15 @@ class Linter:
         reading it as one is the failure every ratchet here was fixed for.
         """
         found: List[str] = []
-        for hook, exe in self.steps:
+        for hook, exe, args in self.steps:
             try:
                 done = subprocess.run(
-                    LINTERS[hook](exe, rel), input=text, cwd=self.target, capture_output=True, text=True, timeout=120
+                    LINTERS[hook](exe, args, rel),
+                    input=text,
+                    cwd=self.target,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
                 )
             except (OSError, subprocess.SubprocessError):
                 return None
@@ -2237,9 +2324,22 @@ def main() -> int:
             ).stdout.strip()
             if tool_ref and tool_ref != head_ref:
                 say("⚠️ ", f"this tool is skeletor @ {tool_ref}; --ref pinned the render to {head_ref}, not the tool")
+                # A clone from the REMOTE, not a worktree of this checkout. The
+                # worktree advice wrote into this generator's `.git/worktrees/`,
+                # which an adopter barred from sibling repositories cannot do
+                # (stash.flow). A clone of the local path writes nothing here but
+                # has a local-path origin, so the writing path's "is the tag
+                # pushed" question answers about this disk; cloning the remote
+                # keeps that question about the remote, where it belongs.
+                origin = subprocess.run(
+                    ["git", "-C", str(SKELETOR), "remote", "get-url", "origin"], capture_output=True, text=True
+                ).stdout.strip()
+                source = origin if re.match(r"^(https?://|git@|ssh://)", origin) else "<skeletor's remote URL>"
                 detail("How this run merges and reports is the tool's behaviour. For a run that is")
-                detail(f"{head_ref} end to end, run bin/skeletor-upgrade from a worktree at that ref:")
-                detail(f"  git -C <skeletor> worktree add --detach /tmp/skeletor-{head_ref} {head_ref}")
+                detail(f"{head_ref} end to end, run bin/skeletor-upgrade from a clone at that ref:")
+                detail(f"  git clone -q --branch {head_ref} {source} /tmp/skeletor-{head_ref}")
+                detail("That writes nothing into this checkout, and its origin is the remote, so the")
+                detail("tag is resolvable there exactly when it is pushed.")
         # **After the standing line, so the reader sees what would be stamped before
         # being told it is refused.** The refusal reads the ref out of the head
         # render's own manifest rather than from `--ref` or from `git describe` here
@@ -2738,6 +2838,7 @@ def main() -> int:
         # real one would introduce. See `Linter`.
         linter = Linter(target)
         lint_new, lint_unanswered = linter.new(written) if linter.steps else ({}, [])
+        linted = sum(1 for rel in written if linter.applies(rel))
 
         for rel in sorted(set(base_files)):
             if rel in head_files or rel in GENERATED:
@@ -3016,6 +3117,12 @@ def main() -> int:
                         "lint_new": lint_new,
                         "lint_unanswered": lint_unanswered,
                         "lint_unsupported": linter.unsupported,
+                        # What was asked of how much, so `lint_new: {}` can be
+                        # told apart from a forecast that never ran — the two
+                        # were identical in v0.41.0 (four trees, one round).
+                        "lint_consulted": linter.consulted(),
+                        "lint_files": linted if linter.steps else 0,
+                        "lint_reason": linter.reason,
                         # Changed by the template and already present — neither written
                         # nor pending, and a reason the base advances.
                         "carried": carried,
@@ -3061,6 +3168,16 @@ def main() -> int:
                 if len(group) > 20:
                     detail(f"… and {len(group) - 20} more")
 
+        # One line on every run that writes Python, found or not. v0.41.0 printed
+        # only findings, so a clean forecast and one that never ran read the same
+        # — four trees said so in one round. It names what answered, because a
+        # tree that also blocks on black, isort or pyright could otherwise take
+        # "nothing new" as covering those, and none of them is asked.
+        if linted and not linter.steps and not linter.unsupported:
+            say("🔎", f"lint: not forecast — {linter.reason}")
+        elif linted and linter.steps and not lint_new and not lint_unanswered:
+            writes = "would write" if args.dry_run else "wrote"
+            say("🔎", f"lint: {', '.join(linter.consulted())} — nothing new in the {linted} file(s) this run {writes}")
         if lint_new:
             # Tense from the run, because the dry run is where this is worth most:
             # it is the only moment the adopter can decide before their gate does.
@@ -3072,6 +3189,7 @@ def main() -> int:
                 for finding in found:
                     detail(f"    {finding}")
             detail()
+            detail(f"Asked: {', '.join(linter.consulted())}, with the arguments your hooks pass.")
             detail("The template is clean under its own lint settings; these are yours, and stricter here.")
             detail("Nothing was held back over them: suppress, refactor or loosen, as you would for your own code.")
         if lint_unanswered:
