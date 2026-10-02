@@ -281,40 +281,29 @@ release PR are attributed to whoever owns the token, and it expires, so somebody
 has to rotate it.
 
 **Door three, a GitHub App**, which is what jam.sense uses — switch off, 304
-releases. This one **needs a workflow edit and `RELEASE_TOKEN` cannot carry it**,
-because an App does not issue a storable string. It issues an app id and a
-private key, which have to be exchanged for a one-hour installation token *at
-run time, by a step*. So the two secrets go in as `RELEASE_APP_ID` and
-`RELEASE_APP_PRIVATE_KEY`, and the release job gains a step above the action:
+releases — and **the release job ships with it**. An App does not issue a
+storable string, so `RELEASE_TOKEN` cannot carry it: it issues an app id and a
+private key, which a step exchanges for a one-hour installation token at run
+time. That step is in `ci.yml`, guarded on an `APP_ID` secret through a job-level
+`env:` (a step's `if:` cannot read `secrets`), so a tree without one skips it and
+the token falls through to `RELEASE_TOKEN`, then `github.token`. Store the pair
+as `APP_ID` and `APP_PRIVATE_KEY` — at organisation level, they reach every
+repository with no per-repo edit — and install the App on the repository with
+`Contents` and `Pull requests` read and write. A missing installation fails the
+mint step loudly rather than falling through.
 
-```yaml
-      - uses: actions/create-github-app-token@v3
-        id: app-token
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+The guarded form was measured on a runner before it shipped: with the secrets
+present the bridge reads `'true'`, the step mints, and the expression picks the
+App token; with an absent secret the bridge reads `'false'`, the step is skipped,
+and the expression falls through to `github.token`. Before that, this guide had
+adopters hand-edit the step in, which made `ci.yml` a modified file and every
+later upgrade a conflict there.
 
-      - uses: googleapis/release-please-action@v5
-        if: steps.config.outputs.present == 'true'
-        with:
-          config-file: .github/release-please-config.json
-          manifest-file: .github/.release-please-manifest.json
-          token: ${{ steps.app-token.outputs.token }}   # replaces the RELEASE_TOKEN line
-```
-
-That edit makes `ci.yml` a file you have modified, so `bin/skeletor-upgrade`
-will hand you a conflict there rather than replacing it — which is the correct
-outcome and worth knowing before you make it, not after.
-
-**The mint step does not ship, and the reason this guide gave for that was
-weaker than it sounded.** "Two secrets a scaffold cannot populate would be red
-on arrival" is avoidable: a job-level `env:` bridging `secrets.RELEASE_APP_ID`
-into a step-level `if:` would skip the step cleanly when unset, because the
-`secrets` context is not readable from a step's `if:` directly. The reasons that
-survive are that nobody has measured that guarded form on a runner, and that
-`--versioning` is a subtraction and nothing else by design — a mode that renders
-an extra step is a different shape and costs a verification grid this project
-does not have. Both are reasons to wait, not reasons it is impossible.
+**The release pull request targets the release branch, pinned.** release-please
+otherwise defaults to the repository's *default* branch, which in a two-branch
+tree is usually the base branch — so a push to the release branch opened its
+release pull request against the base instead. proto.pilot and stash.flow both
+did that on their first run; jam.sense pins `target-branch` for the same reason.
 
 **Set the default branch, and it is not the same field as `--base-branch`.**
 `skeletor-new` defaults to `--base-branch develop`, so `git init -b develop`

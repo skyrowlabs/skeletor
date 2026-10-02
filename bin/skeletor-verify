@@ -2052,6 +2052,35 @@ def actionlint_gate(tree: Path, venv_bin: Path) -> List[Result]:
         return [Result("actionlint", True, 0.0, "skipped: toolchain unavailable (offline?)")]
 
     code, output = run([str(binary), *workflows], cwd=tree)
+    # **actionlint's bundled action metadata is a snapshot, and it can be wrong
+    # about an action this template is right about.** `create-github-app-token@v3`
+    # documents `client-id` and deprecates `app-id` ("Use 'client-id' instead"),
+    # read from its own action.yml at v3; actionlint 1.7.12, its newest release,
+    # still requires `app-id` and rejects `client-id`. The release job uses
+    # `client-id` because that is the input the action supports and the one a
+    # real run measured minting with — switching to `app-id` to quiet this would
+    # ship a deprecation to every tree.
+    #
+    # So exactly those two messages are set aside, and the set-aside is checked
+    # against the output it sets aside, on every run: if actionlint stops
+    # emitting them it has caught up, the entry is stale, and this fails until
+    # it is deleted. Every OTHER finding still fails the gate.
+    stale_metadata = re.compile(
+        r'(input "client-id" is not defined|missing input "app-id" which is required) '
+        r'(in|by) action "actions/create-github-app-token@'
+    )
+    blocks = re.split(r"\n(?=\S+\.ya?ml:\d+:\d+: )", output.strip()) if output.strip() else []
+    kept = [block for block in blocks if not stale_metadata.search(block)]
+    excused = len(blocks) - len(kept)
+    if excused and not kept:
+        code = 0
+    if code == 0 and not excused and "create-github-app-token" in "".join(
+        (tree / path).read_text(encoding="utf-8") for path in workflows
+    ):
+        return [Result("actionlint: the create-github-app-token exemption is stale", False, time.time() - started,
+                       "actionlint no longer reports client-id/app-id for create-github-app-token — it has caught "
+                       "up with the action; delete `stale_metadata` from actionlint_gate.")]
+    output = "\n".join(kept)
     # actionlint lints `run:` blocks by shelling out to shellcheck, and when it
     # is absent it simply does not, without saying so. GitHub's ubuntu runners
     # ship shellcheck and a developer box may not, so the two answer differently

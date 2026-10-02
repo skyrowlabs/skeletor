@@ -1091,20 +1091,35 @@ trying to release. It is written up in [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.
 at Step 4, beside branch protection, because a setup step is the only place a
 fact outside every file can live.
 
-The template's part is a **seam, not a fix**: the release job takes
+The template's part started as a **seam, not a fix**: the release job took
 `token: ${{ secrets.RELEASE_TOKEN || github.token }}`. **That serves a PAT and
 structurally cannot serve a GitHub App**, which the first version of this
 paragraph got wrong in the direction that costs most — a secret holds a static
 string, and an App issues an id and a private key that a *step* exchanges for a
 one-hour token at run time. So there are three doors, not two: the switch (which
 an enterprise policy can close outright — stash.flow got a `409` saying so in
-this org), a PAT in `RELEASE_TOKEN` with no workflow edit, and an App with one.
-The app-token *step* still does not ship, but the reason first given for that —
-two unpopulated secrets would be red on arrival — was weaker than it sounded,
-since a job-level `env:` bridge into a step `if:` avoids it. What survives is
-that nobody has measured the guarded form, and that `--versioning` is a
-subtraction and nothing else. Reported by skyrow-workspace, from the App
-registration, an hour after `v0.13.0` shipped.
+this org), a PAT in `RELEASE_TOKEN`, and an App. Reported by skyrow-workspace,
+from the App registration, an hour after `v0.13.0` shipped.
+
+**The App step ships now, guarded, and it was held back on a reason that only
+needed a run.** From `v0.13.0` the stated reasons were that nobody had
+measured the guarded form and that `--versioning` is a subtraction. The second
+never applied — the step sits behind the same `steps.config` test as the action,
+so a `tag` tree skips it like the rest of the job. The first was one throwaway
+branch: a job-level `env:` carries `secrets.APP_ID != ''` into the step's `if:`,
+the step mints, the `||` chain picks the App token, and an absent secret skips
+the step and falls through to `github.token`. What made it urgent was the first
+`develop`→`main` merges in this fleet: every tree's release job created its
+branch and commit and was refused the pull request, because the organisation
+forbids `GITHUB_TOKEN` from opening one and no tree held a PAT. The secret names
+are `APP_ID`/`APP_PRIVATE_KEY`, which that organisation already holds at org
+level — generic names, so the comment at the site says to rename the pair where
+`APP_ID` means some other App.
+
+The same failure carried a second defect: release-please's `target-branch`
+defaults to the repository's **default** branch, which in a two-branch tree is
+the base branch, so the release pull request was aimed at `develop`. It is
+pinned to the release branch now, as jam.sense had already learned to.
 
 The fallthrough was **measured, not reasoned**. `actionlint` holds the
 expression's syntax and knows nothing about which secrets exist in an account,
