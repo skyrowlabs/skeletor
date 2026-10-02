@@ -2955,6 +2955,24 @@ invisible to coverage and the population does not move. What lifts a tree out of
 the degenerate case is the first *test* of its own — the act the refusal is
 waiting for anyway.
 
+### The comparison measured the template, once upgrades moved it
+
+The refusal above was deliberately narrow — it stopped the paths that *write*
+the number down and left the comparison over the whole measured set, on the
+argument that the shell is the tree's code from its first commit. That held
+while the shell sat still, and `bin/skeletor-upgrade` exists to move it.
+proto.pilot's nightly went red at 86.88% against 87.43% after an upgrade, with
+its product package +0 statements and +0 misses: the 277 new misses were all
+`scripts/`, the shell and `tests/`, every one a manifest path. The message told
+them to cover what they changed.
+
+`own_baseline_pct` compares the rate over the project's own files — not in
+`.skeletor.json`, not under `tests/` — and the whole-set rate is reported beside
+it. The argument, what it gives up, and why the old key keeps its old meaning
+are in `check_coverage_budget.py`'s docstring, where the next change will be
+made. The grid's half is the one no tree can ask: that a real coverage report's
+filenames match a real manifest's paths, so `own_pct` exists at all.
+
 ### Two tiers where the debug loop was permanently red
 
 Found by the change above, on `bin/skeletor-verify --tier core`. Four gates run

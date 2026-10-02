@@ -2295,7 +2295,10 @@ def check_the_baseline_is_refused_on_a_fresh_tree(tree: Path, venv_python: Path)
         return code, payload, output + envelope
 
     def baseline() -> float:
-        return float(json.loads((tree / "tests" / "coverage_budget.json").read_text())["suites"]["unit"]["baseline_pct"])
+        # `--update` writes `own_baseline_pct` where a manifest can tell the
+        # tree's code from ours, and removes the shipped `baseline_pct`.
+        entry = json.loads((tree / "tests" / "coverage_budget.json").read_text())["suites"]["unit"]
+        return float(entry.get("own_baseline_pct", entry.get("baseline_pct", 0.0)))
 
     code, payload, output = measure()
     fresh_refused = code == 1 and payload.get("own_statements") == 0 and baseline() == 0.0
@@ -2321,7 +2324,16 @@ def check_the_baseline_is_refused_on_a_fresh_tree(tree: Path, venv_python: Path)
         "pytestmark = pytest.mark.unit\n\n\ndef test_add() -> None:\n    assert add(1, 1) == 2\n"
     )
     code, payload, output = measure()
-    recorded = code == 0 and (payload.get("own_statements") or 0) > 0 and baseline() > 0.0
+    # `own_pct` is the half only a live run can establish: that the filenames a
+    # real coverage report carries match the paths a real manifest records. The
+    # tree's own suite hands both in as fixtures, so it agrees with itself.
+    recorded = (
+        code == 0
+        and (payload.get("own_statements") or 0) > 0
+        and payload.get("own_pct") is not None
+        and "own_baseline_pct" in json.loads((tree / "tests" / "coverage_budget.json").read_text())["suites"]["unit"]
+        and baseline() > 0.0
+    )
     results.append(
         Result(
             "coverage baseline: recorded once the tree measures code of its own",
