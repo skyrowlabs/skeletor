@@ -85,6 +85,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -1720,6 +1721,118 @@ class Normaliser:
         return scratch.read_text(encoding="utf-8")
 
 
+#: How to lint one file's text without writing it, keyed by the hook id a tree
+#: declares. A capability map for the reason `FORMATTERS` is one. Both read
+#: **stdin under the file's real path, from the tree's own root**, which is what
+#: makes the answer the adopter's: their config, their per-file ignores, their
+#: excludes — none of which survive a copy into a scratch directory, where a
+#: `per-file-ignores` keyed on `scripts/*` matches nothing.
+LINTERS = {
+    "flake8": lambda exe, rel: [exe, "--stdin-display-name", rel, "-"],
+    "ruff": lambda exe, rel: [
+        exe, "check", "--no-fix", "--force-exclude", "--output-format", "concise", "--stdin-filename", rel, "-"
+    ],
+}
+LINTERS["ruff-check"] = LINTERS["ruff"]
+
+#: `path:line:col: ` — dropped before two runs are compared, because a finding
+#: that only moved is not new, and every merge moves lines.
+_LINT_LOCATION = re.compile(r"^.*?:\d+:\d+:\s*")
+
+
+class Linter:
+    """The adopter's own linter, asked about what this run is about to write.
+
+    **The template is clean under its own lint and that says nothing about
+    theirs.** mind.head sets ruff's `max-complexity` to 12 where this template's
+    `.flake8` says 15; v0.40.1 took one function in an untouched file from 12 to
+    13, the upgrade replaced the file exactly as designed, and their lint gate
+    went red on arrival — after a dry run, and a workspace forecast, that both
+    said clean. `--normalise` already ran their formatters over both sides; it
+    had never asked their linter anything.
+
+    So every file this run adds, replaces or merges is linted twice, before and
+    after, and a finding present after and not before is reported. Twice rather
+    than once because a tree carries lint debt of its own, and debt that was
+    there before the upgrade is not news the upgrade should deliver. It reports
+    and never decides: nothing is held back over a finding, since a
+    suppression, a refactor and a looser threshold are all the adopter's call,
+    and a merge tool that refused on lint would be making it for them.
+
+    Declared hooks only, pins checked exactly as `Normaliser` checks them — a
+    linter at another version reports differently, which would be noise
+    presented as a forecast.
+    """
+
+    def __init__(self, target: Path) -> None:
+        self.target = target
+        self.steps: List[Tuple[str, str]] = []
+        self.unsupported: List[str] = []
+        config = target / ".pre-commit-config.yaml"
+        if not config.exists():
+            return
+        text = config.read_text(encoding="utf-8")
+        pins = Normaliser._pins(text)
+        for hook in dict.fromkeys(re.findall(r"^\s*-?\s*id:\s*([\w.-]+)", text, re.MULTILINE)):
+            if hook not in LINTERS:
+                continue
+            exe = Normaliser._executable(target, hook.split("-")[0])
+            if not exe:
+                self.unsupported.append(f"{hook} (not installed)")
+                continue
+            pinned, running = pins.get(hook), Normaliser._version(exe)
+            if pinned and not Normaliser._matches(pinned, running):
+                self.unsupported.append(f"{hook} (tree pins {pinned}, {exe} reports {Normaliser._shown(running)})")
+                continue
+            self.steps.append((hook, exe))
+
+    def applies(self, rel: str) -> bool:
+        return rel.endswith(".py")
+
+    def findings(self, text: str, rel: str) -> Optional[List[str]]:
+        """What the declared linters say about `text` at `rel`, locations dropped.
+
+        `None` when a linter could not answer — a crash is not a clean bill, and
+        reading it as one is the failure every ratchet here was fixed for.
+        """
+        found: List[str] = []
+        for hook, exe in self.steps:
+            try:
+                done = subprocess.run(
+                    LINTERS[hook](exe, rel), input=text, cwd=self.target, capture_output=True, text=True, timeout=120
+                )
+            except (OSError, subprocess.SubprocessError):
+                return None
+            if done.returncode not in (0, 1):
+                return None
+            # Located lines only: ruff ends with `Found 1 error.` or `All checks
+            # passed!`, which differ by count and would read as a new finding.
+            found += [_LINT_LOCATION.sub("", line) for line in done.stdout.splitlines() if _LINT_LOCATION.match(line)]
+        return found
+
+    def new(self, written: Dict[str, Tuple[Optional[str], str]]) -> Tuple[Dict[str, List[str]], List[str]]:
+        """`({path: findings the write introduces}, [paths no linter could answer for])`."""
+        introduced: Dict[str, List[str]] = {}
+        unanswered: List[str] = []
+        for rel, (before, after) in sorted(written.items()):
+            if not self.applies(rel):
+                continue
+            later = self.findings(after, rel)
+            if later is None:
+                unanswered.append(rel)
+                continue
+            if not later:
+                continue  # nothing after, so nothing new — and no second run
+            earlier = self.findings(before, rel) if before is not None else []
+            if earlier is None:
+                unanswered.append(rel)
+                continue
+            fresh = list((Counter(later) - Counter(earlier)).elements())
+            if fresh:
+                introduced[rel] = fresh
+        return introduced, unanswered
+
+
 def read(path: Optional[Path]) -> Optional[str]:
     if path is None or not path.exists():
         return None
@@ -2402,6 +2515,10 @@ def main() -> int:
         #: it, by a run that also records the new name. See the move below.
         wrapper_move: Optional[str] = None
         move_held = False
+        #: `{path: (text before, text after)}` for every file this run adds,
+        #: replaces or merges — dry or not, since the forecast is the point. Read
+        #: by `Linter.new` after the loop and nowhere else.
+        written: Dict[str, Tuple[Optional[str], str]] = {}
 
         for rel in sorted(set(base_files) | set(head_files)):
             if rel in GENERATED or rel == MANIFEST_NAME:
@@ -2470,6 +2587,8 @@ def main() -> int:
                         shutil.copy2(head_files[rel], sidecar)
                     continue
                 added.append(rel)
+                if ours is not None:
+                    written[rel] = (None, ours)
                 if not args.dry_run:
                     live_path.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(head_files[rel], live_path)
@@ -2542,6 +2661,8 @@ def main() -> int:
                     # Proof, not a guess: an equal hash means the file IS the old
                     # render, so there is no edit here to lose.
                     updated.append(rel)
+                    if ours is not None:
+                        written[rel] = (theirs, ours)
                     if not args.dry_run:
                         live_path.write_text(ours, encoding="utf-8")
                     continue
@@ -2564,6 +2685,8 @@ def main() -> int:
                 continue
             if not edited:
                 updated.append(rel)
+                if ours is not None:
+                    written[rel] = (theirs, ours)
                 if not args.dry_run:
                     live_path.write_text(ours, encoding="utf-8")
                 continue
@@ -2605,10 +2728,16 @@ def main() -> int:
                     patch.write_text(unified(base, ours, rel), encoding="utf-8")
             else:
                 merged.append(rel)
+                written[rel] = (theirs, resolved)
                 if normaliser.applies(rel) and not touches_code(base, ours):
                     comment_only.append(rel)
                 if not args.dry_run:
                     live_path.write_text(resolved, encoding="utf-8")
+
+        # Asked of the text, not the disk, so a dry run forecasts exactly what a
+        # real one would introduce. See `Linter`.
+        linter = Linter(target)
+        lint_new, lint_unanswered = linter.new(written) if linter.steps else ({}, [])
 
         for rel in sorted(set(base_files)):
             if rel in head_files or rel in GENERATED:
@@ -2880,6 +3009,13 @@ def main() -> int:
                         # tell a decision to port from a formatter's opinion
                         # without re-running the merge to find out.
                         "formatting_only": formatting_only,
+                        # Findings the tree's OWN declared linter reports in what
+                        # this run writes and did not report before it — a dry
+                        # run's included. `lint_unanswered` is the files a linter
+                        # crashed on, which is not the same answer as none.
+                        "lint_new": lint_new,
+                        "lint_unanswered": lint_unanswered,
+                        "lint_unsupported": linter.unsupported,
                         # Changed by the template and already present — neither written
                         # nor pending, and a reason the base advances.
                         "carried": carried,
@@ -2924,6 +3060,30 @@ def main() -> int:
                     item(rel)
                 if len(group) > 20:
                     detail(f"… and {len(group) - 20} more")
+
+        if lint_new:
+            # Tense from the run, because the dry run is where this is worth most:
+            # it is the only moment the adopter can decide before their gate does.
+            writes = "would write" if args.dry_run else "wrote"
+            count = sum(len(found) for found in lint_new.values())
+            say("⚠️ ", f"{count} finding(s) from your own linter in what this run {writes}, not there before")
+            for rel, found in lint_new.items():
+                item(rel)
+                for finding in found:
+                    detail(f"    {finding}")
+            detail()
+            detail("The template is clean under its own lint settings; these are yours, and stricter here.")
+            detail("Nothing was held back over them: suppress, refactor or loosen, as you would for your own code.")
+        if lint_unanswered:
+            writes = "would write" if args.dry_run else "wrote"
+            say("⚠️ ", f"your linter could not answer for {len(lint_unanswered)} file(s) this run {writes}")
+            for rel in lint_unanswered:
+                item(rel)
+            detail("It exited with an error rather than a verdict, so nothing is known about these.")
+        if linter.unsupported and written:
+            say("⚠️ ", "a linter your tree declares could not be run, so what this run writes was not linted by it")
+            for hook in linter.unsupported:
+                item(hook)
 
         if conflicted and advanced:
             # **The run that records a port reports it once, in its own voice.** It

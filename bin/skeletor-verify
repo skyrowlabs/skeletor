@@ -4027,6 +4027,108 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
     return results
 
 
+def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """An upgrade reports what the adopter's OWN linter will say about what it writes.
+
+    mind.head sets ruff's `max-complexity` at 12, this template's `.flake8` at 15.
+    v0.40.1 took a function in a file they had never touched from 12 to 13; the
+    upgrade replaced the file exactly as designed and their lint gate went red on
+    arrival, after a dry run and a workspace forecast that both said clean. Every
+    gate here lints the template under the template's settings, which is the one
+    configuration that cannot disagree with it.
+
+    So the gate tightens the tree's own `.flake8` and makes the upgrade write a
+    file. The write is manufactured through `--no-base`: the file on disk is
+    replaced and its recorded hash set to match, so the tool sees *untouched by
+    you, moved by the template* and forecasts a replacement — no second checkout,
+    no version skew to arrange, and a dry run, since the forecast is the point.
+
+    Three cases, because each of the two obvious mistakes passes the first alone:
+
+    * **stricter** — the forecast names the file and a `C901`;
+    * **the template's own settings** — nothing, or this reports the template's
+      lint as the adopter's and every upgrade warns;
+    * **debt already there** — the same complex text before and after, nothing:
+      a finding the file carried before this run is not news this run delivers,
+      and dropping the before/after comparison is the version that floods.
+    """
+    results: List[Result] = []
+    started = time.time()
+    manifest_name = load_scaffolder().MANIFEST_NAME
+    result, tree = scaffold(tier, "python", workdir, name="lint-forecast")
+    results.append(Result(f"lint forecast: {result.label}", result.ok, result.seconds, result.output))
+    if not result.ok:
+        return results
+    # The pinned flake8, for the reason `normalise_gate` gives: a linter off the
+    # pin is refused by the tool, and the PATH one on this box is not the pin.
+    (tree / ".venv").symlink_to(venv_python.parents[1])
+
+    manifest_path = tree / manifest_name
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    # A shipped script with a function in it — searched for, not named, so a
+    # rename of any one file does not quietly empty the fixture.
+    subject = next(
+        (rel for rel in sorted(manifest["files"]) if rel.startswith("scripts/") and rel.endswith(".py")
+         and re.search(r"^def \w+\(", (tree / rel).read_text(encoding="utf-8"), re.MULTILINE)),
+        None,
+    )
+    config = tree / ".flake8"
+    shipped = config.read_text(encoding="utf-8") if config.exists() else ""
+    if subject is None or not re.search(r"^max-complexity = \d+$", shipped, re.MULTILINE):
+        results.append(Result("lint forecast: the fixture has a scripts/ module and a complexity limit", False,
+                              time.time() - started, f"subject={subject}, .flake8 present={config.exists()}"))
+        return results
+    rendered = (tree / subject).read_text(encoding="utf-8")
+    pristine = manifest_path.read_text(encoding="utf-8")
+
+    def forecast(disk: str, complexity: Optional[int]) -> Tuple[dict, str]:
+        (tree / subject).write_text(disk, encoding="utf-8")
+        record = json.loads(pristine)
+        record["files"][subject] = hashlib.sha256(disk.encode("utf-8")).hexdigest()
+        manifest_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        if complexity is not None:
+            config.write_text(re.sub(r"^max-complexity = \d+$", f"max-complexity = {complexity}", shipped,
+                                     flags=re.MULTILINE), encoding="utf-8")
+        try:
+            done = subprocess.run(
+                [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--no-base", "--dry-run",
+                 "--json"],
+                cwd=tree, capture_output=True, text=True, timeout=600,
+            )
+            try:
+                payload = json.JSONDecoder().raw_decode(done.stdout[done.stdout.index("{"):])[0]
+            except ValueError:
+                payload = {}
+            return payload, done.stdout + done.stderr
+        finally:
+            (tree / subject).write_text(rendered, encoding="utf-8")
+            manifest_path.write_text(pristine, encoding="utf-8")
+            config.write_text(shipped, encoding="utf-8")
+
+    cases = [
+        ("a stricter adopter limit is forecast, naming the file", "x = 1\n", 1,
+         lambda new: any(f.startswith("C901") for f in new.get(subject, []))),
+        ("the template's own settings forecast nothing", "x = 1\n", None, lambda new: new == {}),
+        ("debt the file already carried is not reported as new", rendered + "\n# yours\n", 1,
+         lambda new: subject not in new),
+    ]
+    for label, disk, complexity, holds in cases:
+        started = time.time()
+        payload, output = forecast(disk, complexity)
+        # The write has to be in the plan, or every case passes on a run that
+        # linted nothing — a plant that did not land.
+        planned = subject in payload.get("updated", [])
+        new = payload.get("lint_new")
+        ok = planned and isinstance(new, dict) and holds(new) and not payload.get("lint_unanswered")
+        results.append(Result(
+            f"lint forecast: {label}", ok, time.time() - started,
+            "" if ok else f"subject {subject}, planned={planned}, lint_new={new}, "
+                          f"unanswered={payload.get('lint_unanswered')}, unsupported={payload.get('lint_unsupported')}"
+                          f"\n{output[-1500:]}",
+        ))
+    return results
+
+
 def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     """The footer that tells a reader not to verify an upgrade by counting.
 
@@ -10604,6 +10706,10 @@ def main() -> int:
             results.append(gate)
 
         for gate in sidecar_gate(fullest, workdir):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        for gate in lint_forecast_gate(fullest, workdir, venv_python):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 
