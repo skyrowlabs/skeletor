@@ -9,7 +9,8 @@ Drives `{{BASE_BRANCH}}` → tagged release on `{{RELEASE_BRANCH}}`. It is a **s
 machine across turns**, not one long run: each phase ends at a checkpoint you
 report, and Phase D stops entirely for a human.
 
-**It never merges the release PR itself.**
+**It never merges a release pull request itself** — and in a two-branch tree
+there are two, below.
 
 ---
 
@@ -58,13 +59,22 @@ gh pr create --base {{RELEASE_BRANCH}} --head {{BASE_BRANCH}} \
 A PR into the release branch runs **everything**. Watch it; fix what breaks; push
 fixes to `{{BASE_BRANCH}}`. Report when every check is green.
 
-## Phase D — STOP. The human merges.
+## Phase D — STOP. The human merges, twice.
 
 Report that the PR is green and ready, with its number and URL. **Do not merge
 it.** Admin enforcement is deliberately off on the release branch precisely so
 this step is a human's.
 
-Then watch for the tag Release Please publishes.
+**That merge does not publish anything.** It is a push to `{{RELEASE_BRANCH}}`,
+and on that push the release job opens a **second** pull request — Release
+Please's own, titled `chore({{RELEASE_BRANCH}}): release <version>`, from
+`release-please--branches--{{RELEASE_BRANCH}}`, authored by whichever App or
+token the release job used, carrying the version bump and the changelog. The tag
+is published when *that* one merges.
+Watch for it, report its number and URL, and stop again: it is a human's merge
+for the same reason. This phase used to end at "watch for the tag", which reads
+as though the first merge produces one; no release pull request had ever opened
+in a tree scaffolded from here, so nothing showed the gap.
 <!-- /SCAFFOLD-IF -->
 <!-- SCAFFOLD-IF-SAME {{BASE_BRANCH}} {{RELEASE_BRANCH}} -->
 ## Phase C — Push to the release branch and babysit it
