@@ -9405,6 +9405,56 @@ def shared_helper_api_gate() -> List[Result]:
     return results
 
 
+def absent_region_gate() -> Result:
+    """A conflict whose every change lands in lines the adopter removed says so.
+
+    sky.boss deleted its whole `release` job and declined the hunks inside it;
+    two upgrades running reported an ordinary conflict, and `--ported` said it
+    "could not find the template's change" without ever saying that what the
+    change would have been applied to was gone. `absent_hunks` now answers, and
+    the report only speaks when **every** hunk is unanchored — mind.head's
+    reformatted test file read "1 of 4", which was literally true and pointed
+    the wrong way, since a rewrapped region is not a removed one.
+
+    The fixture is the real change that produced both reports: `ci.yml`'s release
+    job, `v0.41.1` → `v0.42.0`. Three readings of it:
+
+    * **the job removed** — every hunk absent. The tree's top-level
+      `permissions:` survives, which is the trap the first predicate fell into:
+      a line judged distinctive by its shape matched a different block, so
+      anchors are lines that occur once in the base, and this case holds that;
+    * **an unrelated edit elsewhere** — no hunk absent;
+    * **the region present but every line reindented** — nothing absent either,
+      because lines are compared stripped. A rewrap is the case the
+      all-or-nothing rule exists for and cannot be told apart here; reindenting
+      can, and must not be called a deletion.
+    """
+    started = time.time()
+    upgrader = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade_absent")
+    rel = "template/core/.github/workflows/ci.yml"
+    shown = {tag: run(["git", "show", f"{tag}:{rel}"], cwd=SKELETOR) for tag in ("v0.41.1", "v0.42.0")}
+    if any(code != 0 for code, _ in shown.values()):
+        return Result("absent region: the v0.41.1/v0.42.0 fixture is not in this checkout's tags", False,
+                      time.time() - started, "")
+    base, ours = shown["v0.41.1"][1], shown["v0.42.0"][1]
+    job = base.index("\n  release-please:\n")
+    removed = base[:job + 1]
+    edited = base.replace("name: CI\n", "name: CI (ours)\n", 1)
+    reindented = base[:job + 1] + "\n".join("  " + line if line else line for line in base[job + 1:].split("\n"))
+    problems = []
+    gone, hunks = upgrader.absent_hunks(base, removed, ours)
+    if not hunks or gone != hunks:
+        problems.append(f"job removed: {gone} of {hunks} hunks absent — expected all")
+    if "\npermissions:" not in removed:
+        problems.append("the fixture lost its top-level permissions: block, so the shape trap is not exercised")
+    for label, theirs in (("unrelated edit", edited), ("reindented region", reindented)):
+        gone, hunks = upgrader.absent_hunks(base, theirs, ours)
+        if gone:
+            problems.append(f"{label}: {gone} of {hunks} hunks called absent — expected none")
+    return Result("absent region: a removed section is told apart from an edited one", not problems,
+                  time.time() - started, "\n".join(problems))
+
+
 def already_applied_gate() -> Result:
     """A re-run does not merge a template change into a file that already has it.
 
@@ -10599,6 +10649,7 @@ def main() -> int:
         results += checkout_path_literal_gate()
         results.append(template_comment_names_gate())
         results.append(already_applied_gate())
+        results.append(absent_region_gate())
         results += upstream_record_gate()
         results += shared_helper_api_gate()
         results += maintain_summary_gate()

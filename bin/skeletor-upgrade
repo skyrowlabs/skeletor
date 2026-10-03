@@ -1866,7 +1866,13 @@ class Linter:
             path = Path(exe)
             return str(path.relative_to(self.target)) if path.is_relative_to(self.target) else exe
 
-        return [f"{hook} ({shown(exe)})" for hook, exe, _ in self.steps]
+        # The hook's own arguments are part of the answer: a forecast narrowed to
+        # `--select=E9,...` and one reading `.flake8` bare say "nothing new" about
+        # different questions, and the line read the same for both (stash.flow).
+        return [
+            f"{hook} ({shown(exe)}" + (f" {' '.join(_theirs(hook, args))}" if _theirs(hook, args) else "") + ")"
+            for hook, exe, args in self.steps
+        ]
 
     def applies(self, rel: str) -> bool:
         return rel.endswith(".py")
@@ -1942,6 +1948,54 @@ def merge(base: str, theirs: str, ours: str, workdir: Path) -> Optional[str]:
     )
     # Exit code is the number of conflicts, or negative on error.
     return result.stdout if result.returncode == 0 else None
+
+
+#: The floor for a line to stand for its place: some letters and some length,
+#: so `}` and `fi` never qualify. Distinctiveness itself is uniqueness — see
+#: `absent_hunks` — because shape got it wrong both ways.
+_ANCHOR = re.compile(r".*[A-Za-z].*")
+_ANCHOR_MIN = 8
+
+
+def absent_hunks(base: str, theirs: str, ours: str) -> Tuple[int, int]:
+    """`(hunks whose surroundings are gone from theirs, hunks)` for base → ours.
+
+    A conflict whose every hunk sits in lines the adopter no longer has — a job
+    they deleted, a section they cut — is not a port waiting to happen, and it
+    used to read exactly like one. sky.boss deleted its whole `release` job,
+    declined the hunk inside it, and was told on two upgrades running that the
+    change could not be found, never that what it would have been applied to was
+    not there. A hunk counts as absent only when **no** distinctive line of it or
+    its three lines of context appears anywhere in theirs, so the error runs
+    toward calling it an ordinary conflict, which is what it was before.
+    """
+    import difflib
+
+    base_lines, ours_lines = base.splitlines(), ours.splitlines()
+    present = {line.strip() for line in theirs.splitlines()}
+    # **An anchor is a line that occurs exactly once in the base.** The first
+    # version judged by shape — starts with a letter, eight characters — and was
+    # wrong in both directions on sky.boss's real `ci.yml`: `permissions:` passed
+    # and matched a different job's block, while every comment failed on its `#`,
+    # leaving three hunks with no anchors at all and so counted present. Comments
+    # are the most distinctive lines a workflow has; `permissions:` is among the
+    # least. Uniqueness says that without a list of either.
+    counts: Dict[str, int] = {}
+    for line in base_lines:
+        counts[line.strip()] = counts.get(line.strip(), 0) + 1
+    hunks = absent = 0
+    matcher = difflib.SequenceMatcher(None, base_lines, ours_lines, autojunk=False)
+    for tag, i1, i2, _, _ in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        hunks += 1
+        around = [line.strip() for line in base_lines[max(0, i1 - 3) : i2 + 3]]
+        anchors = [
+            line for line in around if len(line) >= _ANCHOR_MIN and _ANCHOR.fullmatch(line) and counts[line] == 1
+        ]
+        if anchors and not any(line in present for line in anchors):
+            absent += 1
+    return absent, hunks
 
 
 def unified(base: str, ours: str, rel: str) -> str:
@@ -2619,6 +2673,9 @@ def main() -> int:
         #: replaces or merges — dry or not, since the forecast is the point. Read
         #: by `Linter.new` after the loop and nowhere else.
         written: Dict[str, Tuple[Optional[str], str]] = {}
+        #: `{conflicted path: hunks}` where none of the lines around any hunk are
+        #: in the adopter's file. See `absent_hunks`.
+        orphaned: Dict[str, int] = {}
 
         for rel in sorted(set(base_files) | set(head_files)):
             if rel in GENERATED or rel == MANIFEST_NAME:
@@ -2802,6 +2859,13 @@ def main() -> int:
             resolved = merge(base, theirs, ours, workdir)
             if resolved is None:
                 conflicted.append(rel)
+                # All or nothing. A partial count cannot tell a region the adopter
+                # deleted from one they reformatted — mind.head's test file showed
+                # "1 of 4" for lines ruff had merely rewrapped — so only the case
+                # where no hunk has anywhere to land is said at all.
+                gone, hunks = absent_hunks(base, theirs, ours)
+                if hunks and gone == hunks:
+                    orphaned[rel] = hunks
                 if normaliser.applies(rel) and not touches_code(base, ours):
                     comment_only.append(rel)
                 # The counterfactual, computed only for a file that already
@@ -3106,6 +3170,10 @@ def main() -> int:
                         "updated": updated,
                         "merged": merged,
                         "conflicted": conflicted,
+                        # Of `conflicted`, the files where none of the lines around
+                        # any of the template's changes are in the adopter's file —
+                        # a section they removed, or one rewritten past recognition.
+                        "conflicts_without_anchor": sorted(orphaned),
                         # A subset of `conflicted`, so a machine consumer can
                         # tell a decision to port from a formatter's opinion
                         # without re-running the merge to find out.
@@ -3203,6 +3271,15 @@ def main() -> int:
             for hook in linter.unsupported:
                 item(hook)
 
+        def where_it_was(rel: str) -> str:
+            """The note a conflict carries when its change has nowhere to land."""
+            if rel not in orphaned:
+                return ""
+            return (
+                f"  — none of the lines around its {orphaned[rel]} change(s) are in your file:"
+                " if you removed that part, there is nothing to port"
+            )
+
         if conflicted and advanced:
             # **The run that records a port reports it once, in its own voice.** It
             # re-merged against a base it had not yet replaced, so a correctly
@@ -3215,7 +3292,7 @@ def main() -> int:
             # It fired hardest on the correct path.
             say("⚠️ ", f"{len(conflicted)} conflicted file(s) recorded as resolved — the base advanced past them")
             for rel in conflicted:
-                item(rel)
+                item(rel + where_it_was(rel))
             detail()
             detail("Taken on trust, as --ported asserts. In each, this run could not find the template's")
             detail("change — reflowed prose is looked past, other rewording is not — so the change is")
@@ -3225,7 +3302,7 @@ def main() -> int:
         elif conflicted:
             say("❌", f"{len(conflicted)} file(s) that differ from the template — merge conflicts, LEFT ALONE")
             for rel in conflicted:
-                item(rel)
+                item(rel + where_it_was(rel))
             detail()
             detail("Nothing was written to these.")
             if args.dry_run:
