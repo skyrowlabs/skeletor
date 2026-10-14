@@ -7020,6 +7020,28 @@ def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
                     f"refuse the run. Proceeding without normalisation is the one outcome the flag must "
                     f"not have, because it is indistinguishable from having normalised:\n{refused[-700:]}"
                 )
+            # Without the flag the same refusal is a diagnostic, scoped to the
+            # conflicts it could explain: listed in full for a python conflict,
+            # one line for one whose change has nowhere to land (stash.flow, sky.boss).
+            _, doubted = run(upgrade, cwd=tree)
+            tail = doubted.split("may be two versions", 1)[-1]
+            if "may be two versions" not in doubted or rel not in tail or "What could not be run" not in tail:
+                version_problems.append(f"an unrunnable formatter does not name {rel} as in doubt:\n{doubted[-900:]}")
+            original = path.read_text(encoding="utf-8")
+            path.write_text("# the adopter replaced this file outright\n", encoding="utf-8")
+            try:
+                _, orphan = run(upgrade, cwd=tree)
+            finally:
+                path.write_text(original, encoding="utf-8")
+            if "none of the lines" not in orphan:
+                version_problems.append(f"the plant did not orphan {rel}:\n{orphan[-900:]}")
+            elif "may be two versions" in orphan or "What could not be run" in orphan:
+                version_problems.append(
+                    f"{rel}'s change has nowhere to land, and it was still offered as a formatter's "
+                    f"doubt, with the diagnostics for a flag that cannot help:\n{orphan[-900:]}"
+                )
+            elif "does not bear on these conflicts" not in orphan:
+                version_problems.append(f"nothing said --normalise does not bear here:\n{orphan[-900:]}")
         finally:
             config.write_text(pinned_text, encoding="utf-8")
 

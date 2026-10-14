@@ -3350,22 +3350,30 @@ def main() -> int:
             # Printed whether or not the block above printed, because a partially
             # loaded normaliser is truthy: some hooks ran, others were refused, and
             # the refused ones are invisible in `formatting_only` by construction.
-            if not args.normalise and (normaliser.reason or normaliser.unsupported):
-                # **Scoped to the files it could be true of.** It used to say "some of
-                # these" about every conflict, including one whose template change was
-                # comment-only in a file no formatter reads for comments — so a
-                # deliberate conflict, named as such in the release notes, arrived
-                # with an invitation to suspect tooling. node-zero.
-                doubted = [rel for rel in conflicted if normaliser.applies(rel) and rel not in comment_only]
+            #
+            # **Scoped to the files it could be true of.** It used to say "some of
+            # these" about every conflict, including one whose template change was
+            # comment-only in a file no formatter reads for comments — so a
+            # deliberate conflict, named as such in the release notes, arrived
+            # with an invitation to suspect tooling. node-zero.
+            #
+            # An orphaned conflict is not a formatting doubt (stash.flow), and with
+            # nothing doubted the diagnostics have no reader (sky.boss): one line.
+            doubted = [
+                rel
+                for rel in conflicted
+                if normaliser.applies(rel) and rel not in comment_only and rel not in orphaned
+            ]
+            cannot_normalise = not args.normalise and bool(normaliser.reason or normaliser.unsupported)
+            if cannot_normalise and not doubted:
                 detail()
-                if doubted:
-                    detail("--normalise could not be offered here, so these conflicts may be two versions")
-                    detail("of one formatter rather than a disagreement about content:")
-                    for rel in doubted:
-                        item(rel)
-                else:
-                    detail("--normalise could not be offered here. That does not bear on these conflicts:")
-                    detail("the template changed only comments in each, or they are not python.")
+                detail("--normalise could not be offered here, which does not bear on these conflicts.")
+            if cannot_normalise and doubted:
+                detail()
+                detail("--normalise could not be offered here, so these conflicts may be two versions")
+                detail("of one formatter rather than a disagreement about content:")
+                for rel in doubted:
+                    item(rel)
                 detail("What could not be run:")
                 if normaliser.reason:
                     item(normaliser.reason)
