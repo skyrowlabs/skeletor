@@ -302,6 +302,26 @@ def ref_on_remote(checkout: Path, ref: str, commit: str) -> Optional[str]:
     return "here" if rows.get(name + "^{}", rows[name]) == commit else "elsewhere"
 
 
+def stamp_the_typed_tag(manifest: Path, checkout: Path, ref: str) -> None:
+    """Record `--ref <tag>` as typed when that tag names the rendered commit.
+
+    The render stamps `git describe`, which picks one of several tags on a commit,
+    so `--ref v9.9.9` could record `v0.46.0` while every line above it said v9.9.9
+    (mind.head). The tagged scaffolder cannot be taught otherwise, so it is set here.
+    """
+    def commit(name: str) -> str:
+        return subprocess.run(["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet", name],
+                              capture_output=True, text=True).stdout.strip()
+
+    if not commit(f"refs/tags/{ref}^{{commit}}") or commit(f"refs/tags/{ref}^{{commit}}") != commit("HEAD"):
+        return
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    if data.get("skeletor_ref") in (ref, None) or str(data["skeletor_ref"]).endswith("-dirty"):
+        return
+    data["skeletor_ref"] = ref
+    manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
 def refuse_an_unpinned_head(head_ref: str, writing: str) -> None:
     """An applying run must stamp a ref the adopter could have chosen.
 
@@ -2342,6 +2362,8 @@ def main() -> int:
             detail("conflicts, one you declined stays declined. The new values are recorded only if")
             detail("this run applies everything — the same rule as the ref.")
         render_with(head_src, ours_args, head_tree)
+        if args.ref:
+            stamp_the_typed_tag(head_tree / MANIFEST_NAME, head_src, args.ref)
         head_files = files_under(head_tree)
         if args.show:
             asked = Path(args.show)

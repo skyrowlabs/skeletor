@@ -5590,6 +5590,23 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
         )
     )
 
+    # Two tags on one commit: the stamp is the one typed, not the one `describe`
+    # prefers. A lightweight probe loses to the annotated tag in `describe` (mind.head).
+    started = time.time()
+    probe = "v9.9.9-probe"
+    git_in(asker, "tag", probe, f"{tag}^{{commit}}")
+    _, typed = run([sys.executable, str(asker / "bin" / "skeletor-upgrade"), str(target),
+                    "--ref", probe, "--dry-run", "--allow-dirty"], cwd=target)
+    stamped = re.search(r"head: skeletor @ (\S+)", typed)
+    results.append(
+        Result(
+            "pinned ref: --ref stamps the tag typed when several name the commit",
+            bool(stamped) and stamped.group(1) == probe,
+            time.time() - started,
+            f"--ref {probe} stamped {stamped.group(1) if stamped else None!r}:\n{typed[-500:]}",
+        )
+    )
+
     # **The case the flag was built for and could not reach**, which needed a
     # fixture the assertions above cannot supply: a tree ALREADY current with the
     # tag, whose record says something else.
