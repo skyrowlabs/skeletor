@@ -1601,6 +1601,8 @@ class Normaliser:
         self.workdir = workdir
         self.steps: List[Tuple[str, str, Path]] = []
         self.unsupported: List[str] = []
+        #: `hook version` for each step, so a run can say what it bound (dream-doll).
+        self.bound: List[str] = []
         self.reason = ""
         config = target / ".pre-commit-config.yaml"
         if not config.exists():
@@ -1625,6 +1627,7 @@ class Normaliser:
                 )
                 continue
             self.steps.append((hook, exe, settings))
+            self.bound.append(f"{hook} {self._shown(running)}")
         if not self.steps and not self.reason:
             self.reason = "no formatter the tree declares is runnable here"
 
@@ -3227,6 +3230,8 @@ def main() -> int:
                         # tell a decision to port from a formatter's opinion
                         # without re-running the merge to find out.
                         "formatting_only": formatting_only,
+                        # What `--normalise` actually ran, empty without it.
+                        "normalised_with": normaliser.bound if args.normalise else [],
                         # Findings the tree's OWN declared linter reports in what
                         # this run writes and did not report before it — a dry
                         # run's included. `lint_unanswered` is the files a linter
@@ -3458,6 +3463,11 @@ def main() -> int:
                 detail("Port them before then, or re-run to regenerate them. The base stays")
                 detail("where it is until they are gone, so nothing expires while you decide.")
 
+        if args.normalise and normaliser.bound:
+            # Said even when nothing changed: a flag that bound and one that did
+            # nothing printed identical output (dream-doll, proto.pilot).
+            say("ℹ️ ", "--normalise bound " + ", ".join(normaliser.bound))
+            detail("Every python merge above put both template sides through them first.")
         if args.normalise and normaliser.unsupported:
             # **The same two fixes the path without the flag got in v0.31.0, which
             # stopped there.** node-zero ran it: with `--normalise` and an old venv

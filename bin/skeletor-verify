@@ -6982,6 +6982,9 @@ def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
         problems.append(f"the plant did not conflict without --normalise:\n{plain}")
     elif "--normalise" not in plain:
         problems.append("the conflict does not advertise --normalise, so nobody who needs it hears about it")
+    bound_line = next((ln for ln in normalised.splitlines() if "--normalise bound" in ln), "")
+    if "isort" not in bound_line:
+        problems.append(f"--normalise ran and did not name what it bound:\n{normalised[-600:]}")
     if "LEFT ALONE" in normalised:
         problems.append(f"--normalise did not resolve a conflict its own formatter wrote:\n{normalised}")
     elif rel not in normalised:
