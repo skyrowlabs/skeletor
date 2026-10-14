@@ -5571,9 +5571,19 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
     _, missing = run(upgrade, cwd=target)
     if f"{tag} is not on origin" not in missing:
         remote_problems.append(f"origin lacks {tag} and the run did not say so:\n{missing[-600:]}")
+    # A tag moved on origin is not fixed by pushing, which origin refuses (mind.head).
+    parent = git_in(asker, "rev-parse", f"{tag}^{{commit}}^")[1].strip()
+    if git_in(bare, "tag", "-a", tag, "-m", "moved", parent)[0] != 0:
+        remote_problems.append(f"the plant did not land: could not re-create {tag} at {parent!r} on origin")
+    _, moved = run(upgrade, cwd=target)
+    block = moved.split("at a different commit", 1)[-1][:400]
+    if "at a different commit" not in moved:
+        remote_problems.append(f"origin has {tag} at another commit and the run did not say so:\n{moved[-600:]}")
+    elif "git push" in block or "fetch --force origin tag" not in block:
+        remote_problems.append(f"a moved tag was answered with a push, not a fetch:\n{block}")
     results.append(
         Result(
-            f"pinned ref: whether {tag} is on a remote origin is answered, both ways",
+            f"pinned ref: whether {tag} is on a remote origin is answered, all three ways",
             not remote_problems,
             time.time() - started,
             "\n".join(remote_problems),

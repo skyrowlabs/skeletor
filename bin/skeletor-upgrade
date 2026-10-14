@@ -273,8 +273,11 @@ def warn_a_dirty_base(base: Path, role: str) -> None:
     detail("Read the plan as a statement about a tree that exists on one machine.")
 
 
-def ref_on_remote(checkout: Path, ref: str, commit: str) -> Optional[bool]:
-    """Whether `origin` holds tag `ref` at `commit`; `None` when that cannot be said.
+def ref_on_remote(checkout: Path, ref: str, commit: str) -> Optional[str]:
+    """`"here"`, `"absent"` or `"elsewhere"` for tag `ref` on `origin`; `None` if unknown.
+
+    `elsewhere` is origin holding the tag at another commit — a moved tag, whose
+    remedy is the opposite of a push (mind.head).
 
     Tags only: a sha or a branch is reachable without being a row, so absence would
     be a false "not pushed". The peeled `^{}` row is the one compared, because an
@@ -295,8 +298,8 @@ def ref_on_remote(checkout: Path, ref: str, commit: str) -> Optional[bool]:
         return None
     rows = dict(reversed(line.split("\t", 1)) for line in result.stdout.splitlines() if "\t" in line)
     if name not in rows:
-        return False
-    return rows.get(name + "^{}", rows[name]) == commit
+        return "absent"
+    return "here" if rows.get(name + "^{}", rows[name]) == commit else "elsewhere"
 
 
 def refuse_an_unpinned_head(head_ref: str, writing: str) -> None:
@@ -2531,12 +2534,17 @@ def main() -> int:
                     # `ls-remote` by hand every round, so one round trip on the run that
                     # stamps a manifest is the cheaper side. No answer stays unknown.
                     pushed = None if local or not origin_url else ref_on_remote(head_src, args.ref, sha)
-                    if pushed is True:
+                    if pushed == "here":
                         say("✅", f"{args.ref} is on origin at the commit rendered — adopters can resolve it")
-                    elif pushed is False:
-                        say("⚠️ ", f"{args.ref} is not on origin at the commit rendered")
+                    elif pushed == "absent":
+                        say("⚠️ ", f"{args.ref} is not on origin")
                         detail("The manifest will record a name nobody else can resolve until it is")
                         detail(f"pushed there: `git push origin {args.ref}` from the skeletor checkout.")
+                    elif pushed == "elsewhere":
+                        say("⚠️ ", f"origin has {args.ref} at a different commit from the one rendered")
+                        detail(f"Adopters resolve {args.ref} to origin's commit, not this render. Do not")
+                        detail("force-push a published tag: take origin's, then re-run —")
+                        detail(f"  git fetch --force origin tag {args.ref}   (in the skeletor checkout)")
                     else:
                         say("⚠️ ", f"whether {args.ref} is pushed cannot be determined from here")
                         detail("The render is pinned, so the manifest will record a name rather than a")
