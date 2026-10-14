@@ -16,25 +16,37 @@ Ported from jam.sense (`jam-sense@982042d7e`), where 20 of 64 call sites had it.
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from typing import Any, Sequence
 
 #: "command not found", as a POSIX shell reports it.
 MISSING = 127
+
+#: "found but not executable", as a POSIX shell reports it.
+CANNOT_EXECUTE = 126
 
 #: What `timeout(1)` returns for a command it killed.
 TIMED_OUT = 124
 
 
 def run(argv: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess:
-    """`subprocess.run(argv, **kwargs)`, except a missing tool or a hang is a result.
+    """`subprocess.run`, except a missing or unrunnable tool, or a hang, is a result.
 
     The synthesized results carry `""` rather than `None` on both streams, so a
     caller's error branch can read them whether or not it asked to capture.
+
+    A missing `cwd` raises the same exception and is re-raised: it is the
+    caller's bug, not an absent tool, and "not on PATH" would misname it.
     """
     argv = list(argv)
     try:
         return subprocess.run(argv, **kwargs)
-    except FileNotFoundError as exc:
-        return subprocess.CompletedProcess(argv, MISSING, "", f"{exc.filename or argv[0]}: not on PATH")
+    except FileNotFoundError:
+        cwd = kwargs.get("cwd")
+        if cwd is not None and not Path(cwd).is_dir():
+            raise
+        return subprocess.CompletedProcess(argv, MISSING, "", f"{argv[0]}: not on PATH")
+    except PermissionError:
+        return subprocess.CompletedProcess(argv, CANNOT_EXECUTE, "", f"{argv[0]}: not executable")
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(argv, TIMED_OUT, "", f"timed out after {kwargs.get('timeout')}s")

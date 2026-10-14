@@ -38,6 +38,13 @@ def _catches_missing(handler: ast.ExceptHandler) -> bool:
 def unguarded_calls(source: str) -> List[int]:
     """Lines of subprocess calls a missing binary would raise out of."""
     tree = ast.parse(source)
+    modules = {"subprocess"} | {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name == "subprocess"
+    }
     imported = {
         alias.asname or alias.name
         for node in ast.walk(tree)
@@ -58,7 +65,7 @@ def unguarded_calls(source: str) -> List[int]:
             isinstance(func, ast.Attribute)
             and func.attr in SPAWNERS
             and isinstance(func.value, ast.Name)
-            and func.value.id == "subprocess"
+            and func.value.id in modules
         )
         if by_module or (isinstance(func, ast.Name) and func.id in imported):
             lines.append(node.lineno)
@@ -101,9 +108,11 @@ def test_the_predicate_flags_exactly_the_unguarded_shapes():
             "except ValueError:",  # 14
             "    pass",  # 15
             "shellout.run(['f'])",  # 16
+            "import subprocess as sp",  # 17
+            "sp.check_call(['g'])",  # 18 flagged: a module alias (proto.pilot)
         ]
     )
-    assert unguarded_calls(source) == [3, 7, 13]
+    assert unguarded_calls(source) == [3, 7, 13, 18]
 
 
 def test_every_reporting_shell_out_survives_a_missing_binary():
@@ -122,3 +131,14 @@ def test_a_missing_tool_and_a_hang_are_results():
     assert (missing.returncode, missing.stdout) == (shellout.MISSING, "")
     hung = shellout.run([sys.executable, "-c", "import time; time.sleep(5)"], timeout=0.2)
     assert (hung.returncode, hung.stdout) == (shellout.TIMED_OUT, "")
+
+
+def test_a_non_executable_tool_is_a_result(tmp_path):
+    tool = tmp_path / "tool"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    assert shellout.run([str(tool)]).returncode == shellout.CANNOT_EXECUTE
+
+
+def test_a_missing_working_directory_is_not_called_a_missing_tool(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        shellout.run([sys.executable, "-c", "pass"], cwd=tmp_path / "absent")
