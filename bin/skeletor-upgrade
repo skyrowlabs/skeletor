@@ -273,6 +273,32 @@ def warn_a_dirty_base(base: Path, role: str) -> None:
     detail("Read the plan as a statement about a tree that exists on one machine.")
 
 
+def ref_on_remote(checkout: Path, ref: str, commit: str) -> Optional[bool]:
+    """Whether `origin` holds tag `ref` at `commit`; `None` when that cannot be said.
+
+    Tags only: a sha or a branch is reachable without being a row, so absence would
+    be a false "not pushed". The peeled `^{}` row is the one compared, because an
+    annotated tag's own row names the tag object, never the commit.
+    """
+    name = f"refs/tags/{ref}"
+    known = subprocess.run(["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet", name],
+                           capture_output=True, text=True)
+    if known.returncode != 0 or not commit:
+        return None
+    try:
+        # The peeled row comes back only when asked for by name.
+        result = subprocess.run(["git", "-C", str(checkout), "ls-remote", "origin", name, name + "^{}"],
+                                capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return None
+    if result.returncode != 0:
+        return None
+    rows = dict(reversed(line.split("\t", 1)) for line in result.stdout.splitlines() if "\t" in line)
+    if name not in rows:
+        return False
+    return rows.get(name + "^{}", rows[name]) == commit
+
+
 def refuse_an_unpinned_head(head_ref: str, writing: str) -> None:
     """An applying run must stamp a ref the adopter could have chosen.
 
@@ -2490,22 +2516,34 @@ def main() -> int:
                     # stash.flow's, and the flag is most useful exactly where the
                     # sentence was most wrong. Naming the ref also buys a better
                     # check than grepping a sha: `ls-remote` takes a refspec.
-                    say("⚠️ ", f"whether {args.ref} is pushed cannot be determined from here")
-                    detail("The render is pinned, so the manifest will record a name rather than a")
-                    detail("description of this checkout — but a name only resolves for somebody")
-                    detail(f"else once it is pushed. `git ls-remote <remote> {args.ref}` is the check")
-                    detail("this declines to make for you; a row means an adopter can reach it.")
                     # **Which remote, said, because `origin` can be the wrong one.**
-                    # This read `git ls-remote origin <tag>`, and from a clone of a local
-                    # checkout — the way a pinned render is often made — `origin` IS that
-                    # checkout, which always has the tag: a row every time, meaning
-                    # nothing. mind.head reasoned it; the mechanism is git's.
+                    # From a clone of a local checkout — the way a pinned render is
+                    # often made — `origin` IS that checkout, which always has the tag:
+                    # a row every time, meaning nothing. mind.head reasoned it.
                     origin_url = subprocess.run(
                         ["git", "-C", str(head_src), "remote", "get-url", "origin"],
                         capture_output=True,
                         text=True,
                     ).stdout.strip()
-                    if origin_url and "://" not in origin_url and not re.match(r"^[\w.-]+@[\w.-]+:", origin_url):
+                    local = bool(origin_url) and "://" not in origin_url
+                    local = local and not re.match(r"^[\w.-]+@[\w.-]+:", origin_url)
+                    # **Asked, where `origin` is a remote.** Four of six trees ran this
+                    # `ls-remote` by hand every round, so one round trip on the run that
+                    # stamps a manifest is the cheaper side. No answer stays unknown.
+                    pushed = None if local or not origin_url else ref_on_remote(head_src, args.ref, sha)
+                    if pushed is True:
+                        say("✅", f"{args.ref} is on origin at the commit rendered — adopters can resolve it")
+                    elif pushed is False:
+                        say("⚠️ ", f"{args.ref} is not on origin at the commit rendered")
+                        detail("The manifest will record a name nobody else can resolve until it is")
+                        detail(f"pushed there: `git push origin {args.ref}` from the skeletor checkout.")
+                    else:
+                        say("⚠️ ", f"whether {args.ref} is pushed cannot be determined from here")
+                        detail("The render is pinned, so the manifest will record a name rather than a")
+                        detail("description of this checkout — but a name only resolves for somebody")
+                        detail(f"else once it is pushed. `git ls-remote <remote> {args.ref}` is the check;")
+                        detail("a row means an adopter can reach it.")
+                    if local:
                         detail(f"Not `origin` here: it is {origin_url}, a local path, which has every")
                         detail("tag this checkout has. Ask the remote adopters actually fetch from.")
                 else:

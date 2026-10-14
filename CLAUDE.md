@@ -1193,7 +1193,10 @@ inapplicable by construction.
 Deliberately **not** validated against a tag list, which is what was asked for.
 The useful property is that the ref resolves for the people who will read the
 manifest, and that is a question about a remote rather than about this checkout
-— the writing path already asks it with `git ls-remote`, about any ref. A
+— the writing path asks it with `git ls-remote` when the ref is a tag and
+`origin` is a remote, and says it cannot tell otherwise. This sentence claimed
+that for any ref while the tool only *named* the command; four of six trees
+then ran it by hand every round, which is what moved it into the tool. A
 tags-only rule would be enforced at the one place that cannot check the thing it
 is standing in for.
 

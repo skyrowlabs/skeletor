@@ -5548,6 +5548,38 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
         )
     ]
 
+    # **Pushed is answered where `origin` is a remote** — four of six trees asked
+    # it by hand each round. A `file://` bare repository is a remote to the tool and
+    # needs no network; the shared clone's origin is a local path, which is not asked.
+    started = time.time()
+    remote_problems = []
+    if "cannot be determined" not in output:
+        remote_problems.append("with a local-path origin the run claimed to know whether the tag is pushed")
+    asker, bare = workdir / "pinned-ref" / "asker", workdir / "pinned-ref" / "remote.git"
+    for path in (asker, bare):
+        if path.exists():
+            shutil.rmtree(path)
+    run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(asker)], cwd=workdir)
+    run(["git", "clone", "--quiet", "--bare", str(asker), str(bare)], cwd=workdir)
+    git_in(asker, "remote", "set-url", "origin", bare.resolve().as_uri())
+    # `--allow-dirty`: the run above applied the pinned render and left it uncommitted.
+    upgrade = [sys.executable, str(asker / "bin" / "skeletor-upgrade"), str(target), "--ref", tag, "--allow-dirty"]
+    _, held = run(upgrade, cwd=target)
+    if f"{tag} is on origin at the commit rendered" not in held:
+        remote_problems.append(f"origin holds {tag} and the run did not say so:\n{held[-600:]}")
+    git_in(bare, "tag", "-d", tag)
+    _, missing = run(upgrade, cwd=target)
+    if f"{tag} is not on origin" not in missing:
+        remote_problems.append(f"origin lacks {tag} and the run did not say so:\n{missing[-600:]}")
+    results.append(
+        Result(
+            f"pinned ref: whether {tag} is on a remote origin is answered, both ways",
+            not remote_problems,
+            time.time() - started,
+            "\n".join(remote_problems),
+        )
+    )
+
     # **The case the flag was built for and could not reach**, which needed a
     # fixture the assertions above cannot supply: a tree ALREADY current with the
     # tag, whose record says something else.
