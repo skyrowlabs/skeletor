@@ -40,11 +40,11 @@ against the repo, not a mood.
 
 A risk that needs **work but no decision**, and that your fix policy does not let
 you fix, must not live only in the report: next week's edition re-derives it and
-nobody does it. File it once, attributed to this job:
+nobody does it. File it once — the runner attributes it to this job:
 
 ```bash
-./{{CLI}} bug "<title>" --source repo-report --finding … --reproduce … --scope … --acceptance …
-./{{CLI}} task "<title>" --source repo-report --what … --why … --acceptance …
+./{{CLI}} bug "<title>" --finding … --reproduce … --scope … --acceptance …
+./{{CLI}} task "<title>" --what … --why … --acceptance …
 ```
 
 `bug` is for something plainly broken; `task` is for everything else.

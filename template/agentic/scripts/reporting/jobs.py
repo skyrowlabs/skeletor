@@ -109,7 +109,7 @@ FIX_POLICIES = {
 #: `M-9` sat through ten (`jam-sense@a4894a3ac`). Declared, never inferred —
 #: `fix_policy` is what a job may change, which is a different question.
 #: `tests/test_reporting_jobs.py` holds every report-writing job to one of these.
-SINK_QUEUE = "queue"  # filed with `{{CLI}} bug`/`task --source <key>`, capped per job
+SINK_QUEUE = "queue"  # filed with `{{CLI}} bug`/`task`, attributed and capped per job
 SINK_READER = "reader"  # somebody reads the report; `Job.reader` names who, and how often
 SINK_NONE = "no-findings"  # the job reports facts and never a finding
 SINKS = (SINK_QUEUE, SINK_READER, SINK_NONE)

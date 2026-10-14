@@ -9,6 +9,7 @@ first fails at 3am in a log nobody reads, and the second never fails at all.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -21,6 +22,7 @@ pytestmark = [pytest.mark.unit]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scanning import scanned  # noqa: E402
+from scripts.lanes import LANES, SOURCE_ENV  # noqa: E402
 from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 from scripts.reporting.jobs import (  # noqa: E402
     FIX_POLICIES,
@@ -228,10 +230,32 @@ def test_a_reader_sink_names_its_reader():
 
 
 def test_a_queue_sink_is_one_the_prompt_files_into():
-    """Declared and wired are checked together: the prompt files with its own `--source`."""
+    """Declared and wired are checked together: the prompt runs a capture command."""
+    intake = re.compile(r"\./\S+ (?:%s) " % "|".join(lane.key for lane in LANES))
     for job in scanned(JOBS, "registered jobs"):
-        files = f"--source {job.key}" in _prompt(job)
+        files = bool(intake.search(_prompt(job)))
         assert (job.findings_sink == SINK_QUEUE) == files, (
             f"{job.key}: findings_sink={job.findings_sink!r}, and its prompt "
-            f"{'does' if files else 'does not'} file with `--source {job.key}`"
+            f"{'does' if files else 'does not'} run a capture command"
         )
+
+
+def test_the_agent_runs_as_its_job(monkeypatch):
+    """Every capture the agent files is attributed to, and capped against, this job."""
+    import subprocess
+
+    from scripts.reporting import agent_runner
+
+    seen = {}
+
+    def agent(argv, **kwargs):
+        seen.update(kwargs.get("env") or {})
+        return subprocess.CompletedProcess(argv, 1, "", "")
+
+    monkeypatch.setattr(agent_runner, "current_branch", lambda: "main")
+    monkeypatch.setattr(agent_runner, "tree_is_clean", lambda: True)
+    monkeypatch.setattr(agent_runner.run_ledger, "record", lambda run: None)
+    monkeypatch.setattr(agent_runner.subprocess, "run", agent)
+    job = scanned(JOBS, "registered jobs")[0]
+    agent_runner.run_triage(job.key, {}, base_branch="main")
+    assert seen.get(SOURCE_ENV) == job.key

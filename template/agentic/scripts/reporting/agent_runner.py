@@ -29,12 +29,13 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from scripts.lanes import SOURCE_ENV  # noqa: E402
 from scripts.output import line, skip, step  # noqa: E402
 from scripts.paths import PROJECT_ROOT  # noqa: E402
 from scripts.reporting import run_ledger, shellout  # noqa: E402
@@ -107,6 +108,14 @@ def agent_argv(prompt: str) -> List[str]:
             "would run with no instruction and still exit 0"
         )
     return [token.replace(PROMPT_TOKEN, prompt) for token in tokens]
+
+
+def agent_env(job_key: str) -> Dict[str, str]:
+    """The agent's environment: ours, plus the job every capture it files is from.
+
+    The capture command reads it and caps the job; the agent never types it.
+    """
+    return {**os.environ, SOURCE_ENV: job_key}
 
 
 def heartbeat(url: Optional[str], status: str = "up") -> None:
@@ -216,6 +225,7 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
             capture_output=True,
             text=True,
             timeout=AGENT_TIMEOUT_S,
+            env=agent_env(job.key),
         )
     except FileNotFoundError:
         return decline(f"`{argv[0]}` is not on PATH (cron does not give you your login PATH)")
