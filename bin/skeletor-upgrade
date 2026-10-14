@@ -1983,13 +1983,16 @@ def absent_hunks(base: str, theirs: str, ours: str) -> Tuple[int, int]:
     counts: Dict[str, int] = {}
     for line in base_lines:
         counts[line.strip()] = counts.get(line.strip(), 0) + 1
+    # **A hunk is a `@@` hunk of the patch this run writes**, context included —
+    # `unified()` groups with the same three lines. Counting raw opcodes told
+    # node-zero "3 change(s)" beside a `.patch` with two, since nearby changes
+    # share one hunk. It also makes the boundary checkable by the reader: a hunk
+    # is absent when no unique line the patch shows for it is in their file.
     hunks = absent = 0
     matcher = difflib.SequenceMatcher(None, base_lines, ours_lines, autojunk=False)
-    for tag, i1, i2, _, _ in matcher.get_opcodes():
-        if tag == "equal":
-            continue
+    for group in matcher.get_grouped_opcodes(3):
         hunks += 1
-        around = [line.strip() for line in base_lines[max(0, i1 - 3) : i2 + 3]]
+        around = [line.strip() for line in base_lines[group[0][1] : group[-1][2]]]
         anchors = [
             line for line in around if len(line) >= _ANCHOR_MIN and _ANCHOR.fullmatch(line) and counts[line] == 1
         ]
@@ -3276,7 +3279,7 @@ def main() -> int:
             if rel not in orphaned:
                 return ""
             return (
-                f"  — none of the lines around its {orphaned[rel]} change(s) are in your file:"
+                f"  — none of the lines in its {orphaned[rel]} patch hunk(s) are in your file:"
                 " if you removed that part, there is nothing to port"
             )
 

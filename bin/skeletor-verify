@@ -9445,6 +9445,11 @@ def absent_region_gate() -> Result:
     gone, hunks = upgrader.absent_hunks(base, removed, ours)
     if not hunks or gone != hunks:
         problems.append(f"job removed: {gone} of {hunks} hunks absent — expected all")
+    # The count is read beside the `.patch`, so it is that patch's `@@` count —
+    # node-zero saw 3 beside 2. This fixture has 7 changes in 2 hunks.
+    patched = sum(line.startswith("@@") for line in upgrader.unified(base, ours, "ci.yml").splitlines())
+    if hunks != patched:
+        problems.append(f"{hunks} hunk(s) counted, but the .patch this run writes has {patched}")
     if "\npermissions:" not in removed:
         problems.append("the fixture lost its top-level permissions: block, so the shape trap is not exercised")
     for label, theirs in (("unrelated edit", edited), ("reindented region", reindented)):
