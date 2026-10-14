@@ -142,3 +142,13 @@ def test_a_non_executable_tool_is_a_result(tmp_path):
 def test_a_missing_working_directory_is_not_called_a_missing_tool(tmp_path):
     with pytest.raises(FileNotFoundError):
         shellout.run([sys.executable, "-c", "pass"], cwd=tmp_path / "absent")
+
+
+def test_an_unenterable_cwd_is_not_called_an_unexecutable_tool(tmp_path, monkeypatch):
+    def refused(argv, **kwargs):
+        raise PermissionError(13, "Permission denied", str(kwargs["cwd"]))
+
+    monkeypatch.setattr(shellout.subprocess, "run", refused)
+    monkeypatch.setattr(shellout.os, "access", lambda path, mode: False)
+    with pytest.raises(PermissionError):
+        shellout.run(["git", "status"], cwd=tmp_path)
