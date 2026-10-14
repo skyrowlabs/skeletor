@@ -36,6 +36,30 @@ against the repo, not a mood.
 - If nothing meaningful changed, **say that in one line**. A report padded to
   look substantial is one nobody reads next week either.
 
+## File what needs work
+
+A risk that needs **work but no decision**, and that your fix policy does not let
+you fix, must not live only in the report: next week's edition re-derives it and
+nobody does it. File it once, attributed to this job:
+
+```bash
+./{{CLI}} bug "<title>" --source repo-report --finding … --reproduce … --scope … --acceptance …
+./{{CLI}} task "<title>" --source repo-report --what … --why … --acceptance …
+```
+
+`bug` is for something plainly broken; `task` is for everything else.
+
+1. **A refusal is not an error.** The command refuses a title this job already has
+   open, and anything past this job's cap of open captures. Leave that finding in
+   the report and say it is waiting on the queue.
+2. **No acceptance criteria, no filing.** If an agent who has not read this report
+   could not finish the work and know it was done, it stays in the report.
+3. **Check it is still true at HEAD.** The data above was collected earlier.
+4. **Highest consequence first**, when more deserve filing than the cap allows.
+
+Filing routes work to a queue; it changes nothing in the tree, so it does not
+widen your fix policy.
+
 ## Finish
 
 1. Write the report.

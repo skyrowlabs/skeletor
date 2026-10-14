@@ -150,8 +150,9 @@ exactly this reason; `tests/test_reporting_jobs.py` asserts it still does.
 ## Adding a job
 
 1. Add a `Job(...)` entry to `scripts/reporting/jobs.py`. **Decide its
-   `fix_policy` explicitly.** Name the prompt file after the module
-   (`prompts/<module>.md`) — that is how the policy is resolved.
+   `fix_policy` explicitly**, and if it writes a report, its `findings_sink`:
+   where a finding goes that the job may not fix. Name the prompt file after the
+   module (`prompts/<module>.md`) — that is how the policy is resolved.
 2. Write `scripts/reporting/<module>.py` with a `main()`: deterministic
    collection, then `agent_runner.run_triage(<key>, collected)`. Shell out
    through `scripts/reporting/shellout.py`: cron's `PATH` can lack the tool,

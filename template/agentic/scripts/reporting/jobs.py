@@ -103,6 +103,17 @@ FIX_POLICIES = {
     "code": "may open a pull request; never merges, never pushes to a protected branch",
 }
 
+#: Where a job's findings go when it neither fixes them nor rules them out.
+#:
+#: A report nobody acts on re-derives the same finding every edition: jam.sense's
+#: `M-9` sat through ten (`jam-sense@a4894a3ac`). Declared, never inferred —
+#: `fix_policy` is what a job may change, which is a different question.
+#: `tests/test_reporting_jobs.py` holds every report-writing job to one of these.
+SINK_QUEUE = "queue"  # filed with `{{CLI}} bug`/`task --source <key>`, capped per job
+SINK_READER = "reader"  # somebody reads the report; `Job.reader` names who, and how often
+SINK_NONE = "no-findings"  # the job reports facts and never a finding
+SINKS = (SINK_QUEUE, SINK_READER, SINK_NONE)
+
 
 @dataclass(frozen=True)
 class Job:
@@ -117,6 +128,8 @@ class Job:
     commits: bool = False  # does it touch the git tree?
     first_week_only: bool = False  # monthly jobs ride a weekly lane; see below
     heartbeat_var: Optional[str] = None  # env var holding its dead-man-switch URL
+    findings_sink: Optional[str] = None  # one of SINKS, for a job that writes a report
+    reader: str = ""  # for SINK_READER: who reads it, and how often
 
     def needle(self) -> str:
         """What identifies THIS tree's line for this job in a live crontab.
@@ -174,6 +187,7 @@ JOBS: List[Job] = [
         fix_policy="own-report",
         commits=True,
         heartbeat_var="HEARTBEAT_REPO_REPORT",
+        findings_sink=SINK_QUEUE,
     ),
 ]
 

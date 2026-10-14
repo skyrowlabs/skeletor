@@ -22,7 +22,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scanning import scanned  # noqa: E402
 from scripts.paths import PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
-from scripts.reporting.jobs import FIX_POLICIES, JOBS, JOBS_BY_KEY, _allowlisted, crontab_block  # noqa: E402
+from scripts.reporting.jobs import (  # noqa: E402
+    FIX_POLICIES,
+    JOBS,
+    JOBS_BY_KEY,
+    SINK_QUEUE,
+    SINK_READER,
+    SINKS,
+    _allowlisted,
+    crontab_block,
+)
 
 
 def _cli_commands():
@@ -191,3 +200,38 @@ def test_a_siblings_crontab_line_is_not_read_as_ours():
         for forged, what in ((elsewhere, "another checkout"), (wrapper, "another wrapper")):
             assert f"report {job.key}" in forged, f"{job.key}: the {what} plant did not land"
             assert job.needle() not in forged, f"{job.key}: a line from {what} read as ours"
+
+
+def _prompt(job) -> str:
+    return (SCRIPTS_DIR / "reporting" / "prompts" / f"{job.module}.md").read_text(encoding="utf-8")
+
+
+def test_every_report_declares_where_its_findings_go():
+    """A report with no sink re-derives the same finding every edition, unacted on."""
+    for job in scanned(JOBS, "registered jobs"):
+        if job.writes == "—":
+            assert job.findings_sink is None, f"{job.key} writes no report but declares a findings_sink"
+        else:
+            assert job.findings_sink in SINKS, (
+                f"{job.key} writes {job.writes} and declares findings_sink={job.findings_sink!r}; "
+                f"choose one of {SINKS} — see SINKS in scripts/reporting/jobs.py"
+            )
+
+
+def test_a_reader_sink_names_its_reader():
+    """`reader` is the sink that silently stops happening, so it has to say who."""
+    for job in scanned(JOBS, "registered jobs"):
+        assert (job.findings_sink == SINK_READER) == bool(job.reader.strip()), (
+            f"{job.key}: findings_sink={job.findings_sink!r} with reader={job.reader!r} — a "
+            "reader sink names who reads it and how often, and only a reader sink does"
+        )
+
+
+def test_a_queue_sink_is_one_the_prompt_files_into():
+    """Declared and wired are checked together: the prompt files with its own `--source`."""
+    for job in scanned(JOBS, "registered jobs"):
+        files = f"--source {job.key}" in _prompt(job)
+        assert (job.findings_sink == SINK_QUEUE) == files, (
+            f"{job.key}: findings_sink={job.findings_sink!r}, and its prompt "
+            f"{'does' if files else 'does not'} file with `--source {job.key}`"
+        )
