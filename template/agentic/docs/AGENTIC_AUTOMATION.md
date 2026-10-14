@@ -153,7 +153,9 @@ exactly this reason; `tests/test_reporting_jobs.py` asserts it still does.
    `fix_policy` explicitly.** Name the prompt file after the module
    (`prompts/<module>.md`) — that is how the policy is resolved.
 2. Write `scripts/reporting/<module>.py` with a `main()`: deterministic
-   collection, then `agent_runner.run_triage(<key>, collected)`.
+   collection, then `agent_runner.run_triage(<key>, collected)`. Shell out
+   through `scripts/reporting/shellout.py`: cron's `PATH` can lack the tool,
+   and a bare `subprocess.run` then raises instead of returning a code.
 3. Write `scripts/reporting/prompts/<module>.md`. State what **not** to write as
    explicitly as what to write — an unconstrained report is padded to look
    substantial and is not read next week either.
@@ -168,7 +170,8 @@ exactly this reason; `tests/test_reporting_jobs.py` asserts it still does.
    `scripts/reporting_schedule_allowlist.yaml` **with a reason**. Otherwise
    re-run `{{CLI}} report cron --print` and reinstall the crontab.
 
-Steps 1–5 are cross-checked by `tests/test_reporting_jobs.py`. Only step 6's
+Steps 1–5 are cross-checked by `tests/test_reporting_jobs.py`, and step 2's
+shell-outs by `tests/test_reporting_shellout.py`. Only step 6's
 crontab half is unenforceable from here — it is a change to a crontab on a host
 this repo cannot see.
 

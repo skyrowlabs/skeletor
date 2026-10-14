@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.output import line, skip, step  # noqa: E402
 from scripts.paths import PROJECT_ROOT  # noqa: E402
-from scripts.reporting import run_ledger  # noqa: E402
+from scripts.reporting import run_ledger, shellout  # noqa: E402
 from scripts.reporting.jobs import FIX_POLICIES, JOBS_BY_KEY  # noqa: E402
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
@@ -130,14 +130,14 @@ def heartbeat(url: Optional[str], status: str = "up") -> None:
 
 
 def current_branch() -> Optional[str]:
-    result = subprocess.run(
+    result = shellout.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
     )
     return result.stdout.strip() or None if result.returncode == 0 else None
 
 
 def tree_is_clean() -> bool:
-    return not subprocess.run(
+    return not shellout.run(
         ["git", "status", "--porcelain"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
     ).stdout.strip()
 
@@ -235,7 +235,7 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
         return 1
 
     agent_ran = result.returncode == 0
-    committed = subprocess.run(
+    committed = shellout.run(
         ["git", "rev-parse", "--short", "HEAD"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
     ).stdout.strip()
 

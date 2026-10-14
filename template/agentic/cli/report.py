@@ -9,7 +9,6 @@ that does not exist are both silent failures, and each has happened.
 from __future__ import annotations
 
 import importlib
-import subprocess
 import sys
 
 import click
@@ -79,7 +78,14 @@ def cron(print_: bool, check_: bool) -> None:
         click.echo(crontab_block())
         return
 
-    live = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+    from scripts.reporting import shellout
+
+    listed = shellout.run(["crontab", "-l"], capture_output=True, text=True)
+    if listed.returncode == shellout.MISSING:
+        fail("this host has no `crontab` command, so nothing here is scheduled")
+        detail("The registry is in scripts/reporting/jobs.py; install cron to run it unattended.")
+        sys.exit(1)
+    live = listed.stdout
     exempt = _allowlisted()
     missing, off = [], []
     for job in JOBS:
