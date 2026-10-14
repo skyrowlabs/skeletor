@@ -3489,7 +3489,8 @@ def main() -> int:
             # Said even when nothing changed: a flag that bound and one that did
             # nothing printed identical output (dream-doll, proto.pilot).
             say("ℹ️ ", "--normalise bound " + ", ".join(normaliser.bound))
-            detail("Every python merge above put both template sides through them first.")
+            if any(normaliser.applies(rel) for rel in merged + conflicted):
+                detail("Every python merge above put both template sides through them first.")
         if args.normalise and normaliser.unsupported:
             # **The same two fixes the path without the flag got in v0.31.0, which
             # stopped there.** node-zero ran it: with `--normalise` and an old venv
