@@ -126,7 +126,7 @@ open.
 
 1. **One phase per turn.** Each ends at a checkpoint you report; the user
    decides whether to continue.
-2. **Never merge the release PR.**
+2. **Never merge any release pull request.** Phase D says how many there are.
 3. **Never hand-edit `CHANGELOG.md` or `VERSION`.** Release Please owns both.
 4. **Never edit a frozen report edition.** Corrections go in an `## Errata`
    block on the current in-flight edition.
