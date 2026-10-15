@@ -2365,18 +2365,6 @@ def main() -> int:
         if args.ref:
             stamp_the_typed_tag(head_tree / MANIFEST_NAME, head_src, args.ref)
         head_files = files_under(head_tree)
-        if args.show:
-            asked = Path(args.show)
-            if asked.is_absolute():
-                asked = asked.resolve().relative_to(target) if asked.resolve().is_relative_to(target) else asked
-            shown = asked.as_posix() if not asked.is_absolute() else None
-            shown = shown[2:] if shown and shown.startswith("./") else shown
-            if shown is None or shown not in head_files:
-                die(f"{args.show}: the template does not render that path for this tree")
-            sys.stdout.write(head_files[shown].read_text(encoding="utf-8", errors="replace"))
-            return 0
-        if set_args_applied:
-            report_reach(head_src, recorded, workdir, target, hashes, head_files, set_args_applied)
         # The version this run is comparing the tree against, read out of the
         # render rather than asked of git a second time — it is the value that
         # would be recorded if this run applied anything, so there is one source
@@ -2385,6 +2373,20 @@ def main() -> int:
         head_ref = (
             json.loads((head_tree / MANIFEST_NAME).read_text(encoding="utf-8")).get("skeletor_ref") or "?"
         )
+        if args.show:
+            asked = Path(args.show)
+            if asked.is_absolute():
+                asked = asked.resolve().relative_to(target) if asked.resolve().is_relative_to(target) else asked
+            shown = asked.as_posix() if not asked.is_absolute() else None
+            shown = shown[2:] if shown and shown.startswith("./") else shown
+            if shown is None or shown not in head_files:
+                die(f"{args.show}: the template does not render that path for this tree")
+            # The base line above names the other render; this one names the text printed (proto.pilot).
+            say("→", f"shown: skeletor @ {head_ref}")
+            sys.stdout.write(head_files[shown].read_text(encoding="utf-8", errors="replace"))
+            return 0
+        if set_args_applied:
+            report_reach(head_src, recorded, workdir, target, hashes, head_files, set_args_applied)
 
         # Where the render's own source stands, said plainly, because until now
         # this report answered "is it dirty" and nothing else — and committing
