@@ -2043,6 +2043,15 @@ def workflow_files(tree: Path) -> List[str]:
     )
 
 
+def actionlint_ignores(tree: Path) -> List[str]:
+    """The `ignore:` patterns in the tree's `.github/actionlint.yaml`."""
+    config = tree / ".github" / "actionlint.yaml"
+    if not config.exists():
+        return []
+    text = config.read_text(encoding="utf-8")
+    return [single or double for single, double in re.findall(r"^\s+- '([^']*)'$|^\s+- \"([^\"]*)\"$", text, re.M)]
+
+
 def actionlint_gate(tree: Path, venv_bin: Path) -> List[Result]:
     """The workflows a scaffold ships are valid GitHub Actions.
 
@@ -2063,19 +2072,15 @@ def actionlint_gate(tree: Path, venv_bin: Path) -> List[Result]:
     actually runs these workflows, and its absence here is why this gate is
     milliseconds.
 
-    This is the one lint here that does **not** read its arguments out of the
-    tree's `.pre-commit-config.yaml`. Two reasons are available for that and only
-    one of them survives: the tree has no actionlint hook to read (a fact about
-    today, which shipping such a hook would falsify), and this gate is not asking
-    the tree's question anyway (a fact about what it is for, which nothing
-    falsifies). The second is the load-bearing one. black, isort, flake8 and
-    pyright ask "does this tree govern itself", and are read from its config so
-    the answer is the tree's own; this asks "is what skeletor ships valid at
-    all" — the same question `check_no_baked_paths` asks, and equally not the
-    tree's business. So shipping actionlint as a hook in the generated tree
-    would be a different and also good change, since it would check a user's own
-    edits to these files — and it would **not** make this gate read its
-    arguments from there.
+    The tree now ships actionlint as a hook too, which checks a user's own edits
+    to these files, and that falsified the weaker of the two reasons this gate
+    gave for not reading the tree's config: "the tree has no hook to read". The
+    load-bearing reason survives. black, isort, flake8 and pyright ask "does this
+    tree govern itself"; this also asks "is what skeletor ships valid at all",
+    which is `check_no_baked_paths`'s question and not the tree's business. So it
+    runs both: once with the tree's `.github/actionlint.yaml`, as the hook does,
+    and once with that config emptied, holding the tree's ignores to exactly
+    what actionlint reports.
 
     The reasons are separated because the first kind expires silently. A rule
     whose stated reason names something broken or absent loses that reason the
@@ -2095,36 +2100,29 @@ def actionlint_gate(tree: Path, venv_bin: Path) -> List[Result]:
     if not binary.exists():
         return [Result("actionlint", True, 0.0, "skipped: toolchain unavailable (offline?)")]
 
-    code, output = run([str(binary), *workflows], cwd=tree)
-    # **actionlint's bundled action metadata is a snapshot, and it can be wrong
-    # about an action this template is right about.** `create-github-app-token@v3`
-    # documents `client-id` and deprecates `app-id` ("Use 'client-id' instead"),
-    # read from its own action.yml at v3; actionlint 1.7.12, its newest release,
-    # still requires `app-id` and rejects `client-id`. The release job uses
-    # `client-id` because that is the input the action supports and the one a
-    # real run measured minting with — switching to `app-id` to quiet this would
-    # ship a deprecation to every tree.
-    #
-    # So exactly those two messages are set aside, and the set-aside is checked
-    # against the output it sets aside, on every run: if actionlint stops
-    # emitting them it has caught up, the entry is stale, and this fails until
-    # it is deleted. Every OTHER finding still fails the gate.
-    stale_metadata = re.compile(
-        r'(input "client-id" is not defined|missing input "app-id" which is required) '
-        r'(in|by) action "actions/create-github-app-token@'
-    )
-    blocks = re.split(r"\n(?=\S+\.ya?ml:\d+:\d+: )", output.strip()) if output.strip() else []
-    kept = [block for block in blocks if not stale_metadata.search(block)]
-    excused = len(blocks) - len(kept)
-    if excused and not kept:
-        code = 0
-    if code == 0 and not excused and "create-github-app-token" in "".join(
-        (tree / path).read_text(encoding="utf-8") for path in workflows
-    ):
-        return [Result("actionlint: the create-github-app-token exemption is stale", False, time.time() - started,
-                       "actionlint no longer reports client-id/app-id for create-github-app-token — it has caught "
-                       "up with the action; delete `stale_metadata` from actionlint_gate.")]
-    output = "\n".join(kept)
+    # Twice, because the tree carries its own exemptions in
+    # `.github/actionlint.yaml` and this gate asks two questions of them. With the
+    # tree's config, as its hook runs: everything must be green. With an empty
+    # config, which is skeletor's question: every finding must be one the tree
+    # ignores, and every ignore must still match a finding, or it is stale. The
+    # patterns are read from the tree, so there is no second copy of them here.
+    code, output = run([str(binary), "-oneline", *workflows], cwd=tree)
+    if code != 0:
+        return [Result("actionlint, as the tree's hook runs it", False, time.time() - started, output)]
+    ignores = actionlint_ignores(tree)
+    with tempfile.TemporaryDirectory() as scratch:
+        empty = Path(scratch) / "actionlint.yaml"
+        empty.write_text("{}\n", encoding="utf-8")
+        _, bare = run([str(binary), "-oneline", "-config-file", str(empty), *workflows], cwd=tree)
+    findings = [line for line in bare.splitlines() if re.match(r"\S+\.ya?ml:\d+:\d+: ", line)]
+    unexcused = [f for f in findings if not any(re.search(pattern, f) for pattern in ignores)]
+    stale = [pattern for pattern in ignores if not any(re.search(pattern, f) for f in findings)]
+    if unexcused or stale:
+        return [Result("actionlint: .github/actionlint.yaml ignores exactly what actionlint reports",
+                       False, time.time() - started,
+                       "\n".join(["not ignored:", *unexcused, "stale (actionlint no longer reports it; "
+                                   "delete it from template/core/.github/actionlint.yaml):", *stale]))]
+    output = bare
     # actionlint lints `run:` blocks by shelling out to shellcheck, and when it
     # is absent it simply does not, without saying so. GitHub's ubuntu runners
     # ship shellcheck and a developer box may not, so the two answer differently
