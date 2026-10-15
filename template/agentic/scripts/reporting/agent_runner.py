@@ -23,6 +23,7 @@ The rails here exist because each was once absent:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
@@ -216,6 +217,8 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
     except ValueError as exc:
         return decline(str(exc))
 
+    head_before = _head()
+    artifact_before = _artifact_hash(job)
     step(f"{job.key}: running {argv[0]} (policy: {policy})")
     try:
         result = subprocess.run(
@@ -244,9 +247,21 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
         return 1
 
     agent_ran = result.returncode == 0
-    committed = shellout.run(
-        ["git", "rev-parse", "--short", "HEAD"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
-    ).stdout.strip()
+    head_after = _head()
+    # `ok` is a claim about the artifact, not the exit code. This recorded `ok`
+    # for an agent that exited 0 having written nothing, with `committed` set to
+    # whatever HEAD already was, so the heartbeat said up over a report that had
+    # stopped changing — measured on a fresh tree with the agent replaced by
+    # `true`. HEAD and the artifact are read on both sides of the run; "wrote"
+    # is one of them moving, the only thing a run can prove about itself
+    # without reading its own output. A job naming no artifact has nothing to
+    # prove and keeps the exit code's answer.
+    wrote = head_after != head_before or _artifact_hash(job) != artifact_before
+    if agent_ran and not wrote and _artifact_hash(job) is not None:
+        agent_ran = False
+        reason = "agent exited 0 and wrote nothing — neither HEAD nor its artifact moved"
+    else:
+        reason = "" if agent_ran else (result.stderr.strip()[-500:] or "agent exited non-zero")
 
     run_ledger.record(
         run_ledger.Run(
@@ -256,11 +271,27 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
             finished=run_ledger.now(),
             branch=branch,
             agent_ran=agent_ran,
-            committed=committed if job.commits else None,
+            committed=head_after if job.commits and head_after != head_before else None,
             findings=int(collected.get("finding_count", 0) or 0),
-            reason="" if agent_ran else (result.stderr.strip()[-500:] or "agent exited non-zero"),
+            reason=reason,
         )
     )
     heartbeat(os.environ.get(job.heartbeat_var or ""), "up" if agent_ran else "down")
     line(result.stdout[-4000:])
     return 0 if agent_ran else 1
+
+
+def _head() -> str:
+    return shellout.run(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _artifact_hash(job) -> str | None:
+    """A digest of `job.writes`, or `None` when the job names no file or it is absent."""
+    if not job.writes or job.writes == "—":
+        return None
+    path = PROJECT_ROOT / job.writes
+    if not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
