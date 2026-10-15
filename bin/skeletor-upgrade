@@ -2433,7 +2433,15 @@ def main() -> int:
                 capture_output=True,
                 text=True,
             ).stdout.strip()
-            if tool_ref and tool_ref != head_ref:
+            # Commits, not names: two tags on one commit are one render, and the
+            # names differ exactly when --ref picked the other tag (mind.head).
+            def commit_of(checkout: Path) -> str:
+                return subprocess.run(
+                    ["git", "-C", str(checkout), "rev-parse", "HEAD"], capture_output=True, text=True
+                ).stdout.strip()
+
+            differs = commit_of(SKELETOR) != commit_of(head_src) or tool_ref.endswith("-dirty")
+            if tool_ref and differs:
                 say("⚠️ ", f"this tool is skeletor @ {tool_ref}; --ref pinned the render to {head_ref}, not the tool")
                 # A clone from the REMOTE, not a worktree of this checkout. The
                 # worktree advice wrote into this generator's `.git/worktrees/`,

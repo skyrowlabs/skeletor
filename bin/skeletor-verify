@@ -5607,6 +5607,23 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
         )
     )
 
+    # Same commit, other name: the tool is not "elsewhere" just because `describe`
+    # names its HEAD differently from the tag typed (mind.head).
+    started = time.time()
+    git_in(asker, "tag", "-a", "v9.9.8-probe", "-m", "probe", "HEAD")
+    git_in(asker, "tag", "v9.9.9-probe-head", "HEAD")
+    _, same = run([sys.executable, str(asker / "bin" / "skeletor-upgrade"), str(target),
+                   "--ref", "v9.9.9-probe-head", "--dry-run", "--allow-dirty"], cwd=target)
+    named = git_in(asker, "describe", "--tags", "HEAD")[1].strip()
+    results.append(
+        Result(
+            "pinned ref: a tool on the rendered commit is not told it differs",
+            named == "v9.9.8-probe" and "not the tool" not in same and "head: skeletor @" in same,
+            time.time() - started,
+            f"describe says {named!r}:\n{same[-600:]}",
+        )
+    )
+
     # **The case the flag was built for and could not reach**, which needed a
     # fixture the assertions above cannot supply: a tree ALREADY current with the
     # tag, whose record says something else.
