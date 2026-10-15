@@ -8685,7 +8685,10 @@ def entangled_gate(workdir: Path) -> List[Result]:
                 "entangled: a clean file importing a conflicted one is named",
                 importee in payload.get("conflicted", [])
                 and importer in payload.get("updated", [])
-                and entangled == {importer: [importee]},
+                # The pair, and nothing listed that names no conflicted file: a
+                # second real importer is correct (a test that also imports it).
+                and entangled.get(importer) == [importee]
+                and all(hits and set(hits) <= set(payload.get("conflicted", [])) for hits in entangled.values()),
                 time.time() - started,
                 f"conflicted={payload.get('conflicted')}\nupdated={payload.get('updated')}\n"
                 f"entangled={entangled}\n{output}",
