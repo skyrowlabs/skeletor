@@ -10541,6 +10541,67 @@ def parenthesised_except_gate(tree: Path) -> Result:
     )
 
 
+def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """`--rehearse` names a gate the release turns red, stays quiet when none, and writes nothing.
+
+    The release is manufactured: a skeletor clone of its own commits a template
+    test that passes, then one that fails. Only the second may be reported, and
+    it must be named as `unit tests`, since a rehearsal that reported every run
+    as red would pass a gate asserting only the red case. Both runs must leave
+    the tree's status and its worktree list exactly as they found them.
+    """
+    started = time.time()
+    own = workdir / "rehearse-skeletor"
+    if own.exists():
+        shutil.rmtree(own)
+    run(["git", "clone", "--quiet", "--no-hardlinks", str(clean_skeletor(workdir)), str(own)], cwd=workdir)
+    tree = workdir / "rehearse" / "probe"
+    if tree.exists():
+        shutil.rmtree(tree.parent)
+    code, output = run(
+        [sys.executable, str(own / "bin" / "skeletor-new"), str(tree), "--name", "Probe", "--cli", CLI_NAME,
+         "--tagline", "t", "--tier", "core", "--language", "python"],
+        cwd=SKELETOR,
+    )
+    if code != 0:
+        return [Result("rehearse: scaffold", False, time.time() - started, output[-1500:])]
+    (tree / ".venv").symlink_to(venv_python.parents[1])
+    probe = own / "template" / "core" / "tests" / "test_rehearsal_probe.py"
+    body = 'import pytest\n\npytestmark = pytest.mark.unit\n\n\ndef test_probe():\n    assert {}\n'
+
+    def release(verdict: str) -> None:
+        probe.write_text(body.format(verdict), encoding="utf-8")
+        git_in(own, "add", "-A")
+        git_in(own, "commit", "--quiet", "-m", f"scratch: a template test that asserts {verdict}")
+
+    def rehearse() -> Tuple[int, str]:
+        done = subprocess.run(
+            [sys.executable, str(own / "bin" / "skeletor-upgrade"), str(tree), "--rehearse", "--allow-untagged"],
+            cwd=tree, capture_output=True, text=True, timeout=1800,
+        )
+        return done.returncode, done.stdout + done.stderr
+
+    # The `.venv` link above is untracked, so "untouched" is "as it was", not "clean".
+    baseline = git_in(tree, "status", "--porcelain")[1]
+
+    def untouched() -> bool:
+        worktrees = git_in(tree, "worktree", "list")[1].strip().splitlines()
+        return git_in(tree, "status", "--porcelain")[1] == baseline and len(worktrees) == 1
+
+    results = []
+    for verdict, wants_red in (("True", False), ("False", True)):
+        started = time.time()
+        release(verdict)
+        code, output = rehearse()
+        named = "turns 1 gate(s) red" in output and "· unit tests" in output
+        quiet = "none it turned red" in output
+        ok = untouched() and (code == 1 and named if wants_red else code == 0 and quiet)
+        label = "a release that fails a test names `unit tests`" if wants_red else "a release that breaks nothing says so"
+        results.append(Result(f"rehearse: {label}, and writes nothing", ok, time.time() - started,
+                              "" if ok else f"exit {code}, untouched={untouched()}\n{output[-2500:]}"))
+    return results
+
+
 def cli_rename_gate(workdir: Path) -> List[Result]:
     """An adopted tree renames its wrapper with `--set-arg cli=`, and the move is honest.
 
@@ -11078,6 +11139,7 @@ def main() -> int:
         for gate in shell_package_gate(fullest, workdir, venv_python, pyright_ok):
             results.append(gate)
         results += cli_rename_gate(workdir)
+        results += rehearse_gate(workdir, venv_python)
         results += newest_floor_gate(fullest, workdir, venv_python)
 
         # Beside it, and the one that would have stopped v0.22.0: a tree that

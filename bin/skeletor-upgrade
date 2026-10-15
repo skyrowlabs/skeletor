@@ -2209,6 +2209,144 @@ def touches_code(base: str, ours: str) -> bool:
     return False
 
 
+#: One row of `scripts/output.py`'s `summarize()` table: the symbol, then the gate.
+_GATE_ROW = re.compile(r"^(\S+)\s+(.+?)\s*$")
+_RULE = re.compile(r"^─{10,}$")
+
+
+def gate_table(tree: Path, quick: bool) -> Tuple[Optional[Dict[str, bool]], str]:
+    """`({gate: passed}, output)` from the tree's own `check pre-push`; `None` when no table was printed.
+
+    Read from the table `summarize()` prints between its two rules, so a tree
+    that added or renamed gates is read as it is. A run that printed no table
+    crashed before it judged anything, which is not the same answer as green.
+    """
+    manifest = json.loads((tree / MANIFEST_NAME).read_text(encoding="utf-8"))
+    recorded = manifest.get("args") or []
+    wrapper = tree / (recorded[recorded.index("--cli") + 1] if "--cli" in recorded else "")
+    if not wrapper.is_file():
+        return None, f"no CLI wrapper at {wrapper.name or '(unrecorded --cli)'}"
+    command = [str(wrapper), "check", "pre-push", *(["--quick"] if quick else [])]
+    try:
+        # One stream, so a gate's own output stays beside the command that produced it.
+        done = subprocess.run(command, cwd=tree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                              timeout=3600)
+    except subprocess.TimeoutExpired:
+        return None, "check pre-push ran past an hour"
+    output = done.stdout
+    rules = [i for i, line in enumerate(output.splitlines()) if _RULE.match(line.strip())]
+    if len(rules) < 2:
+        return None, output
+    table: Dict[str, bool] = {}
+    for line in output.splitlines()[rules[-2] + 1 : rules[-1]]:
+        row = _GATE_ROW.match(line.strip())
+        if row:
+            table[row.group(2)] = row.group(1) == "✅"
+    return (table or None), output
+
+
+def rehearsal_argv(argv: List[str], target: str) -> List[str]:
+    """This run's arguments minus the target and the flags that make it a rehearsal."""
+    out, dropped = [], False
+    for arg in argv:
+        if arg in ("--rehearse", "--quick", "--dry-run"):
+            continue
+        if not dropped and arg == target:
+            dropped = True
+            continue
+        out.append(arg)
+    return out
+
+
+def rehearse(args: argparse.Namespace) -> int:
+    """Apply the upgrade to a throwaway worktree and run the tree's own gates before and after.
+
+    The dry run forecasts conflicts and cannot forecast a gate: the v0.53.0 round
+    was exact on conflicts in six trees and caught none of eight gates that went
+    red on arrival, all of them new checks meeting a tree's own state. Only
+    running the tree answers that, so this does, somewhere disposable.
+
+    The worktree is a linked one, so it shares `.git/config` (clone-local config
+    is the tree's) and HEAD plus tracked edits (`git stash create`). It does NOT
+    carry untracked files — `tmp/`, `.env` — and borrows the tree's `.venv` and
+    `node_modules` by symlink. The real tree is never written.
+    """
+    target = Path(args.target).expanduser().resolve()
+    me = [sys.executable, str(Path(__file__).resolve())]
+    passthrough = rehearsal_argv(sys.argv[1:], args.target)
+    forecast = subprocess.run([*me, str(target), *passthrough, "--dry-run"])
+
+    def git(*argv: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(target), *argv], capture_output=True, text=True)
+
+    snapshot = git("stash", "create").stdout.strip() or git("rev-parse", "HEAD").stdout.strip()
+    if not snapshot:
+        die(f"{target} has no commit to rehearse from")
+    stage = Path(tempfile.mkdtemp(prefix="skeletor-rehearse-"))
+    stage_tree = stage / target.name
+    logs = Path(tempfile.mkdtemp(prefix="skeletor-rehearsal-logs-"))
+    added = git("worktree", "add", "--detach", "--quiet", str(stage_tree), snapshot)
+    if added.returncode != 0:
+        shutil.rmtree(stage, ignore_errors=True)
+        die(f"could not make a rehearsal worktree: {added.stderr.strip()}")
+    try:
+        for borrowed in (".venv", "node_modules"):
+            if (target / borrowed).exists() and not (stage_tree / borrowed).exists():
+                (stage_tree / borrowed).symlink_to(target / borrowed)
+        say("🎭", f"rehearsal: `check pre-push{' --quick' if args.quick else ''}` before and after, in a worktree")
+        before, before_out = gate_table(stage_tree, args.quick)
+        applied = subprocess.run([*me, str(stage_tree), *passthrough], capture_output=True, text=True)
+        changed = subprocess.run(
+            ["git", "-C", str(stage_tree), "status", "--porcelain"], capture_output=True, text=True
+        ).stdout.strip()
+        (logs / "upgrade.log").write_text(applied.stdout + applied.stderr, encoding="utf-8")
+        if not changed:
+            say("ℹ️ ", "the upgrade wrote nothing in the rehearsal, so there is nothing to compare")
+            for line in (applied.stdout + applied.stderr).strip().splitlines()[-6:]:
+                detail(line)
+            return forecast.returncode or (1 if applied.returncode else 0)
+        after, after_out = gate_table(stage_tree, args.quick)
+    finally:
+        git("worktree", "remove", "--force", str(stage_tree))
+        shutil.rmtree(stage, ignore_errors=True)
+    (logs / "before.log").write_text(before_out, encoding="utf-8")
+    (logs / "after.log").write_text(after_out, encoding="utf-8")
+    return report_rehearsal(before, after, after_out, logs) or forecast.returncode
+
+
+def report_rehearsal(
+    before: Optional[Dict[str, bool]], after: Optional[Dict[str, bool]], after_out: str, logs: Path
+) -> int:
+    """Say which gates this upgrade turns red; 1 when any does, or when either run could not be read."""
+    if before is None or after is None:
+        say("⚠️ ", f"rehearsal: `check pre-push` printed no gate table {'before' if before is None else 'after'} "
+                   "the upgrade, so nothing is known about its gates")
+        detail(f"Its output is in {logs}.")
+        return 1
+    turned = [gate for gate, ok in after.items() if not ok and before.get(gate, True)]
+    already = [gate for gate, ok in after.items() if not ok and gate not in turned]
+    cleared = [gate for gate, ok in before.items() if not ok and after.get(gate)]
+    if turned:
+        say("❌", f"rehearsal: this upgrade turns {len(turned)} gate(s) red that were green before it")
+        for gate in turned:
+            item(gate + ("" if gate in before else " (new with this upgrade)"))
+        # The lines before the final table: the last gates' own output, where a
+        # suite's failure summary is. The table itself is the list above.
+        lines = after_out.rstrip().splitlines()
+        rules = [i for i, line in enumerate(lines) if _RULE.match(line.strip())]
+        detail("What the run after the upgrade printed last, before its table:")
+        for line in lines[: rules[-2] if len(rules) >= 2 else len(lines)][-30:]:
+            detail(f"    {line}")
+    else:
+        say("✅", f"rehearsal: {len(after)} gate(s) ran after the upgrade, and none it turned red")
+    if already:
+        detail(f"Red before and after, so not this upgrade's: {', '.join(already)}.")
+    if cleared:
+        detail(f"Red before, green after: {', '.join(cleared)}.")
+    detail(f"Full output, before and after, and the upgrade's own: {logs}")
+    return 1 if turned else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("target", help="the scaffolded tree to upgrade")
@@ -2288,7 +2426,21 @@ def main() -> int:
         "Writes nothing, like --dry-run. For a file the report lists as one you have edited: "
         "that list says the file differs, and this is what it differs FROM.",
     )
+    parser.add_argument(
+        "--rehearse",
+        action="store_true",
+        help="the dry run, then the upgrade applied in a throwaway worktree with the tree's own "
+        "`check pre-push` run before and after it: which gates this release turns red. Writes nothing "
+        "to the tree. Untracked files (tmp/, .env) are not carried into the rehearsal.",
+    )
+    parser.add_argument("--quick", action="store_true", help="with --rehearse: `check pre-push --quick`, no suites")
     args = parser.parse_args(join_set_arg(sys.argv[1:]))
+    if args.quick and not args.rehearse:
+        die("--quick only means something with --rehearse")
+    if args.rehearse:
+        if args.json or args.show or args.repair_manifest:
+            die("--rehearse reports to a person; it does not combine with --json, --show or --repair-manifest")
+        return rehearse(args)
     # A read, so every rule for a read applies to it: nothing refused, nothing
     # written, nothing recorded.
     if args.show:
