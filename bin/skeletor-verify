@@ -9459,15 +9459,24 @@ def upstream_record_gate() -> List[Result]:
     return results
 
 
+def first_party_roots() -> set:
+    """Every top-level package an overlay ships, which is what a tree imports as its own."""
+    overlays = [overlay for overlay in (SKELETOR / "template").iterdir() if overlay.is_dir()]
+    return {p.name for overlay in overlays for p in overlay.iterdir() if p.is_dir() and any(p.glob("*.py"))}
+
+
 def released_helper_names(text: str) -> set:
     """Every top-level name a module binds that an importer could reach.
 
-    Imports count. `from scripts.paths import PROJECT_ROOT` makes
+    Imports from the tree count. `from scripts.paths import PROJECT_ROOT` makes
     `repo_files.PROJECT_ROOT` resolvable, and an adopter reaching for it is
     reaching for a name this module publishes. The contract asserted below is
     that the name still resolves, never where it came from, so a refactor that
     moves an import around satisfies it and one that drops the name does not.
+    An import from outside the tree is not published: `conftest.Optional` was
+    never the template's to promise, and `typing` still serves it.
     """
+    ours = first_party_roots()
     try:
         tree = ast.parse(text)
     except SyntaxError:
@@ -9481,7 +9490,10 @@ def released_helper_names(text: str) -> set:
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             names.add(node.target.id)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+            if isinstance(node, ast.ImportFrom):
+                if not node.level and (node.module or "").split(".")[0] not in ours:
+                    continue
+            elif not any(alias.name.split(".")[0] in ours for alias in node.names):
                 continue
             names.update((alias.asname or alias.name).split(".")[0] for alias in node.names)
     return {name for name in names if not name.startswith("_")}
@@ -9548,12 +9560,14 @@ def shared_helper_api_gate() -> List[Result]:
 
     withdrawn: Dict[str, Dict[str, str]] = {}
     released: Dict[str, set] = {}
+    shipped: set = set()
     for rel in modules:
         current = released_helper_names(Path(SKELETOR / rel).read_text(encoding="utf-8"))
         for tag in tags:
             code, text = run(["git", "show", f"{tag}:{rel}"], cwd=SKELETOR)
             if code != 0:
                 continue  # the module did not ship at that tag
+            shipped.add(rel)
             names = released_helper_names(text)
             released.setdefault(rel, set()).update(names)
             for name in names - current:
@@ -9563,15 +9577,18 @@ def shared_helper_api_gate() -> List[Result]:
     # first draft and a plant walked straight through it: a `git show` that
     # succeeds with no content, or a revision `released_helper_names` cannot
     # parse, advances the pair count and contributes nothing to compare against.
-    # A gate whose subject is a set of names has to assert it found names.
+    # A gate whose subject is a set of names has to assert it found names, and
+    # does so per module that shipped: one added since the last tag has no
+    # released names and is not a misread, which `len(modules)` treated as one.
     found = sum(len(names) for names in released.values())
+    unread = sorted(rel for rel in shipped if not released.get(rel))
     results.append(
         Result(
             "shared helper API: released names read",
-            found >= len(modules) and len(released) >= len(modules),
+            len(shipped) >= 3 and not unread,
             0.0,
-            f"read {found} released names across {len(released)} of {len(modules)} modules at "
-            f"{len(tags)} tags. `git show <tag>:<path>` is answering with nothing parseable, so the "
+            f"read {found} released names; {len(shipped)} of {len(modules)} modules shipped at some of "
+            f"{len(tags)} tags and these yielded none: {unread}. `git show <tag>:<path>` is answering with nothing parseable, so the "
             f"withdrawal check below is comparing against an empty set and cannot fail.",
         )
     )
