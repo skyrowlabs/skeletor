@@ -10484,7 +10484,33 @@ def newest_floor_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     return [
         Result(f"python {floor} floor: {gate.label}", gate.ok, gate.seconds, gate.output)
         for gate in lint_gates(tree, venv_python)
-    ]
+    ] + [parenthesised_except_gate(tree)]
+
+
+def parenthesised_except_gate(tree: Path) -> Result:
+    """No `except (A, B):` without `as` in a rendered tree, asked of the source and not of black.
+
+    The lint half above only bites when the grid's own interpreter is 3.14, and
+    CI runs the grid at the scaffold's default floor, so `scripts/manifest.py`
+    shipped one in v0.53.0 and stash.flow's 3.14 tree was red on arrival.
+    """
+    started = time.time()
+    found = []
+    paths = sorted(p for p in tree.rglob("*.py") if ".venv" not in p.parts)
+    if not paths:
+        return Result("no parenthesised `except (A, B):`", False, time.time() - started, f"no python under {tree}")
+    for path in paths:
+        source = path.read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.ExceptHandler) and node.name is None and isinstance(node.type, ast.Tuple):
+                if (ast.get_source_segment(source, node.type) or "").startswith("("):
+                    found.append(f"{path.relative_to(tree)}:{node.lineno}")
+    return Result(
+        "no parenthesised `except (A, B):` — black rewrites it at a 3.14 target",
+        not found,
+        time.time() - started,
+        "name the tuple instead:\n  " + "\n  ".join(found),
+    )
 
 
 def cli_rename_gate(workdir: Path) -> List[Result]:
