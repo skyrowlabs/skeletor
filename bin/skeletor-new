@@ -946,8 +946,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--line-length",
         type=int,
-        default=120,
-        help="the column limit black, isort and flake8 all enforce (floor: what this template's own files need)",
+        default=FORMATTED_AT,
+        help=(
+            "the column limit black, isort and flake8 all enforce; between what this template's own "
+            f"files need and {FORMATTED_AT}, the width they are formatted at"
+        ),
     )
     parser.add_argument(
         "--org",
@@ -1223,6 +1226,11 @@ def python_matrix(floor: str, ceiling: str) -> str:
     return "[" + ", ".join(f"'{version}'" for version in versions) + "]"
 
 
+#: The width the template's python is formatted at, and so the widest
+#: `--line-length` a fresh tree can pass its own black at.
+FORMATTED_AT = 120
+
+
 def line_length_floor() -> Tuple[int, str]:
     """The strictest column limit the files this generator copies can satisfy.
 
@@ -1338,6 +1346,19 @@ def main() -> int:
             f"   Every scaffold vendors those files, so the tree would fail its own black and flake8 "
             f"on the first `pre-commit run` — red on arrival, before you have written anything.\n"
             f"   Pass {floor} or more, or fork the template and reformat it at the width you want."
+        )
+        return 1
+
+    # The ceiling is the same invariant from the other side: above the width the
+    # template is formatted at, black re-joins statements the template splits, so
+    # a tree at 130 had black rewriting 25 of its files on the first run.
+    if args.line_length > FORMATTED_AT and not args.reproducing:
+        print(
+            f"❌ --line-length {args.line_length} is above {FORMATTED_AT}, the width this template's own "
+            f"files are formatted at.\n"
+            f"   black re-joins any split statement that fits a wider limit, so the tree would fail its "
+            f"own black on the first `pre-commit run` — red on arrival.\n"
+            f"   Pass {FORMATTED_AT} or less, or fork the template and reformat it at the width you want."
         )
         return 1
 

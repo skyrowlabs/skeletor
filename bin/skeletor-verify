@@ -1850,7 +1850,7 @@ def set_arg_gate(workdir: Path) -> List[Result]:
     return results
 
 
-def line_length_gate(tier: str, workdir: Path) -> List[Result]:
+def line_length_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     """`--line-length` cannot be set below what the vendored files need.
 
     The flag took any integer and this template's own python sat **exactly on
@@ -1860,7 +1860,7 @@ def line_length_gate(tier: str, workdir: Path) -> List[Result]:
     its own lint on the first `pre-commit run`. mind.head at 100 was the first
     adopter to stand in it, on files they had not written.
 
-    Three assertions, and they fail in different directions on purpose.
+    The assertions fail in different directions on purpose.
 
     **The floor refuses.** A value below it exits non-zero rather than writing a
     tree that is red on arrival.
@@ -1985,6 +1985,50 @@ def line_length_gate(tier: str, workdir: Path) -> List[Result]:
             time.time() - started,
             "\n".join(over[:20])
             or f"every rendered python line fits in {floor} columns — the template measures {floor} too",
+        )
+    )
+
+    # The ceiling, in both directions. A tree at 130 once scaffolded with black
+    # rewriting 25 of its files, because black re-joins a split statement that
+    # fits the wider limit. The refusal is half; the other half is that the
+    # ceiling still binds, so a template made width-stable fails here rather
+    # than keeping a limit nothing needs.
+    ceiling = scaffolder.FORMATTED_AT
+    started = time.time()
+    above = workdir / "line-length-ceiling"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(above), "--allow-dirty", "--name", "Wide", "--slug", "wide",
+         "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--language", "python",
+         "--line-length", str(ceiling + 1)],
+        cwd=workdir,
+    )
+    results.append(
+        Result(
+            f"line length: --line-length {ceiling + 1} is refused (formatted at {ceiling})",
+            code != 0 and not above.exists(),
+            time.time() - started,
+            f"exit {code}, target written: {above.exists()}\n{output[-1500:]}",
+        )
+    )
+
+    started = time.time()
+    binds = workdir / "line-length-ceiling-binds"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(binds), "--allow-dirty", "--reproducing",
+         "--name", "Wider", "--slug", "wider", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
+         "--language", "python", "--line-length", str(ceiling + 1)],
+        cwd=workdir,
+    )
+    if code == 0:
+        code, output = run([str(venv_python), "-m", "black", "--check", *python_files(binds)], cwd=binds)
+    results.append(
+        Result(
+            f"line length: black at {ceiling + 1} would reformat the template, so the ceiling binds",
+            code == 1,
+            time.time() - started,
+            f"black exit {code} (1 = would reformat)\n"
+            f"if black is green at {ceiling + 1}, the template no longer needs FORMATTED_AT — raise it.\n"
+            + output[-1500:],
         )
     )
     return results
@@ -10805,7 +10849,7 @@ def main() -> int:
         for gate in one_branch_gate(fullest, workdir, venv_python):
             results.append(gate)
 
-        for gate in line_length_gate(fullest, workdir):
+        for gate in line_length_gate(fullest, workdir, venv_python):
             results.append(gate)
 
         for gate in gating_gate(fullest, workdir):
