@@ -665,10 +665,13 @@ def node_gates(tree: Path) -> List[Result]:
 
 #: The rule that closes `tests/conftest.py`; everything after it is the adopter's.
 CONFTEST_REGION = "# ── Your fixtures go below this line"
+#: The block's last line, which adopters write directly under. Any edit to it conflicts in
+#: every tree that followed the block (v0.51.2 did, in five); an edit above it is clean.
+CONFTEST_REGION_LAST = "# of this file conflicted with the template's at v0.49.0 and again at v0.51.0."
 
 
 def check_conftest_leaves_the_adopter_region_empty(tree: Path) -> Result:
-    """skeletor renders only comments after the conftest rule, at every tier.
+    """skeletor renders only comments after the conftest rule, and never edits the last one.
 
     A fixture the template adds below it lands beside the adopter's and conflicts
     on every upgrade, which is the defect the rule exists to end (proto.pilot).
@@ -678,11 +681,16 @@ def check_conftest_leaves_the_adopter_region_empty(tree: Path) -> Result:
     lines = (tree / "tests" / "conftest.py").read_text(encoding="utf-8").splitlines()
     rule = next((i for i, line in enumerate(lines) if line.startswith(CONFTEST_REGION)), None)
     below = [line for line in lines[rule + 1:] if line.strip() and not line.startswith("#")] if rule is not None else []
+    last = next((line for line in reversed(lines) if line.strip()), "")
+    problems = ["tests/conftest.py has no adopter rule"] if rule is None else []
+    problems += ["rendered below the rule:\n  " + "\n  ".join(below)] if below else []
+    if last != CONFTEST_REGION_LAST:
+        problems.append(f"the block's last line changed to {last!r}; an adopter's first line sits against it")
     return Result(
-        "conftest: skeletor renders nothing below the adopter's rule",
-        rule is not None and not below,
+        "conftest: skeletor renders nothing below the adopter's rule, and its last line is unchanged",
+        not problems,
         time.time() - started,
-        "tests/conftest.py has no adopter rule" if rule is None else "rendered below the rule:\n  " + "\n  ".join(below),
+        "\n".join(problems),
     )
 
 
