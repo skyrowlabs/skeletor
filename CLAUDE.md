@@ -90,6 +90,7 @@ bin/skeletor-upgrade ../target --dry-run
 bin/skeletor-upgrade ../target
 bin/skeletor-upgrade ../target --ported   # I resolved the conflicts; advance the base
 bin/skeletor-upgrade ../target --ref v0.24.0   # pin the head render to a released tag
+bin/skeletor-upgrade ../target --rehearse      # dry run, then the tree's own gates before/after, in a worktree
 ```
 
 There is no test suite for skeletor itself. **The scaffold IS the test**: a

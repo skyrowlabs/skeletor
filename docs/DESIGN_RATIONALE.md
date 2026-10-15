@@ -5642,3 +5642,30 @@ changed (stash.flow). Each is a named tuple now, which formats the same everywhe
 and `newest_floor_gate` scaffolds the fullest tier at the grid's own interpreter
 version and runs the tree's lint gates on it — every other configuration renders the
 default floor, so no gate had ever asked. Planting one handler back turns it red.
+
+That gate bites only when the grid's interpreter is 3.14, and CI runs the grid at
+the scaffold's default floor, so `scripts/manifest.py` shipped one in v0.53.0.
+`parenthesised_except_gate` reads the rendered source with `ast` instead, and runs
+at any interpreter.
+
+## A dry run forecasts conflicts; only running the tree forecasts gates
+
+The v0.53.0 round's dry runs were exact on conflicts in six trees and forecast
+none of the eight gates that went red on arrival. Every one was a new check
+meeting a tree's own state — clone-local config, test fixtures, a stricter
+formatter setting — which no reading of the render can see. `--rehearse` runs
+the dry run, then applies the upgrade in a linked worktree of the tree's HEAD
+plus tracked edits, and runs the tree's own `check pre-push` before and after.
+A gate red after and not before is the upgrade's; red both times is debt.
+
+It reads the gate table `summarize()` prints rather than an exit code, because
+"which gate" is the answer and "something failed" was already known. A run that
+prints no table is reported as unknown, never as green. The worktree is linked,
+not a copy, so `.git/config` is the tree's own — which is where the round's most
+common red lived. What it cannot carry is untracked state (`tmp/`, `.env`), and
+the help says so. The full suite is the default because seven of the eight reds
+were in it; `--quick` is there for a tree whose suite costs minutes.
+
+`rehearse_gate` manufactures a release from its own skeletor clone — a template
+test that passes, then one that fails — so the quiet case and the red case are
+both asserted. A rehearsal that never reports red passes the first alone.
