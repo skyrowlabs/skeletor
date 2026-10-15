@@ -103,10 +103,25 @@ def recent(limit: int = 50) -> list[dict]:
 
 
 def last_run(job: str) -> dict | None:
-    for entry in reversed(recent(500)):
+    """The newest row for `job`, read from the whole ledger.
+
+    This read the last 500 rows. Nothing trims the ledger, so with a full grid
+    of nightly jobs a monthly job's row left that window in weeks and `report
+    watch` showed it as never run — which is what a dead cron looks like.
+    Measured: one monthly row, 501 nightly rows after it, `None`.
+    """
+    ledger = ledger_path()
+    if not ledger.exists():
+        return None
+    found = None
+    for raw in ledger.read_text(encoding="utf-8").splitlines():
+        try:
+            entry = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
         if entry.get("job") == job:
-            return entry
-    return None
+            found = entry
+    return found
 
 
 def now() -> str:
