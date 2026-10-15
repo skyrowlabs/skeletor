@@ -212,6 +212,10 @@ def pre_push(quick: bool) -> None:
         # Self-guarding: with no release automation in the tree there is no
         # contract to check and it says so.
         ("commit subjects", script("scripts/check_commit_subjects.py")),
+        # A clone fact, so CI cannot hold it and `tests/test_pre_push_covers_ci.py`
+        # cannot require it: the merge driver and commit template live in
+        # .git/config, which every second clone starts without.
+        ("clone-local config", script("scripts/git/install_merge_drivers.py", "--check")),
     ]
     if not quick:
         junit = TMP_DIR / "junit-unit.xml"
