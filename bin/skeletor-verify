@@ -9525,6 +9525,67 @@ def released_helper_names(text: str) -> set:
     return {name for name in names if not name.startswith("_")}
 
 
+def modern_typing_spellings() -> Dict[str, str]:
+    """Every `typing` name with a newer spelling, derived from `typing` rather than listed.
+
+    An alias carries its replacement as `__origin__`; `Optional` and `Union` are the
+    two special forms PEP 604's `|` replaces, and have none.
+    """
+    import typing
+
+    found = {"Optional": "X | None", "Union": "X | Y"}
+    for name in dir(typing):
+        origin = getattr(getattr(typing, name), "__origin__", None)
+        if isinstance(origin, type) and origin.__module__ != "typing":
+            found[name] = f"{origin.__module__}.{origin.__name__}".replace("builtins.", "")
+    return found
+
+
+def template_annotations_gate() -> List[Result]:
+    """Template source uses the annotation spellings its newest adopters' linters require.
+
+    A tree that runs pyupgrade rewrote `List`, `Optional` and friends on every
+    upgrade until v0.51.0 converted them, and the sweep missed four sites a round
+    then found (mind.head). This keeps the conversion from regressing, here and not
+    in a round. Annotations are strings under `from __future__ import annotations`,
+    so the 3.9 floor allows every replacement in an annotation.
+    """
+    started = time.time()
+    spellings = modern_typing_spellings()
+    code, output = run(["git", "ls-files", "template/*.py"], cwd=SKELETOR)
+    files = [rel for rel in output.splitlines() if rel]
+    found: List[str] = []
+    for rel in files:
+        try:
+            tree = ast.parse((SKELETOR / rel).read_text(encoding="utf-8"))
+        except SyntaxError as error:
+            found.append(f"{rel}: does not parse, so it was not checked ({error.msg})")
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "typing":
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "typing":
+                names = [node.attr]
+            else:
+                continue
+            found += [f"{rel}:{node.lineno}: typing.{n} → {spellings[n]}" for n in names if n in spellings]
+    return [
+        Result(
+            f"template annotations: {len(files)} files read, {len(spellings)} old spellings known",
+            len(files) >= 50 and {"List", "Optional", "Callable"} <= set(spellings),
+            time.time() - started,
+            f"read {len(files)} tracked template files and derived {sorted(spellings)}; too few of "
+            "either and the check below passes having looked at nothing.",
+        ),
+        Result(
+            "template annotations: no typing name that has a newer spelling",
+            not found,
+            0.0,
+            "\n".join(found),
+        ),
+    ]
+
+
 def shared_helper_api_gate() -> List[Result]:
     """A name a release handed an adopter still resolves.
 
@@ -10891,6 +10952,7 @@ def main() -> int:
         results.append(absent_region_gate())
         results += upstream_record_gate()
         results += shared_helper_api_gate()
+        results += template_annotations_gate()
         results += maintain_summary_gate()
         venv_python = make_venv(workdir, args.quiet)
         results.append(shadow_gate(workdir, venv_python))
