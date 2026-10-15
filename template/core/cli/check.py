@@ -209,8 +209,7 @@ def pre_push(quick: bool) -> None:
         # here one commit deep and there three: same gate, same name, two sets,
         # and the bigger one runs after the push. The script prints the range
         # it chose, because two ranges that print alike is the whole defect.
-        # Self-guarding: with no release automation in the tree there is no
-        # contract to check and it says so.
+        # With no Release Please config the contract is the commit-msg hook.
         ("commit subjects", script("scripts/check_commit_subjects.py")),
         # A clone fact, so CI cannot hold it and `tests/test_pre_push_covers_ci.py`
         # cannot require it: the merge driver and commit template live in
