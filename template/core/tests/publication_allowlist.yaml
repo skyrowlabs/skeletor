@@ -1,0 +1,6 @@
+# Findings `tests/test_publication.py` may leave in a tracked file, and why.
+#
+# Format:  <path> <match>: <why this one names nobody's machine>
+#
+# An entry whose finding is gone is stale and fails the test, so an exemption
+# cannot outlive the line it was written for.
