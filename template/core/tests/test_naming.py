@@ -32,3 +32,9 @@ def test_the_masks_keep_code_and_reveal_prose():
     assert not BARE.search(MASKS[".md"](f"type `{COMMAND} x` here\n\n```\n{COMMAND}\n```\n"))
     assert not BARE.search(MASKS[".py"](f'x = "{COMMAND}"\n')), "a string literal is code"
     assert BARE.search(MASKS[".py"](f"# {spoken}\n")) and BARE.search(MASKS[".js"](f"// {spoken}\n"))
+
+
+def test_an_unmatched_backtick_run_does_not_hide_what_follows():
+    assert BARE.search(MASKS[".md"](f"with a ```bash block\n\nlater {COMMAND} here\n")), "proto.pilot's repro"
+    assert not BARE.search(MASKS[".md"](f"with a ```bash block\n\nlater `{COMMAND}`'s surface\n"))
+    assert not BARE.search(MASKS[".md"](f"``a `{COMMAND}` b``")), "a longer run closes only on its own length"

@@ -19,8 +19,8 @@ import io
 import re
 import sys
 import tokenize
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -34,7 +34,9 @@ FENCE = re.compile(r"^\s*```")
 INDENTED = re.compile(r"^(?: {4,}|\t)\S")
 # A backslashed backtick is not a delimiter; reading it as one desynchronises every span after it.
 ESCAPED_TICK = re.compile(r"\\`")
-CODE_SPAN = re.compile(r"(`+)[\s\S]*?\1")
+# A closing run equals the opener exactly and a span stops at a blank line, so an unmatched
+# opener stays plain text instead of masking everything after it (proto.pilot).
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)")
 HTML_TAG = re.compile(r"<[^>]*>", re.DOTALL)
 _JS_STRING = re.compile(r"""(?<!\\)(?:'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`)""", re.DOTALL)
 _JS_COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
@@ -54,7 +56,7 @@ def _spans_blanked(text: str) -> str:
 
 
 def _markdown_mask(text: str) -> str:
-    kept: List[str] = []
+    kept: list[str] = []
     fenced = False
     for line in text.splitlines(keepends=True):
         body = line.rstrip("\n")
@@ -72,7 +74,7 @@ def _block_mask(block: str) -> str:
     lines = block.splitlines(keepends=True)
     bodies = [ln.rstrip("\n") for ln in lines[1:] if ln.strip()]
     base = min((len(b) - len(b.lstrip()) for b in bodies), default=0)
-    kept: List[str] = []
+    kept: list[str] = []
     fenced = False
     for i, line in enumerate(lines):
         body = line.rstrip("\n")
@@ -119,7 +121,7 @@ def _javascript_mask(text: str) -> str:
     return "".join(mask)
 
 
-MASKS: Dict[str, Callable[[str], str]] = {
+MASKS: dict[str, Callable[[str], str]] = {
     ".md": _markdown_mask,
     ".py": _python_mask,
     ".js": _javascript_mask,
@@ -131,7 +133,7 @@ MASKS: Dict[str, Callable[[str], str]] = {
 _NOT_PROSE = {".git", ".venv", "node_modules", "tmp", "__pycache__"}
 
 
-def offences(path: Path, root: Path) -> List[str]:
+def offences(path: Path, root: Path) -> list[str]:
     """Every `path:line` where the command stands in for the project."""
     mask = MASKS[path.suffix](path.read_text(encoding="utf-8"))
     rel = path.relative_to(root)
