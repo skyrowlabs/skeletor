@@ -168,20 +168,18 @@ jobs:
       # which deepens a fetch of refs and cannot reach an orphan — there is
       # nothing to deepen to. A remedy that does not exist is the expensive
       # kind of wrong answer. Reported by stash.flow.
-      - name: Commit subjects Release Please can read, if it reads them here
+      - name: Commit subjects the contract in force can read
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           FORCED: ${{ github.event.forced }}
         run: |
-          # SCAFFOLD-OPTIONAL .github/release-please-config.json
-          # Scaffolded with `--versioning tag` there is no release automation,
-          # so nothing parses these subjects and there is no contract to check.
-          # Asked of the FILE and not of a flag: the flag is gone by the time
-          # this runs, and the file is the thing the answer depends on.
-          if [ ! -f .github/release-please-config.json ]; then
-            echo "no Release Please config in this repository — nothing parses commit subjects"
-            exit 0
-          fi
+          # This step used to exit 0 here when no Release Please config was
+          # present, so a `--versioning tag` tree had no CI commit gate at all:
+          # the commit-msg hook binds only contributors who installed it, and a
+          # web-UI commit, a merge button or a bot reached the release branch
+          # with any subject. The script decides the contract itself now — the
+          # config's section list where there is one, the hook's own rules
+          # where there is not — so nothing here asks about the file.
           REASON=""
           if [ "$FORCED" = "true" ]; then
             REASON="force-push: \`before\` names a commit no ref reaches"
