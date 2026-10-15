@@ -34,7 +34,8 @@ Raise it above 1 wherever the scan feeds a filter, and say why at the call site.
 
 from __future__ import annotations
 
-from typing import Sized, TypeVar
+from collections.abc import Sized
+from typing import TypeVar
 
 #: Bound to `Sized`, and returned unchanged, so a scan keeps the type it had. A
 #: mapping of `path → where it was found` must not come back as a list of keys

@@ -30,9 +30,9 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterator, List, Optional
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
 # owns every path below — can be imported. See scripts/paths.py.
@@ -88,7 +88,7 @@ class Hold:
             return True
 
 
-def _branch() -> Optional[str]:
+def _branch() -> str | None:
     result = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
     )
@@ -123,7 +123,7 @@ def sweep() -> int:
     return removed
 
 
-def lock_dir_for(root: Optional[Path] = None) -> Path:
+def lock_dir_for(root: Path | None = None) -> Path:
     """The lock directory belonging to a checkout — this one by default.
 
     Holds are **per-checkout**, structurally rather than by a recorded field:
@@ -149,7 +149,7 @@ def lock_dir_for(root: Optional[Path] = None) -> Path:
     return (Path(root) if root else PROJECT_ROOT) / "tmp" / "tree-locks"
 
 
-def holders(root: Optional[Path] = None) -> List[Hold]:
+def holders(root: Path | None = None) -> list[Hold]:
     """Every live hold on a tree, newest first. This tree unless told otherwise."""
     lock_dir = lock_dir_for(root)
     if root is None:
@@ -163,7 +163,7 @@ def holders(root: Optional[Path] = None) -> List[Hold]:
     return sorted((h for h in out if h.alive), key=lambda h: -h.started)
 
 
-def acquire(kind: str, owner: str) -> Optional[Path]:
+def acquire(kind: str, owner: str) -> Path | None:
     LOCK_DIR.mkdir(parents=True, exist_ok=True)
     branch = _branch()
     hold = Hold(kind=kind, pid=os.getpid(), branch=branch or "", owner=owner, started=time.time())
@@ -185,7 +185,7 @@ def held(kind: str, owner: str) -> Iterator[None]:
         release(kind)
 
 
-def would_strand(branch: str) -> Optional[str]:
+def would_strand(branch: str) -> str | None:
     """Why switching this tree to ``branch`` is unsafe, or ``None``.
 
     Ignores our own pid and stale records. **Refuses on a branch it cannot

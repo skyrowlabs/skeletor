@@ -12,7 +12,6 @@ from __future__ import annotations
 import ast
 import sys
 from pathlib import Path
-from typing import Dict, List
 
 import pytest
 
@@ -35,7 +34,7 @@ def _catches_missing(handler: ast.ExceptHandler) -> bool:
     return any((n.attr if isinstance(n, ast.Attribute) else getattr(n, "id", "")) in CATCHES for n in names)
 
 
-def unguarded_calls(source: str) -> List[int]:
+def unguarded_calls(source: str) -> list[int]:
     """Lines of subprocess calls a missing binary would raise out of."""
     tree = ast.parse(source)
     modules = {"subprocess"} | {
@@ -81,7 +80,7 @@ def _imports_reporting(path: Path) -> bool:
     return False
 
 
-def _population() -> Dict[str, Path]:
+def _population() -> dict[str, Path]:
     found = {p.relative_to(PROJECT_ROOT).as_posix(): p for p in sorted((SCRIPTS_DIR / "reporting").rglob("*.py"))}
     for path in sorted(CLI_DIR.rglob("*.py")):
         if _imports_reporting(path):

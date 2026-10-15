@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 #: "command not found", as a POSIX shell reports it.
 MISSING = 127

@@ -42,7 +42,6 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
@@ -127,8 +126,8 @@ class Job:
     fix_policy: str = "none"
     commits: bool = False  # does it touch the git tree?
     first_week_only: bool = False  # monthly jobs ride a weekly lane; see below
-    heartbeat_var: Optional[str] = None  # env var holding its dead-man-switch URL
-    findings_sink: Optional[str] = None  # one of SINKS, for a job that writes a report
+    heartbeat_var: str | None = None  # env var holding its dead-man-switch URL
+    findings_sink: str | None = None  # one of SINKS, for a job that writes a report
     reader: str = ""  # for SINK_READER: who reads it, and how often
 
     def needle(self) -> str:
@@ -165,7 +164,7 @@ class Job:
 #: Sunday" is not expressible in cron fields at all, and a bare day-of-month
 #: schedule lands on a weekly lane one month in seven. The gate is enforced once,
 #: in the runner.
-def in_first_week(when: Optional[datetime] = None) -> bool:
+def in_first_week(when: datetime | None = None) -> bool:
     return (when or now_local()).day <= 7
 
 
@@ -177,7 +176,7 @@ def in_first_week(when: Optional[datetime] = None) -> bool:
 #: Add the rest by copying this shape. `docs/AGENTIC_AUTOMATION.md` § Adding a
 #: job lists the five places a new entry touches; `tests/test_reporting_jobs.py`
 #: fails if you miss one.
-JOBS: List[Job] = [
+JOBS: list[Job] = [
     Job(
         key="repo-report",
         module="repo_report",
@@ -191,10 +190,10 @@ JOBS: List[Job] = [
     ),
 ]
 
-JOBS_BY_KEY: Dict[str, Job] = {job.key: job for job in JOBS}
+JOBS_BY_KEY: dict[str, Job] = {job.key: job for job in JOBS}
 
 
-def _allowlisted() -> Dict[str, str]:
+def _allowlisted() -> dict[str, str]:
     """Jobs deliberately registered but NOT scheduled, with their reasons.
 
     Read through `scripts/allowlist.py`, the one reader every allowlist in this
@@ -243,8 +242,8 @@ def merged_crontab(live: str) -> str:
     line of ours outside any block is dropped, since the block re-adds it.
     """
     ours = f"cd {CRON_CWD} && ./{{CLI}} report "
-    kept: List[str] = []
-    block: Optional[List[str]] = None
+    kept: list[str] = []
+    block: list[str] | None = None
     placed = False
     for line in live.splitlines():
         if block is None and line.startswith(BLOCK_BEGIN):

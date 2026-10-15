@@ -64,7 +64,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Pattern, Tuple
+from re import Pattern
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
 # owns every path below — can be imported. See scripts/paths.py.
@@ -83,7 +83,7 @@ ALLOWLIST = SCRIPTS_DIR / "workflow_drift_allowlist.yaml"
 #: then contain every step the rule names. Each step names the failure it
 #: prevents — an entry with no stated failure gets deleted by the next person
 #: who finds it inconvenient.
-RULES: List[Tuple[str, List[Pattern[str]], Dict[str, str]]] = [
+RULES: list[tuple[str, list[Pattern[str]], dict[str, str]]] = [
     (
         "stands the stack up",
         [re.compile(r"docker\s+compose\s+up"), re.compile(r"uses:\s*\./\.github/actions/\S*stack")],
@@ -120,7 +120,7 @@ def _allowlist() -> dict:
     return allowlist.read(ALLOWLIST)
 
 
-def _jobs(path: Path) -> Dict[str, str]:
+def _jobs(path: Path) -> dict[str, str]:
     """Split a workflow into `job-id -> job text`, by indentation.
 
     A YAML parser would be more correct and would add a dependency to a check
@@ -134,7 +134,7 @@ def _jobs(path: Path) -> Dict[str, str]:
     except StopIteration:
         return {}
 
-    jobs: Dict[str, List[str]] = {}
+    jobs: dict[str, list[str]] = {}
     current = None
     for line in lines[start + 1 :]:
         match = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
@@ -161,7 +161,7 @@ def main() -> int:
     # What each exempt job is actually missing, so an entry can be asked whether
     # it is still describing something. Collected for every enrolled job rather
     # than only the unexempt ones — the exempt ones are the whole question.
-    divergence: Dict[str, List[str]] = {}
+    divergence: dict[str, list[str]] = {}
 
     for workflow in sorted(WORKFLOWS.glob("*.yml")):
         for job_id, body in _jobs(workflow).items():
@@ -184,7 +184,7 @@ def main() -> int:
     # An entry whose job was fixed has outlived its reason; one whose job is
     # gone is worse — the job name can come back for something else and arrive
     # already exempt, which is an exemption nobody chose.
-    def why(key: str) -> Optional[str]:
+    def why(key: str) -> str | None:
         if key not in divergence:
             return "no enrolled job by that name"
         if not divergence[key]:

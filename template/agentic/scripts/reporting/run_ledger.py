@@ -22,7 +22,6 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
 # owns every path below — can be imported. See scripts/paths.py.
@@ -57,7 +56,7 @@ class Run:
     finished: str
     branch: str
     agent_ran: bool = False
-    committed: Optional[str] = None  # sha, if it wrote anything
+    committed: str | None = None  # sha, if it wrote anything
     findings: int = 0
     reason: str = ""  # required for declined/failed
 
@@ -89,7 +88,7 @@ def record(run: Run) -> None:
         handle.write(json.dumps(asdict(run)) + "\n")
 
 
-def recent(limit: int = 50) -> List[dict]:
+def recent(limit: int = 50) -> list[dict]:
     ledger = ledger_path()
     if not ledger.exists():
         return []
@@ -103,7 +102,7 @@ def recent(limit: int = 50) -> List[dict]:
     return out
 
 
-def last_run(job: str) -> Optional[dict]:
+def last_run(job: str) -> dict | None:
     for entry in reversed(recent(500)):
         if entry.get("job") == job:
             return entry

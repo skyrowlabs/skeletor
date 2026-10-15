@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 import pytest
 
@@ -28,7 +27,7 @@ def in_ci() -> bool:
     return os.environ.get(CI_FLAG) == "1"
 
 
-def require_or_skip(condition: bool, reason: str, *, requires: Optional[str] = None) -> None:
+def require_or_skip(condition: bool, reason: str, *, requires: str | None = None) -> None:
     """Skip locally, **fail** in CI.
 
     Use for anything CI guarantees — services running, seed data present, a
@@ -88,3 +87,4 @@ def _never_the_users_browser(monkeypatch: pytest.MonkeyPatch) -> None:
 
     for name in ("open", "open_new", "open_new_tab"):
         monkeypatch.setattr(webbrowser, name, refuse(name))
+

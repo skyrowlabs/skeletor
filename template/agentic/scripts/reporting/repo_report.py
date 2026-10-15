@@ -20,7 +20,6 @@ from __future__ import annotations
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Dict
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
 # owns every path below — can be imported. See scripts/paths.py.
@@ -35,7 +34,7 @@ def _git(*args: str) -> str:
     return shellout.run(["git", *args], cwd=str(PROJECT_ROOT), capture_output=True, text=True).stdout.strip()
 
 
-def collect() -> Dict[str, object]:
+def collect() -> dict[str, object]:
     """Facts about the current release window. No judgements — those are the
     agent's job, and mixing the two makes both unverifiable."""
     window = release_window.window()

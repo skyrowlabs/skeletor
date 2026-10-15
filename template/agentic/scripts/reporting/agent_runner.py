@@ -29,7 +29,6 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
 # owns every path below — can be imported. See scripts/paths.py.
@@ -90,7 +89,7 @@ DEFAULT_AGENT_CMD = f"claude -p {PROMPT_TOKEN} --permission-mode acceptEdits"
 AGENT_CMD_VAR = "{{CLI_ENV_PREFIX}}_AGENT_CMD"
 
 
-def agent_argv(prompt: str) -> List[str]:
+def agent_argv(prompt: str) -> list[str]:
     """The command to run, with the prompt substituted in.
 
     Raises rather than guessing. A template with no `{prompt}` token would run
@@ -110,7 +109,7 @@ def agent_argv(prompt: str) -> List[str]:
     return [token.replace(PROMPT_TOKEN, prompt) for token in tokens]
 
 
-def agent_env(job_key: str) -> Dict[str, str]:
+def agent_env(job_key: str) -> dict[str, str]:
     """The agent's environment: ours, plus the job every capture it files is from.
 
     The capture command reads it and caps the job; the agent never types it.
@@ -118,7 +117,7 @@ def agent_env(job_key: str) -> Dict[str, str]:
     return {**os.environ, SOURCE_ENV: job_key}
 
 
-def heartbeat(url: Optional[str], status: str = "up") -> None:
+def heartbeat(url: str | None, status: str = "up") -> None:
     """Ping the dead-man switch.
 
     Pinged on `declined` as well as `ok`, on purpose. A job that executed and
@@ -138,7 +137,7 @@ def heartbeat(url: Optional[str], status: str = "up") -> None:
         pass
 
 
-def current_branch() -> Optional[str]:
+def current_branch() -> str | None:
     result = shellout.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(PROJECT_ROOT), capture_output=True, text=True
     )
