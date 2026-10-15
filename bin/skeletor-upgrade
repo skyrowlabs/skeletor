@@ -3557,8 +3557,8 @@ def main() -> int:
             say("⚠️ ", f"{len(collided)} collided file(s) recorded as resolved — the base advanced past them")
             for rel in collided:
                 item(rel)
-            detail("Yours stands where it was. The template's version is in tmp/upgrade/<path>.new —")
-            detail("the only copy, since the base has advanced past it.")
+            detail("Yours stands where it was. The template's version is in tmp/upgrade/<path>.new until")
+            detail("the next real run clears that directory; `--show <path> --ref <tag>` re-renders it.")
         elif collided:
             say("❌", f"{len(collided)} file(s) you already had where the template now ships one")
             for rel in collided:
