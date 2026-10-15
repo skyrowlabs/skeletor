@@ -2045,11 +2045,15 @@ def report_clone_config(target: Path) -> None:
     """
     installer = target / "scripts" / "git" / "install_merge_drivers.py"
     if not installer.exists():
+        say("ℹ️ ", "clone-local config: not checked — this tree has no scripts/git/install_merge_drivers.py")
         return
     venv = target / ".venv" / "bin" / "python"
     python = str(venv) if venv.exists() else sys.executable
     done = subprocess.run([python, str(installer), "--check"], cwd=target, capture_output=True, text=True)
     if done.returncode == 0:
+        # Said on green too: a silent pass reads like a step that never ran (dream-doll).
+        said = next((line for line in (done.stdout + done.stderr).splitlines() if line.strip()), "")
+        say("✅", "clone-local config: " + (said.lstrip("✅ ").strip() or "the tree's own check passed"))
         return
     say("⚠️ ", "this clone's local git config is not what the tree now checks — `check pre-push` is red until:")
     detail(f"{Path(python).relative_to(target) if venv.exists() else 'python3'} scripts/git/install_merge_drivers.py")
