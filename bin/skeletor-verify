@@ -2034,6 +2034,49 @@ def line_length_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result
     return results
 
 
+def prose_check_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """The command-in-prose check ships where it can pass, and only there.
+
+    The scaffolder leaves `scripts/prose.py` and `tests/test_naming.py` out when the
+    command is an ordinary word in the template's prose. `CLI_NAME` is one, so
+    every other tree here omits the check, and without this gate the grid would
+    never run it. Two directions: a command no prose uses ships the check and
+    passes it; `run` omits both files and records neither.
+    """
+    results: List[Result] = []
+    for cli, ships in (("zq", True), ("run", False)):
+        started = time.time()
+        target = workdir / f"prose-{cli}"
+        code, output = run(
+            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Prose", "--slug", f"prose-{cli}",
+             "--tagline", "t", "--cli", cli, "--tier", tier, "--language", "both"],
+            cwd=workdir,
+        )
+        if code != 0:
+            results.append(Result(f"prose check: scaffold --cli {cli}", False, time.time() - started, output))
+            continue
+        manifest = json.loads((target / ".skeletor.json").read_text(encoding="utf-8"))["files"]
+        on_disk = {rel for rel in scaffolder_prose_check() if (target / rel).exists()}
+        recorded = {rel for rel in scaffolder_prose_check() if rel in manifest}
+        if ships:
+            code, tested = run([str(venv_python), "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                                "tests/test_naming.py"], cwd=target)
+            ok = on_disk == recorded == scaffolder_prose_check() and code == 0
+            label = f"prose check: --cli {cli} ships it, and it passes"
+            output = tested
+        else:
+            ok = not on_disk and not recorded and "ordinary word" in output
+            label = f"prose check: --cli {cli} leaves it out, records neither file, and says so"
+        results.append(Result(label, ok, time.time() - started,
+                              f"on disk: {sorted(on_disk)}\nrecorded: {sorted(recorded)}\n{output[-1500:]}"))
+    return results
+
+
+def scaffolder_prose_check() -> set:
+    """The files the scaffolder ships and omits together, read from it rather than repeated."""
+    return set(load_scaffolder().PROSE_CHECK)
+
+
 def workflow_files(tree: Path) -> List[str]:
     """Every workflow a scaffold ships, as paths relative to the tree."""
     workflows = tree / ".github" / "workflows"
@@ -10848,6 +10891,9 @@ def main() -> int:
             results.append(gate)
 
         for gate in line_length_gate(fullest, workdir, venv_python):
+            results.append(gate)
+
+        for gate in prose_check_gate(fullest, workdir, venv_python):
             results.append(gate)
 
         for gate in gating_gate(fullest, workdir):

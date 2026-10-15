@@ -1106,6 +1106,32 @@ def existing_files(target: Path) -> Set[str]:
     }
 
 
+#: Shipped together, and left out together when the command is an ordinary word.
+PROSE_CHECK = frozenset({"scripts/prose.py", "tests/test_naming.py"})
+
+
+def omitted(args, overlays: List[str], values: Dict[str, str]) -> Set[str]:
+    """Every path this scaffold leaves out: the versioning subtraction, plus the prose check
+    when the command is an ordinary word in the template's own prose.
+
+    `--cli run` appears bare in that prose 191 times, and no mask can tell the word
+    from the command, so `tests/test_naming.py` would be red on arrival. Measured by
+    running the tree's own `scripts/prose.py` over a throwaway render, so the decision
+    is a function of the arguments alone and an upgrade's base render repeats it.
+    """
+    omit = set(VERSIONING[args.versioning])
+    with tempfile.TemporaryDirectory(prefix="skeletor-prose-") as scratch:
+        preview = Path(scratch)
+        if copy_overlays(preview, overlays, values, values["CLI"], omit) is None:
+            return omit
+        result = subprocess.run(
+            [sys.executable, "scripts/prose.py", str(preview)], cwd=str(preview), capture_output=True, text=True
+        )
+    if result.returncode not in (0, 1):
+        raise SystemExit(f"scripts/prose.py failed on a fresh render:\n{result.stdout}{result.stderr}")
+    return omit | set(PROSE_CHECK) if result.returncode == 1 else omit
+
+
 def copy_overlays(
     target: Path, overlays: List[str], values: Dict[str, str], cli_name: str, omit: Iterable[str]
 ) -> Optional[List[str]]:
@@ -1155,7 +1181,7 @@ def report_a_dry_run(
     with tempfile.TemporaryDirectory(prefix="skeletor-dry-") as tmp:
         preview = Path(tmp) / "tree"
         preview.mkdir()
-        written = copy_overlays(preview, overlays, values, values["CLI"], VERSIONING[args.versioning])
+        written = copy_overlays(preview, overlays, values, values["CLI"], omitted(args, overlays, values))
         if written is None:
             return 1
         post_copy_steps(preview, values)
@@ -1415,7 +1441,13 @@ def main() -> int:
             before_text[rel] = (target / rel).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             pass
-    written = copy_overlays(target, overlays, values, cli_name, VERSIONING[args.versioning])
+    omit = omitted(args, overlays, values)
+    if PROSE_CHECK <= omit:
+        print(
+            f"ℹ️  `{cli_name}` is an ordinary word in this template's prose, so the check that keeps the "
+            "command out of prose (tests/test_naming.py) is left out: it could not tell the two apart."
+        )
+    written = copy_overlays(target, overlays, values, cli_name, omit)
     if written is None:
         return 1
 
