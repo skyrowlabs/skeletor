@@ -6973,6 +6973,11 @@ def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
             text = path.read_text(encoding="utf-8")
             if not re.search(rf"^from {re.escape(name)} import", text, re.MULTILINE):
                 continue
+            # The template change below is made in `template/core`, so a test an
+            # overlay ships cannot be the subject however isort treats it.
+            if not (scratch / "template" / "core" / path.relative_to(tree)).exists():
+                attempts.append(f"{name} in {path.name}: not shipped from template/core")
+                continue
             config.write_text(
                 settings.replace(match.group(0), "known_first_party = [%s]" % ", ".join(
                     f'"{other}"' for other in names if other != name)),
