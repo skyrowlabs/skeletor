@@ -2009,6 +2009,28 @@ _ANCHOR = re.compile(r".*[A-Za-z].*")
 _ANCHOR_MIN = 8
 
 
+def report_clone_config(target: Path) -> None:
+    """Run the tree's own clone-local check after a write, and say the fix when it is red.
+
+    That config lives in `.git/config`, which no upgrade can carry, so a release
+    that starts checking a key turned `check pre-push` red in five of six trees
+    with nothing in this output to say why. Asked of the tree's own script, as
+    written by this run, so the question is the one its gate will ask.
+    """
+    installer = target / "scripts" / "git" / "install_merge_drivers.py"
+    if not installer.exists():
+        return
+    venv = target / ".venv" / "bin" / "python"
+    python = str(venv) if venv.exists() else sys.executable
+    done = subprocess.run([python, str(installer), "--check"], cwd=target, capture_output=True, text=True)
+    if done.returncode == 0:
+        return
+    say("⚠️ ", "this clone's local git config is not what the tree now checks — `check pre-push` is red until:")
+    detail(f"{Path(python).relative_to(target) if venv.exists() else 'python3'} scripts/git/install_merge_drivers.py")
+    for line in (done.stdout + done.stderr).strip().splitlines()[:4]:
+        detail(f"    {line.strip()}")
+
+
 def absent_hunks(base: str, theirs: str, ours: str) -> Tuple[int, int]:
     """`(hunks whose surroundings are gone from theirs, hunks)` for base → ours.
 
@@ -4114,6 +4136,7 @@ def main() -> int:
                 )
         else:
             say("✅", "nothing was committed. Read the diff, then commit as one `chore(skeletor):` change")
+            report_clone_config(target)
         # A `--ported` run that advanced has recorded its conflicts as resolved, which
         # is the success it exists for; exiting 1 there reported the port as a
         # failure to every caller that reads a status. mind.head saw it: a run that

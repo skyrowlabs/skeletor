@@ -117,6 +117,12 @@ def setup_commands(language: str) -> List[str]:
     `./<cli>` invocation resolving against an interpreter nobody chose, which is
     the same ambient-resolution bug the pyright gate was fixed for.
 
+    **Step two installs the clone-local config too**, joined with `&&` rather
+    than given a line: `.git/config` is not tracked, so every clone after the
+    first had `check pre-push` red on a merge driver and a commit template nobody
+    had told it to install. A new line would move the shared-prefix floor
+    `test_setup_blocks_agree.py` pins in every adopter tree.
+
     **The python steps are unconditional, and `--language` only ever adds.**
     They used to be guarded by `language in ("python", "both")`, which reads as
     symmetry and is not: `cli/`, `tests/` and `scripts/` all ship at `core`, so
@@ -133,7 +139,7 @@ def setup_commands(language: str) -> List[str]:
     """
     steps = [
         "python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt",
-        ".venv/bin/pre-commit install --install-hooks",
+        ".venv/bin/pre-commit install --install-hooks && .venv/bin/python scripts/git/install_merge_drivers.py",
     ]
     if language in ("node", "both"):
         steps.append("npm install")
