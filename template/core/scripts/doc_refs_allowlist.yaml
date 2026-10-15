@@ -13,3 +13,8 @@
 docs/TODO/x.md: the checker's own docstring example
 docs/a.md: a fixture name tests/test_doc_links_fix.py and tests/test_publication.py create in a temporary tree
 docs/b.md: a fixture name tests/test_doc_links_fix.py and tests/test_publication.py create in a temporary tree
+
+# ── Your entries go below this line ──────────────────────────────────────────
+#
+# skeletor adds its entries above this block and renders nothing below it, so a
+# release's lines and yours are never adjacent and merge cleanly.

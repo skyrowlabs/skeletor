@@ -663,35 +663,49 @@ def node_gates(tree: Path) -> List[Result]:
     return results
 
 
-#: The rule that closes `tests/conftest.py`; everything after it is the adopter's.
-CONFTEST_REGION = "# ── Your fixtures go below this line"
-#: The block's last line, which adopters write directly under. Any edit to it conflicts in
-#: every tree that followed the block (v0.51.2 did, in five); an edit above it is clean.
-CONFTEST_REGION_LAST = "# of this file conflicted with the template's at v0.49.0 and again at v0.51.0."
+#: `(file, the rule that opens its adopter region, the block's last line)`. Any
+#: edit to that last line conflicts in every tree that followed the block (v0.51.2
+#: did, in five); an edit above it is clean.
+ADOPTER_REGIONS = (
+    (
+        "tests/conftest.py",
+        "# ── Your fixtures go below this line",
+        "# of this file conflicted with the template's at v0.49.0 and again at v0.51.0.",
+    ),
+    (
+        "scripts/doc_refs_allowlist.yaml",
+        "# ── Your entries go below this line",
+        "# release's lines and yours are never adjacent and merge cleanly.",
+    ),
+)
 
 
-def check_conftest_leaves_the_adopter_region_empty(tree: Path) -> Result:
-    """skeletor renders only comments after the conftest rule, and never edits the last one.
+def check_adopter_regions_stay_empty(tree: Path) -> List[Result]:
+    """skeletor renders only comments after each adopter rule, and never edits the block's last line.
 
-    A fixture the template adds below it lands beside the adopter's and conflicts
-    on every upgrade, which is the defect the rule exists to end (proto.pilot).
-    No tree can ask this of itself, since its own fixtures belong there.
+    A line the template adds below a rule lands beside the adopter's and
+    conflicts on every upgrade, which is the defect the rule exists to end
+    (proto.pilot, twice). No tree can ask this of itself, since its own lines
+    belong there.
     """
-    started = time.time()
-    lines = (tree / "tests" / "conftest.py").read_text(encoding="utf-8").splitlines()
-    rule = next((i for i, line in enumerate(lines) if line.startswith(CONFTEST_REGION)), None)
-    below = [line for line in lines[rule + 1:] if line.strip() and not line.startswith("#")] if rule is not None else []
-    last = next((line for line in reversed(lines) if line.strip()), "")
-    problems = ["tests/conftest.py has no adopter rule"] if rule is None else []
-    problems += ["rendered below the rule:\n  " + "\n  ".join(below)] if below else []
-    if last != CONFTEST_REGION_LAST:
-        problems.append(f"the block's last line changed to {last!r}; an adopter's first line sits against it")
-    return Result(
-        "conftest: skeletor renders nothing below the adopter's rule, and its last line is unchanged",
-        not problems,
-        time.time() - started,
-        "\n".join(problems),
-    )
+    results = []
+    for rel, opening, closing in ADOPTER_REGIONS:
+        started = time.time()
+        lines = (tree / rel).read_text(encoding="utf-8").splitlines()
+        rule = next((i for i, line in enumerate(lines) if line.startswith(opening)), None)
+        below = [line for line in lines[rule + 1:] if line.strip() and not line.startswith("#")] if rule else []
+        last = next((line for line in reversed(lines) if line.strip()), "")
+        problems = [f"{rel} has no adopter rule"] if rule is None else []
+        problems += ["rendered below the rule:\n  " + "\n  ".join(below)] if below else []
+        if last != closing:
+            problems.append(f"the block's last line changed to {last!r}; an adopter's first line sits against it")
+        results.append(Result(
+            f"{rel}: skeletor renders nothing below the adopter's rule, and its last line is unchanged",
+            not problems,
+            time.time() - started,
+            "\n".join(problems),
+        ))
+    return results
 
 
 def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
@@ -729,7 +743,7 @@ def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     results += actionlint_gate(tree, venv_python.parent)
     results += informational_step_gate(tree, venv_python.parent)
     results.append(check_seam_prose_is_held(tree, venv_python))
-    results.append(check_conftest_leaves_the_adopter_region_empty(tree))
+    results += check_adopter_regions_stay_empty(tree)
     # Last, because it is the only gate here that WRITES into the tree — a
     # module and a test of its own, to move the one variable the refusal turns
     # on. It puts them back, and running it after everything else means a
