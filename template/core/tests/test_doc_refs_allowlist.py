@@ -21,6 +21,11 @@ pytestmark = pytest.mark.unit
 
 ALLOWLIST = SCRIPTS_DIR / "doc_refs_allowlist.yaml"
 
+#: A name rather than a parenthesised tuple in the `except`: at a 3.14 target
+#: black rewrites `except (A, B):` into PEP 758's `except A, B:`, so the literal
+#: is not black-clean at every `--python` this renders. Same as the checker.
+_UNREADABLE = (UnicodeDecodeError, OSError)
+
 
 def _tracked_text() -> str:
     names = subprocess.run(
@@ -33,7 +38,7 @@ def _tracked_text() -> str:
             continue
         try:
             out.append(path.read_text(encoding="utf-8"))
-        except (UnicodeDecodeError, OSError):
+        except _UNREADABLE:
             continue
     return "\n".join(out)
 
