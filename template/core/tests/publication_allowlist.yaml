@@ -1,6 +1,9 @@
 # Findings `tests/test_publication.py` may leave in a tracked file, and why.
 #
-# Format:  <path> <match>: <why this one names nobody's machine>
+# Format, three keys:
+#   <path> <match>: <why>   one finding in one file
+#   <path>: <why>           every finding in that tracked file, e.g. a frozen design render
+#   <match>: <why>          that exact match in any file, e.g. a placeholder path
 #
-# An entry whose finding is gone is stale and fails the test, so an exemption
-# cannot outlive the line it was written for.
+# An entry that exempts nothing is stale and fails the test, so an exemption
+# cannot outlive what it was written for.

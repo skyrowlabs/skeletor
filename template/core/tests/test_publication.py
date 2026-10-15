@@ -15,7 +15,6 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 import pytest
 
@@ -29,12 +28,13 @@ from tests.scanning import scanned  # noqa: E402
 
 ALLOWLIST = Path(__file__).with_name("publication_allowlist.yaml")
 
-HOME_DIR = re.compile(r"/(?:home|Users)/[A-Za-z][\w.-]*")
+# Not after a word character, `.` or `}`: a URL's `/home/` and a templated `{HOME}/home/` name nobody (stash.flow).
+HOME_DIR = re.compile(r"(?<![\w.}])/(?:home|Users)/[A-Za-z][\w.-]*")
 # A tool owns a dotted directory under the home; any other first segment describes somebody's disk.
 TILDE_PATH = re.compile(r"~/[A-Za-z0-9][\w.-]*")
 HOME_JOIN = re.compile(r'Path\.home\(\)\s*/\s*"[A-Za-z0-9][\w.-]*"')
-# Not after `=`, `@` or `v`, which is how a four-part version pin is spelled.
-IPV4 = re.compile(r"(?<![\w.=@-])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])")
+# Not after `=`, `@` or `v`, which is how a four-part version pin is spelled, nor `§`, a section number.
+IPV4 = re.compile(r"(?<![\w.=@§-])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])")
 LOCAL_NOTES = re.compile(r"(^|/)CLAUDE\.local\.md$")
 
 
@@ -58,15 +58,15 @@ def _harmless(address: str) -> bool:
     )
 
 
-def _tracked() -> List[str]:
+def _tracked() -> list[str]:
     """What git would publish, which is the only definition of tracked that cannot drift."""
     listed = subprocess.run(["git", "ls-files", "-z"], cwd=PROJECT_ROOT, capture_output=True, text=True)
     return [name for name in listed.stdout.split("\0") if name]
 
 
-def findings() -> List[str]:
-    """Every shape in every tracked text file, as `<path> <match>`."""
-    found = [f"{name} {name}" for name in _tracked() if LOCAL_NOTES.search(name)]
+def findings() -> list[tuple[str, str]]:
+    """Every shape in every tracked text file, as `(path, match)`."""
+    found = [(name, name) for name in _tracked() if LOCAL_NOTES.search(name)]
     for name in scanned(_tracked(), "tracked files", least=20):
         # The allowlist quotes the findings it exempts, and each of those is held to a real one below.
         if PROJECT_ROOT / name == ALLOWLIST:
@@ -76,22 +76,28 @@ def findings() -> List[str]:
         except _UNREADABLE:
             continue
         for pattern in (HOME_DIR, TILDE_PATH, HOME_JOIN):
-            found += [f"{name} {m.group(0)}" for m in pattern.finditer(text)]
-        found += [f"{name} {m.group(0)}" for m in IPV4.finditer(text) if not _harmless(m.group(0))]
+            found += [(name, m.group(0)) for m in pattern.finditer(text)]
+        found += [(name, m.group(0)) for m in IPV4.finditer(text) if not _harmless(m.group(0))]
     return sorted(set(found))
 
 
+def exempts(key: str, finding: tuple[str, str]) -> bool:
+    """A key is `<path> <match>` for one finding, a tracked path for a whole file, or a bare match anywhere."""
+    path, match = finding
+    return key in (f"{path} {match}", path, match)
+
+
 def test_no_tracked_file_names_this_machine():
-    exempt = allowlist.read(ALLOWLIST)
-    leaks = [finding for finding in findings() if finding not in exempt]
+    keys = allowlist.read(ALLOWLIST)
+    leaks = [f"{path} {match}" for path, match in findings() if not any(exempts(key, (path, match)) for key in keys)]
     assert not leaks, "a tracked file names a machine:\n" + "\n".join(leaks)
 
 
 def test_every_exemption_still_exempts_something():
-    current = set(findings())
+    current = findings()
 
-    def still_needed(key: str) -> Optional[str]:
-        return None if key in current else "nothing in the tree matches it any more"
+    def still_needed(key: str) -> str | None:
+        return None if any(exempts(key, finding) for finding in current) else "nothing in the tree matches it any more"
 
     stale = allowlist.stale(allowlist.read(ALLOWLIST), still_needed)
     assert not stale, "\n".join(stale) + "\n" + allowlist.STALE_ADVICE
@@ -102,3 +108,10 @@ def test_the_shapes_catch_what_they_claim():
     assert not TILDE_PATH.search("~/" + ".config/x"), "a tool's own dotfile is not a leak"
     assert IPV4.search("ssh 10.0.0." + "5") and not _harmless("10.0.0." + "5")
     assert not IPV4.search("tool==1.7.12." + "24") and _harmless("127.0.0." + "1")
+    assert not IPV4.search("§2.3.1." + "4") and not HOME_DIR.search("https://example.org/home/" + "Download")
+
+
+def test_an_exemption_names_one_finding_a_whole_file_or_a_match_anywhere():
+    finding = ("docs/a.md", "~/" + "src")
+    assert all(exempts(key, finding) for key in ("docs/a.md ~/" + "src", "docs/a.md", "~/" + "src"))
+    assert not exempts("docs/b.md", finding) and not exempts("~/" + "other", finding)
