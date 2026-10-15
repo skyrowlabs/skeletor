@@ -663,6 +663,29 @@ def node_gates(tree: Path) -> List[Result]:
     return results
 
 
+#: The rule that closes `tests/conftest.py`; everything after it is the adopter's.
+CONFTEST_REGION = "# ── Your fixtures go below this line"
+
+
+def check_conftest_leaves_the_adopter_region_empty(tree: Path) -> Result:
+    """skeletor renders only comments after the conftest rule, at every tier.
+
+    A fixture the template adds below it lands beside the adopter's and conflicts
+    on every upgrade, which is the defect the rule exists to end (proto.pilot).
+    No tree can ask this of itself, since its own fixtures belong there.
+    """
+    started = time.time()
+    lines = (tree / "tests" / "conftest.py").read_text(encoding="utf-8").splitlines()
+    rule = next((i for i, line in enumerate(lines) if line.startswith(CONFTEST_REGION)), None)
+    below = [line for line in lines[rule + 1:] if line.strip() and not line.startswith("#")] if rule is not None else []
+    return Result(
+        "conftest: skeletor renders nothing below the adopter's rule",
+        rule is not None and not below,
+        time.time() - started,
+        "tests/conftest.py has no adopter rule" if rule is None else "rendered below the rule:\n  " + "\n  ".join(below),
+    )
+
+
 def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     """The tree's own checks, run the way its user would run them."""
     results = []
@@ -698,6 +721,7 @@ def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     results += actionlint_gate(tree, venv_python.parent)
     results += informational_step_gate(tree, venv_python.parent)
     results.append(check_seam_prose_is_held(tree, venv_python))
+    results.append(check_conftest_leaves_the_adopter_region_empty(tree))
     # Last, because it is the only gate here that WRITES into the tree — a
     # module and a test of its own, to move the one variable the refusal turns
     # on. It puts them back, and running it after everything else means a
@@ -5575,6 +5599,13 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
         )
     if "pinned with --ref" not in output:
         problems.append("the standing line does not say the head was pinned, so a reader cannot tell it was")
+    # `--show` returns before the standing line, so it names its own render or prints under the base's.
+    _, shown = run(
+        [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--ref", tag, "--show", "AGENTS.md"],
+        cwd=target,
+    )
+    if f"shown: skeletor @ {tag}\n" not in shown:
+        problems.append(f"--show --ref {tag} does not name {tag} as the source of the text it printed:\n{shown[:400]}")
 
     # `clean`, not SKELETOR: the upgrade was invoked as `clean/bin/skeletor-upgrade`,
     # so the worktrees it adds are that clone's. Asking this checkout would be a
