@@ -38,6 +38,11 @@ IPV4 = re.compile(r"(?<![\w.=@-])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])")
 LOCAL_NOTES = re.compile(r"(^|/)CLAUDE\.local\.md$")
 
 
+#: A name rather than a parenthesised tuple in the `except`: at a 3.14 target black
+#: rewrites `except (A, B):` into PEP 758's `except A, B:`. A name formats the same everywhere.
+_UNREADABLE = (UnicodeDecodeError, OSError)
+
+
 def _harmless(address: str) -> bool:
     """Loopback, unspecified, broadcast and the RFC 5737 documentation ranges name no network."""
     try:
@@ -68,7 +73,7 @@ def findings() -> List[str]:
             continue
         try:
             text = (PROJECT_ROOT / name).read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
+        except _UNREADABLE:
             continue
         for pattern in (HOME_DIR, TILDE_PATH, HOME_JOIN):
             found += [f"{name} {m.group(0)}" for m in pattern.finditer(text)]

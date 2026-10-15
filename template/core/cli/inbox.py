@@ -34,10 +34,15 @@ def source_of(body: str) -> str:
     return found.group(1) if found else SESSION
 
 
+#: A name rather than a parenthesised tuple in the `except`: at a 3.14 target black
+#: rewrites `except (A, B):` into PEP 758's `except A, B:`. A name formats the same everywhere.
+_UNPARSEABLE = (AttributeError, ValueError)
+
+
 def age_days(created: str, now: Optional[datetime] = None) -> Optional[int]:
     try:
         then = datetime.fromisoformat(created.replace("Z", "+00:00"))
-    except (AttributeError, ValueError):
+    except _UNPARSEABLE:
         return None
     return ((now or datetime.now(timezone.utc)) - then).days
 
