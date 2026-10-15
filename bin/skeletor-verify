@@ -4417,11 +4417,8 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
         for line in real_output.splitlines()
         if line.startswith("     ") and not line.strip().startswith("#") and line.strip()
     ]
-    # The recipe's two scratch FILES are rehomed: `collect-diff` and
-    # `collect-diff-none` would collide on a shared `/tmp/before.txt`. The
-    # worktree path is not, and is executed as printed — only one tree runs the
-    # recipe, the recipe removes it on its own last line, and the plant below
-    # needs the printed value to rewrite.
+    # Executed exactly as printed. The recipe makes its own `mktemp -d`, so the
+    # only addition is a copy of its result out to where this gate reads it.
     scratch = workdir / "collect-diff-run"
     scratch.mkdir(exist_ok=True)
 
@@ -4433,20 +4430,8 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     if not (tree / ".venv").exists():
         (tree / ".venv").symlink_to(venv_python.parent.parent)
 
-    def rehome(line: str) -> str:
-        """The recipe's own two scratch files, moved out of a shared `/tmp/`.
-
-        By name, not by prefix: a blanket `/tmp/` rewrite also caught the
-        interpreter path, since a verify workdir lives under `/tmp/` too. The
-        gate then ran nothing and reported a clean comparison — the failure mode
-        under test, arriving inside the thing testing for it.
-        """
-        for name in ("before.txt", "after.txt", "before.raw", "after.raw"):
-            line = line.replace(f"/tmp/{name}", str(scratch / name))
-        return line
-
-    script = "\n".join(rehome(line) for line in recipe)
-    code, ran = run(["bash", "-c", script], cwd=tree)
+    script = "\n".join(recipe)
+    code, ran = run(["bash", "-c", script + f'\ncp "$D/before.txt" {scratch}/before.txt'], cwd=tree)
     before = scratch / "before.txt"
     collected = [ln for ln in before.read_text().splitlines() if "::" in ln] if before.exists() else []
     # The recipe's own marker, read out of the recipe rather than spelled here:
@@ -4461,6 +4446,16 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
             f"{len(recipe)} command line(s) extracted, exit {code}, {len(collected)} collected ids\n"
             f"the recipe's own failure marker fired: {marker in ran}\n"
             f"--- script ---\n{script}\n--- output ---\n{ran}",
+        )
+    )
+    # Two trees in one round ran this recipe at once and could overwrite each other's IDs.
+    shared = [line for line in recipe if "/tmp/" in line]
+    results.append(
+        Result(
+            "collect-diff: the recipe names no fixed scratch path",
+            not shared and any("mktemp -d" in line for line in recipe),
+            0.0,
+            "these lines name a path every concurrent run shares:\n  " + "\n  ".join(shared),
         )
     )
 
@@ -4485,9 +4480,9 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     # where it used to be AND unscopes, which is the historical recipe verbatim,
     # and the exit-code check must still catch it.
     started = time.time()
-    unscoped = script.replace("/tmp/pre-upgrade", "tmp/pre-upgrade").replace("-m pytest tests/ ", "-m pytest ")
+    unscoped = script.replace("$D/pre-upgrade", "tmp/pre-upgrade").replace("-m pytest tests/ ", "-m pytest ")
     planted = unscoped != script and "tmp/pre-upgrade" in unscoped and "-m pytest tests/ " not in unscoped
-    prune = "rm -rf tmp/pre-upgrade /tmp/pre-upgrade; git worktree prune\n"
+    prune = "rm -rf tmp/pre-upgrade; git worktree prune\n"
     plant_code, plant_ran = run(["bash", "-c", prune + unscoped], cwd=tree)
     results.append(
         Result(
@@ -4499,7 +4494,7 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
             f"--- output ---\n{plant_ran}",
         )
     )
-    run(["bash", "-c", "rm -rf tmp/pre-upgrade /tmp/pre-upgrade; git worktree prune"], cwd=tree)
+    run(["bash", "-c", "rm -rf tmp/pre-upgrade; git worktree prune"], cwd=tree)
 
     # And the other direction, which is the one an unconditional footer passes.
     started = time.time()
