@@ -1843,6 +1843,8 @@ class Linter:
     def __init__(self, target: Path) -> None:
         self.target = target
         self.steps: List[Tuple[str, str, List[str]]] = []
+        #: `hook version` for each formatter asked through `reformatted`.
+        self.formatters: List[str] = []
         self.unsupported: List[str] = []
         #: Why nothing was asked, when nothing was. Printed: a forecast that did
         #: not run and one that found nothing must not read the same.
@@ -1924,7 +1926,31 @@ class Linter:
         return [
             f"{hook} ({shown(exe)}" + (f" {' '.join(_theirs(hook, args))}" if _theirs(hook, args) else "") + ")"
             for hook, exe, args in self.steps
-        ]
+        ] + self.formatters
+
+    def asked(self) -> bool:
+        return bool(self.steps or self.formatters)
+
+    def reformatted(
+        self, written: Dict[str, Tuple[Optional[str], str]], normaliser: "Normaliser"
+    ) -> Dict[str, List[str]]:
+        """`{path: [finding]}` for each file the tree's formatters would rewrite after this run and not before.
+
+        A linter-only forecast said "nothing new" over a file black then failed
+        on (stash.flow), while `Normaliser` already runs those formatters, pinned
+        and from the tree's own config. It fails closed, so a formatter that
+        crashes reads as no rewrite here: the gap is in the safe direction for a
+        merge and the unsafe one for a forecast, and it is the same tool.
+        """
+        self.formatters = list(normaliser.bound)
+        found: Dict[str, List[str]] = {}
+        for rel, (before, after) in sorted(written.items()):
+            if not normaliser.applies(rel) or normaliser(after, rel) == after:
+                continue
+            if before is not None and normaliser(before, rel) != before:
+                continue  # already unformatted before this run: debt, not news
+            found[rel] = [f"{', '.join(h.split()[0] for h in self.formatters)} would rewrite this file"]
+        return found
 
     def applies(self, rel: str) -> bool:
         return rel.endswith(".py")
@@ -3008,6 +3034,9 @@ def main() -> int:
         # real one would introduce. See `Linter`.
         linter = Linter(target)
         lint_new, lint_unanswered = linter.new(written) if linter.steps else ({}, [])
+        if normaliser:
+            for rel, found in linter.reformatted(written, normaliser).items():
+                lint_new.setdefault(rel, []).extend(found)
         linted = sum(1 for rel in written if linter.applies(rel))
 
         for rel in sorted(set(base_files)):
@@ -3297,7 +3326,7 @@ def main() -> int:
                         # told apart from a forecast that never ran — the two
                         # were identical in v0.41.0 (four trees, one round).
                         "lint_consulted": linter.consulted(),
-                        "lint_files": linted if linter.steps else 0,
+                        "lint_files": linted if linter.asked() else 0,
                         "lint_reason": linter.reason,
                         # Changed by the template and already present — neither written
                         # nor pending, and a reason the base advances.
@@ -3347,11 +3376,11 @@ def main() -> int:
         # One line on every run that writes Python, found or not. v0.41.0 printed
         # only findings, so a clean forecast and one that never ran read the same
         # — four trees said so in one round. It names what answered, because a
-        # tree that also blocks on black, isort or pyright could otherwise take
-        # "nothing new" as covering those, and none of them is asked.
-        if linted and not linter.steps and not linter.unsupported:
+        # tree that also blocks on pyright could otherwise take "nothing new" as
+        # covering it, and it is not asked. Formatters are, when they run here.
+        if linted and not linter.asked() and not linter.unsupported:
             say("🔎", f"lint: not forecast — {linter.reason}")
-        elif linted and linter.steps and not lint_new and not lint_unanswered:
+        elif linted and linter.asked() and not lint_new and not lint_unanswered:
             writes = "would write" if args.dry_run else "wrote"
             say("🔎", f"lint: {', '.join(linter.consulted())} — nothing new in the {linted} file(s) this run {writes}")
         if lint_new:
@@ -3359,13 +3388,14 @@ def main() -> int:
             # it is the only moment the adopter can decide before their gate does.
             writes = "would write" if args.dry_run else "wrote"
             count = sum(len(found) for found in lint_new.values())
-            say("⚠️ ", f"{count} finding(s) from your own linter in what this run {writes}, not there before")
+            say("⚠️ ", f"{count} finding(s) from your own linters in what this run {writes}, not there before")
             for rel, found in lint_new.items():
                 item(rel)
                 for finding in found:
                     detail(f"    {finding}")
             detail()
-            detail(f"Asked: {', '.join(linter.consulted())}, with the arguments your hooks pass.")
+            detail(f"Asked: {', '.join(linter.consulted())}. Linters with the arguments your hooks pass,")
+            detail("formatters with the settings file they read.")
             detail("The template is clean under its own lint settings; these are yours, and stricter here.")
             detail("Nothing was held back over them: suppress, refactor or loosen, as you would for your own code.")
         if lint_unanswered:

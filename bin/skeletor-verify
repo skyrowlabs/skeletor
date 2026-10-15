@@ -4251,9 +4251,16 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
     rendered = (tree / subject).read_text(encoding="utf-8")
     pristine = manifest_path.read_text(encoding="utf-8")
 
-    def forecast(disk: str, hooks: Optional[str]) -> Tuple[dict, str]:
+    pyproject = tree / "pyproject.toml"
+    shipped_pyproject = pyproject.read_text(encoding="utf-8")
+    # black's own setting, narrowed in the TREE so the template's render is no
+    # longer black-clean there: stash.flow's case, where the forecast was flake8's.
+    narrowed = re.sub(r"(?m)^line-length = \d+$", "line-length = 20", shipped_pyproject, count=1)
+
+    def forecast(disk: str, hooks: Optional[str], project: str = shipped_pyproject) -> Tuple[dict, str]:
         """`hooks` is the `.pre-commit-config.yaml` text, or `None` for no file at all."""
         (tree / subject).write_text(disk, encoding="utf-8")
+        pyproject.write_text(project, encoding="utf-8")
         record = json.loads(pristine)
         record["files"][subject] = hashlib.sha256(disk.encode("utf-8")).hexdigest()
         manifest_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -4276,13 +4283,20 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
             (tree / subject).write_text(rendered, encoding="utf-8")
             manifest_path.write_text(pristine, encoding="utf-8")
             config.write_text(shipped, encoding="utf-8")
+            pyproject.write_text(shipped_pyproject, encoding="utf-8")
 
     def asked(payload: dict) -> bool:
         return bool(payload.get("lint_consulted")) and (payload.get("lint_files") or 0) >= 1
 
+    if narrowed == shipped_pyproject:
+        results.append(Result("lint forecast: the fixture's pyproject.toml sets black's line-length", False,
+                              time.time() - started, "no `line-length = N` line to narrow"))
+        return results
     cases = [
         ("hook args that widen past .flake8 are forecast, naming the file", "x = 1\n", widened,
          lambda new, payload: asked(payload) and any(f.startswith("C901") for f in new.get(subject, []))),
+        ("a formatter the tree configures differently is forecast too", "x = 1\n", (shipped, narrowed),
+         lambda new, payload: any("black" in f and "rewrite" in f for f in new.get(subject, []))),
         ("the shipped hook forecasts nothing, and says what it asked", "x = 1\n", shipped,
          lambda new, payload: new == {} and asked(payload)),
         ("debt the file already carried is not reported as new", rendered + "\n# yours\n", widened,
@@ -4292,7 +4306,7 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
     ]
     for label, disk, hooks, holds in cases:
         started = time.time()
-        payload, output = forecast(disk, hooks)
+        payload, output = forecast(disk, *hooks) if isinstance(hooks, tuple) else forecast(disk, hooks)
         # The write has to be in the plan, or every case passes on a run that
         # linted nothing — a plant that did not land.
         planned = subject in payload.get("updated", [])
