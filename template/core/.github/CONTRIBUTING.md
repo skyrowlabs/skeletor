@@ -17,7 +17,12 @@ gh pr ready <n>                  # once, when you believe it is green
 | Branch                | Role                                                  |
 | --------------------- | ----------------------------------------------------- |
 | `{{BASE_BRANCH}}`     | Integration. Cut branches from it; PRs target it.     |
+<!-- SCAFFOLD-IF .github/release-please-config.json -->
 | `{{RELEASE_BRANCH}}`  | Release. Release Please owns it. Never commit direct. |
+<!-- /SCAFFOLD-IF -->
+<!-- SCAFFOLD-IF-NOT .github/release-please-config.json -->
+| `{{RELEASE_BRANCH}}`  | Release. Versioned by annotated tag (`git tag -a`). Never commit direct. |
+<!-- /SCAFFOLD-IF -->
 
 Force-push is fine on your own unreviewed branch — squashing your own in-flight
 work is how four CI runs become one. Never on either branch above.
