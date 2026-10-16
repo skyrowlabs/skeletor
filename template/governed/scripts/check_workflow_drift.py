@@ -80,8 +80,8 @@ ALLOWLIST = SCRIPTS_DIR / "workflow_drift_allowlist.yaml"
 
 #: `(what the rule is about, enrolment patterns, required steps)`. A job is
 #: enrolled in a rule if its text matches ANY of that rule's patterns, and must
-#: then contain every step the rule names. Each step names the failure it
-#: prevents — an entry with no stated failure gets deleted by the next person
+#: then contain every step the rule names; `a|b` is satisfied by either. Each
+#: step names the failure it prevents — an entry with no stated failure gets deleted by the next person
 #: who finds it inconvenient.
 RULES: list[tuple[str, list[Pattern[str]], dict[str, str]]] = [
     (
@@ -93,8 +93,8 @@ RULES: list[tuple[str, list[Pattern[str]], dict[str, str]]] = [
         "runs the suite",
         [re.compile(r"python\s+-m\s+pytest\b")],
         {
-            "pip install -e": "without it a tree that is a package cannot import its own dependencies, and "
-            "the suite fails at collection — see ci.yml's 'Install the project, if it is one'",
+            "scripts/install_project.py|pip install -e": "without it a tree that is a package cannot import its "
+            "own dependencies, and the suite fails at collection — see scripts/install_project.py",
         },
     ),
 ]
@@ -171,10 +171,10 @@ def main() -> int:
             key = key_for(workflow.name, job_id)
             enrolled.append(key)
             missing = [
-                f"{key}: {about}, and is missing '{step}' — {why}"
+                f"{key}: {about}, and is missing '{step.replace('|', "' or '")}' — {why}"
                 for about, steps in rules
                 for step, why in steps.items()
-                if step not in body
+                if not any(alternative in body for alternative in step.split("|"))
             ]
             divergence[key] = missing
             if key not in exempt:

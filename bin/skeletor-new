@@ -117,6 +117,10 @@ def setup_commands(language: str) -> List[str]:
     `./<cli>` invocation resolving against an interpreter nobody chose, which is
     the same ambient-resolution bug the pyright gate was fixed for.
 
+    **Step one installs the project when it is one**, through the script CI's
+    jobs run, so a fresh clone and CI install the same thing (proto.pilot's
+    clone was red while CI was green). It is a no-op for a fresh scaffold.
+
     **Step two installs the clone-local config too**, joined with `&&` rather
     than given a line: `.git/config` is not tracked, so every clone after the
     first had `check pre-push` red on a merge driver and a commit template nobody
@@ -138,7 +142,8 @@ def setup_commands(language: str) -> List[str]:
     hazard in the paragraph above, arriving on the language axis.
     """
     steps = [
-        "python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt",
+        "python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt"
+        " && .venv/bin/python scripts/install_project.py",
         ".venv/bin/pre-commit install --install-hooks && .venv/bin/python scripts/git/install_merge_drivers.py",
     ]
     if language in ("node", "both"):

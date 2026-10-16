@@ -42,17 +42,13 @@ def _venv_inputs(root: Path) -> dict:
     nothing to do with the environment being borrowed. A scaffold cannot exhibit
     that shape, so nothing here could have found it.
 
-    **The limit, and it is the opposite error to the one above.** This covers the
-    declared file and `-r` includes, and nothing else. In a scaffold that is
-    complete — `setup_commands()` builds the venv with exactly one
-    `pip install -r scripts/requirements.txt`, and the README, `AGENTS.md` and
-    `docs/DEVELOPMENT.md` all say so. An adopter whose setup grows a second kind
-    of input, `.venv/bin/pip install -e .` being the likely one, has made
-    `pyproject.toml` a host-venv input that this does not see — and a set that is
-    too narrow **links** where it should decline, which is the quiet direction.
-    Too wide declines loudly and gets fixed; too narrow borrows the wrong
-    environment and says nothing. Extend `_venv_inputs` when the setup block
-    grows, not when a new requirements file appears.
+    **The limit, and it is the opposite error to the one above.** The setup
+    block installs the requirements file and, once `pyproject.toml` declares
+    `[project]`, the project itself (`scripts/install_project.py`), so that file
+    is an input too. A set that is too narrow **links** where it should decline,
+    which is the quiet direction: too wide declines loudly and gets fixed; too
+    narrow borrows the wrong environment and says nothing. Extend this when the
+    setup block grows another kind of install.
     """
     seen: dict = {}
     pending = [root / REQUIREMENTS.relative_to(PROJECT_ROOT)]
@@ -69,6 +65,9 @@ def _venv_inputs(root: Path) -> dict:
             stripped = entry.strip()
             if stripped.startswith("-r "):
                 pending.append(path.parent / stripped[3:].strip())
+    pyproject = root / "pyproject.toml"
+    if pyproject.is_file() and "[project]" in pyproject.read_text(encoding="utf-8").splitlines():
+        seen["pyproject.toml"] = pyproject.read_bytes()
     return seen
 
 

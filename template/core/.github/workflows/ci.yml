@@ -473,51 +473,11 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: pip install -r scripts/requirements.txt
 
-      # A scaffold ships no `[project]` block, so this does nothing until the
-      # tree becomes a real package — and the moment it does, every test that
-      # imports it fails COLLECTION, which is exit 2 and is not the exit 5 the
-      # integration job tolerates. The job then goes red for a reason
-      # that has nothing to do with the tests it is named for. Reading whether
-      # the block is there is a fact about the tree, not a guess about it, and
-      # every branch says out loud which one it took: a step that installs
-      # nothing in silence is the same failure as a suite that selects nothing
-      # in silence.
-      #
-      # EVERY extra, because a bare `pip install -e .` installs `dependencies`
-      # and stops. Test requirements conventionally live in an extra, so the
-      # common case is the one a bare install misses — the suite then cannot
-      # import what it needs, which is the exact failure this step exists to
-      # prevent, one field further in. The extra is NOT assumed to be called
-      # `dev`: some trees call it `test`, and guessing a name here would be the
-      # same class of mistake as guessing the tree has a package at all. The
-      # names are read out of the file, which is why there is no list to keep.
-      #
-      # It installs ALL of them, which is the right default and not always the
-      # right answer: an extra carrying something huge or platform-specific gets
-      # installed here too. Narrow the line if that is your tree — this is your
-      # workflow, and erring toward "the suite can import what it needs" is only
-      # a default.
+      # A no-op until the tree declares `[project]`; from then on, the suite
+      # imports the package and fails collection without it. The setup block
+      # runs the same script, so a fresh clone and CI install the same thing.
       - name: Install the project, if it is one
-        run: |
-          if [ ! -f pyproject.toml ] || ! grep -q '^\[project\]' pyproject.toml; then
-            echo "no [project] block in this tree — nothing to install"
-            exit 0
-          fi
-          # One line because a heredoc cannot be indented into a YAML block —
-          # its terminator has to sit at column 0, and the Python inside would
-          # carry this block's indent. Reads the extra NAMES only; it never
-          # decides anything, so a malformed pyproject.toml fails the step
-          # loudly — GitHub runs this under `bash -eo pipefail`, so the failing
-          # substitution stops it — rather than quietly resolving to "no extras"
-          # and installing the wrong thing. Verified, not assumed.
-          extras=$(python -c 'import importlib.util as u, sys; sys.exit(0) if u.find_spec("tomllib") is None else None; import tomllib; d = tomllib.load(open("pyproject.toml", "rb")); print(",".join(sorted((d.get("project") or {}).get("optional-dependencies") or {})))')
-          if [ -n "$extras" ]; then
-            echo "pyproject.toml declares [project] with extras: $extras — installing all of them"
-            pip install -e ".[$extras]"
-          else
-            echo "pyproject.toml declares [project], no extras — installing it editable"
-            pip install -e .
-          fi
+        run: python scripts/install_project.py
 
       # `--junitxml` is not optional decoration: the step below reads that file
       # and has nothing to say without it. It ran without one for as long as
@@ -593,26 +553,7 @@ jobs:
       # more here: a collection failure is exit 2, and the tolerance below is
       # written for exit 5.
       - name: Install the project, if it is one
-        run: |
-          if [ ! -f pyproject.toml ] || ! grep -q '^\[project\]' pyproject.toml; then
-            echo "no [project] block in this tree — nothing to install"
-            exit 0
-          fi
-          # One line because a heredoc cannot be indented into a YAML block —
-          # its terminator has to sit at column 0, and the Python inside would
-          # carry this block's indent. Reads the extra NAMES only; it never
-          # decides anything, so a malformed pyproject.toml fails the step
-          # loudly — GitHub runs this under `bash -eo pipefail`, so the failing
-          # substitution stops it — rather than quietly resolving to "no extras"
-          # and installing the wrong thing. Verified, not assumed.
-          extras=$(python -c 'import importlib.util as u, sys; sys.exit(0) if u.find_spec("tomllib") is None else None; import tomllib; d = tomllib.load(open("pyproject.toml", "rb")); print(",".join(sorted((d.get("project") or {}).get("optional-dependencies") or {})))')
-          if [ -n "$extras" ]; then
-            echo "pyproject.toml declares [project] with extras: $extras — installing all of them"
-            pip install -e ".[$extras]"
-          else
-            echo "pyproject.toml declares [project], no extras — installing it editable"
-            pip install -e .
-          fi
+        run: python scripts/install_project.py
 
       # SCAFFOLD: stand up the stack here. If two workflows both do this, put
       # the steps in a composite action under .github/actions/ and have both
@@ -671,26 +612,7 @@ jobs:
 
       # Same step as the unit job, and the reason is stated there.
       - name: Install the project, if it is one
-        run: |
-          if [ ! -f pyproject.toml ] || ! grep -q '^\[project\]' pyproject.toml; then
-            echo "no [project] block in this tree — nothing to install"
-            exit 0
-          fi
-          # One line because a heredoc cannot be indented into a YAML block —
-          # its terminator has to sit at column 0, and the Python inside would
-          # carry this block's indent. Reads the extra NAMES only; it never
-          # decides anything, so a malformed pyproject.toml fails the step
-          # loudly — GitHub runs this under `bash -eo pipefail`, so the failing
-          # substitution stops it — rather than quietly resolving to "no extras"
-          # and installing the wrong thing. Verified, not assumed.
-          extras=$(python -c 'import importlib.util as u, sys; sys.exit(0) if u.find_spec("tomllib") is None else None; import tomllib; d = tomllib.load(open("pyproject.toml", "rb")); print(",".join(sorted((d.get("project") or {}).get("optional-dependencies") or {})))')
-          if [ -n "$extras" ]; then
-            echo "pyproject.toml declares [project] with extras: $extras — installing all of them"
-            pip install -e ".[$extras]"
-          else
-            echo "pyproject.toml declares [project], no extras — installing it editable"
-            pip install -e .
-          fi
+        run: python scripts/install_project.py
 
       # Exit 5 is pytest for "the marker selected nothing", and a scaffold ships
       # no ui test — so an empty selection is REPORTED, never passed off as a
