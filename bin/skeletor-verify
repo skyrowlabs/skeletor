@@ -10552,6 +10552,12 @@ def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
     it must be named as `unit tests`, since a rehearsal that reported every run
     as red would pass a gate asserting only the red case. Both runs must leave
     the tree's status and its worktree list exactly as they found them.
+
+    The passing test asserts a directory named `rehearse` is among its own
+    ancestors: true in the tree and beside it, false under `/tmp`, where a test
+    matching absolute path parts read every file as skipped (sky.boss). The
+    third run commits a failing test of the tree's own first, so the gate is red
+    on both sides and only the failing test IDs can name what the release added.
     """
     started = time.time()
     own = workdir / "rehearse-skeletor"
@@ -10570,7 +10576,11 @@ def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
         return [Result("rehearse: scaffold", False, time.time() - started, output[-1500:])]
     (tree / ".venv").symlink_to(venv_python.parents[1])
     probe = own / "template" / "core" / "tests" / "test_rehearsal_probe.py"
-    body = 'import pytest\n\npytestmark = pytest.mark.unit\n\n\ndef test_probe():\n    assert {}\n'
+    body = (
+        "from pathlib import Path\n\nimport pytest\n\npytestmark = pytest.mark.unit\n\n\n"
+        "def test_probe():\n    assert {}\n"
+    )
+    beside = 'any(p.name == "rehearse" for p in Path(__file__).resolve().parents)'
 
     def release(verdict: str) -> None:
         probe.write_text(body.format(verdict), encoding="utf-8")
@@ -10592,16 +10602,37 @@ def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
         return git_in(tree, "status", "--porcelain")[1] == baseline and len(worktrees) == 1
 
     results = []
-    for verdict, wants_red in (("True", False), ("False", True)):
+    # The failing verdict uses `Path` too: an unused import turns `lint` red as well.
+    failing = "not Path(__file__).exists()"
+    for verdict, wants_red in ((beside, False), (failing, True)):
         started = time.time()
         release(verdict)
         code, output = rehearse()
         named = "turns 1 gate(s) red" in output and "· unit tests" in output
-        quiet = "none it turned red" in output
+        quiet = "none it turned red" in output and "applied with:" in output
         ok = untouched() and (code == 1 and named if wants_red else code == 0 and quiet)
-        label = "a release that fails a test names `unit tests`" if wants_red else "a release that breaks nothing says so"
+        label = (
+            "a release that fails a test names `unit tests`"
+            if wants_red
+            else "a release that breaks nothing says so, from beside the tree"
+        )
         results.append(Result(f"rehearse: {label}, and writes nothing", ok, time.time() - started,
                               "" if ok else f"exit {code}, untouched={untouched()}\n{output[-2500:]}"))
+
+    started = time.time()
+    (tree / "tests" / "test_adopter_red.py").write_text(body.format(failing), encoding="utf-8")
+    git_in(tree, "add", "tests/test_adopter_red.py")
+    git_in(tree, "commit", "--quiet", "-m", "test: a failure of the tree's own")
+    baseline = git_in(tree, "status", "--porcelain")[1]
+    code, output = rehearse()
+    ok = (
+        untouched()
+        and code == 1
+        and "1 test(s) fail after the upgrade that did not before" in output
+        and "test_rehearsal_probe" in output
+    )
+    results.append(Result("rehearse: a gate red on both sides still names the test the release broke",
+                          ok, time.time() - started, "" if ok else f"exit {code}\n{output[-2500:]}"))
     return results
 
 

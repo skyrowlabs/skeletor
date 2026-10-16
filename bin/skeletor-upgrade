@@ -2274,6 +2274,12 @@ def rehearse(args: argparse.Namespace) -> int:
     is the tree's) and HEAD plus tracked edits (`git stash create`). It does NOT
     carry untracked files — `tmp/`, `.env` — and borrows the tree's `.venv` and
     `node_modules` by symlink. The real tree is never written.
+
+    It sits BESIDE the tree, so its ancestors are the tree's: under `/tmp`, a
+    test that matched `tmp` against absolute path parts skipped every file and
+    read red before the upgrade (sky.boss). What the upgrade writes is left
+    unstaged, as the tool leaves it, so a gate that reads only the index is
+    reported rather than hidden (stash.flow).
     """
     target = Path(args.target).expanduser().resolve()
     me = [sys.executable, str(Path(__file__).resolve())]
@@ -2286,7 +2292,11 @@ def rehearse(args: argparse.Namespace) -> int:
     snapshot = git("stash", "create").stdout.strip() or git("rev-parse", "HEAD").stdout.strip()
     if not snapshot:
         die(f"{target} has no commit to rehearse from")
-    stage = Path(tempfile.mkdtemp(prefix="skeletor-rehearse-"))
+    try:
+        stage = Path(tempfile.mkdtemp(prefix=f"{target.name}-rehearsal-", dir=target.parent))
+    except OSError:
+        stage = Path(tempfile.mkdtemp(prefix="skeletor-rehearse-"))
+        say("⚠️ ", f"{target.parent} is not writable, so the rehearsal sits under {stage.parent}, not beside the tree")
     stage_tree = stage / target.name
     logs = Path(tempfile.mkdtemp(prefix="skeletor-rehearsal-logs-"))
     added = git("worktree", "add", "--detach", "--quiet", str(stage_tree), snapshot)
@@ -2297,9 +2307,13 @@ def rehearse(args: argparse.Namespace) -> int:
         for borrowed in (".venv", "node_modules"):
             if (target / borrowed).exists() and not (stage_tree / borrowed).exists():
                 (stage_tree / borrowed).symlink_to(target / borrowed)
-        say("🎭", f"rehearsal: `check pre-push{' --quick' if args.quick else ''}` before and after, in a worktree")
+        mode = " ".join(passthrough) or "no flags"
+        where = "beside the tree" if stage.parent == target.parent else f"under {stage.parent}"
+        say("🎭", f"rehearsal: `check pre-push{' --quick' if args.quick else ''}` before and after, in a worktree "
+                  f"{where}; the upgrade is applied with: {mode}")
         before, before_out = gate_table(stage_tree, args.quick)
-        applied = subprocess.run([*me, str(stage_tree), *passthrough], capture_output=True, text=True)
+        failing_before = failing_tests(stage_tree)
+        applied = subprocess.run([*me, str(stage_tree), *passthrough, "--json"], capture_output=True, text=True)
         changed = subprocess.run(
             ["git", "-C", str(stage_tree), "status", "--porcelain"], capture_output=True, text=True
         ).stdout.strip()
@@ -2310,16 +2324,53 @@ def rehearse(args: argparse.Namespace) -> int:
                 detail(line)
             return forecast.returncode or (1 if applied.returncode else 0)
         after, after_out = gate_table(stage_tree, args.quick)
+        failing_after = failing_tests(stage_tree)
     finally:
         git("worktree", "remove", "--force", str(stage_tree))
         shutil.rmtree(stage, ignore_errors=True)
     (logs / "before.log").write_text(before_out, encoding="utf-8")
     (logs / "after.log").write_text(after_out, encoding="utf-8")
-    return report_rehearsal(before, after, after_out, logs) or forecast.returncode
+    held_back(applied.stdout)
+    added = sorted(failing_after - failing_before)
+    return report_rehearsal(before, after, after_out, logs, added) or forecast.returncode
+
+
+def failing_tests(tree: Path) -> set:
+    """`classname::name` of every failed or errored case in the tree's `tmp/junit*.xml` reports."""
+    import xml.etree.ElementTree as ElementTree
+
+    found = set()
+    for report in sorted((tree / "tmp").glob("junit*.xml")):
+        try:
+            cases = ElementTree.parse(report).getroot().iter("testcase")
+        except (ElementTree.ParseError, OSError):
+            continue
+        for case in cases:
+            if case.find("failure") is not None or case.find("error") is not None:
+                found.add(f"{case.get('classname', '')}::{case.get('name', '')}")
+    return found
+
+
+def held_back(envelope: str) -> None:
+    """Say when the rehearsed apply left conflicts, so the base never advanced (mind.head)."""
+    try:
+        payload = json.JSONDecoder().raw_decode(envelope[envelope.index("{"):])[0]
+    except ValueError:
+        return
+    pending = payload.get("conflicted", []) + payload.get("collided", [])
+    if pending and not payload.get("base_advanced"):
+        say("⚠️ ", f"the rehearsed apply left {len(pending)} file(s) conflicted, so the base did not advance")
+        detail("Those files keep your version in the rehearsal, and a gate that only fires on the")
+        detail("template's version of them, or on the new base, could not have run. Try --normalise")
+        detail("if the dry run offered it, or port them and rehearse again.")
 
 
 def report_rehearsal(
-    before: Optional[Dict[str, bool]], after: Optional[Dict[str, bool]], after_out: str, logs: Path
+    before: Optional[Dict[str, bool]],
+    after: Optional[Dict[str, bool]],
+    after_out: str,
+    logs: Path,
+    added: Optional[List[str]] = None,
 ) -> int:
     """Say which gates this upgrade turns red; 1 when any does, or when either run could not be read."""
     if before is None or after is None:
@@ -2330,6 +2381,14 @@ def report_rehearsal(
     turned = [gate for gate, ok in after.items() if not ok and before.get(gate, True)]
     already = [gate for gate, ok in after.items() if not ok and gate not in turned]
     cleared = [gate for gate, ok in before.items() if not ok and after.get(gate)]
+    # A gate red on both sides hides what the upgrade added to it (sky.boss), so
+    # the failing tests are compared too, from the junit report pre-push writes.
+    added = added or []
+    if added and not turned:
+        say("❌", f"rehearsal: {len(added)} test(s) fail after the upgrade that did not before")
+        for case in added:
+            item(case)
+        detail("Their gate was already red, so the gate verdict alone would have hidden them.")
     if turned:
         say("❌", f"rehearsal: this upgrade turns {len(turned)} gate(s) red that were green before it")
         for gate in turned:
@@ -2342,13 +2401,17 @@ def report_rehearsal(
         for line in lines[: rules[-2] if len(rules) >= 2 else len(lines)][-30:]:
             detail(f"    {line}")
     else:
-        say("✅", f"rehearsal: {len(after)} gate(s) ran after the upgrade, and none it turned red")
+        if not added:
+            say("✅", f"rehearsal: {len(after)} gate(s) ran after the upgrade, and none it turned red")
     if already:
-        detail(f"Red before and after, so not this upgrade's: {', '.join(already)}.")
+        whose = "with the tests above added by this upgrade" if added else "so not this upgrade's"
+        detail(f"Red before and after, {whose}: {', '.join(already)}.")
     if cleared:
         detail(f"Red before, green after: {', '.join(cleared)}.")
+    if turned and added:
+        detail(f"Tests failing after and not before: {', '.join(added)}.")
     detail(f"Full output, before and after, and the upgrade's own: {logs}")
-    return 1 if turned else 0
+    return 1 if turned or added else 0
 
 
 def main() -> int:
@@ -3461,6 +3524,9 @@ def main() -> int:
                         "updated": updated,
                         "merged": merged,
                         "conflicted": conflicted,
+                        # Whether this run moved the recorded base. A rehearsal reads it:
+                        # gates that only fire on the new base cannot have run otherwise.
+                        "base_advanced": advanced,
                         # Of `conflicted`, the files where none of the lines around
                         # any of the template's changes are in the adopter's file —
                         # a section they removed, or one rewritten past recognition.
