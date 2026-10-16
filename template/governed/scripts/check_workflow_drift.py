@@ -100,6 +100,11 @@ RULES: list[tuple[str, list[Pattern[str]], dict[str, str]]] = [
 ]
 
 
+def _spelled(step: str) -> str:
+    """`a|b` as `'a' or 'b'`. Outside the f-string: a nested same quote parses only on 3.12+."""
+    return " or ".join(f"'{alternative}'" for alternative in step.split("|"))
+
+
 def key_for(workflow: str, job_id: str) -> str:
     """The name a job is known by, here and in the allowlist.
 
@@ -171,7 +176,7 @@ def main() -> int:
             key = key_for(workflow.name, job_id)
             enrolled.append(key)
             missing = [
-                f"{key}: {about}, and is missing '{step.replace('|', "' or '")}' — {why}"
+                f"{key}: {about}, and is missing {_spelled(step)} — {why}"
                 for about, steps in rules
                 for step, why in steps.items()
                 if not any(alternative in body for alternative in step.split("|"))
