@@ -1586,6 +1586,20 @@ CONFIG_FILES = {
 }
 
 
+def stale_pin_remedy(unsupported: List[str]) -> List[str]:
+    """The way out when a declared tool was refused for its version, else nothing.
+
+    A release that bumps pins leaves every tree's .venv one version behind its
+    own config, so this is the common refusal and the one the reader can fix.
+    """
+    if not any("tree pins" in hook for hook in unsupported):
+        return []
+    return [
+        "A version above is a pin the installed tool does not match. Rebuild the venv at",
+        "the pins (.venv/bin/pip install -r scripts/requirements.txt), then re-run.",
+    ]
+
+
 class Normaliser:
     """The adopter's own formatters, applied to the two sides skeletor renders.
 
@@ -2953,7 +2967,13 @@ def main() -> int:
         #: and read by the currency test after it. Empty is the honest default:
         #: with no declines there is nothing the template can have changed.
         fresh: List[str] = []
+        # **Both tool classes read the tree as this run found it**, before any write:
+        # that is what its .venv was installed from, and what a dry run reads. The
+        # linter was built after the writes, so a pin-bumping release bound the
+        # formatters to the old config and the linters to the new (dream-doll,
+        # proto.pilot), and the dry run and the apply reported different tools.
         normaliser = Normaliser(target, workdir)
+        linter = Linter(target)
         if args.normalise and not normaliser:
             # **The summary names no cause, and there are three.** `reason` is
             # "no formatter the tree declares is runnable here" whether a hook is
@@ -2963,7 +2983,8 @@ def main() -> int:
             # is the `absent` versus `empty` split at a third artifact: one message
             # over causes that expire differently.
             detail_lines = "".join(f"\n   · {hook}" for hook in normaliser.unsupported)
-            die(f"--normalise: {normaliser.reason}{detail_lines}")
+            remedy = "".join(f"\n{line}" for line in stale_pin_remedy(normaliser.unsupported))
+            die(f"--normalise: {normaliser.reason}{detail_lines}{remedy}")
         if args.normalise and args.no_base:
             # Silence here would be the flag's own failure mode: a run that
             # normalises nothing looks exactly like a run whose normalisation
@@ -3251,7 +3272,6 @@ def main() -> int:
 
         # Asked of the text, not the disk, so a dry run forecasts exactly what a
         # real one would introduce. See `Linter`.
-        linter = Linter(target)
         lint_new, lint_unanswered = linter.new(written) if linter.steps else ({}, [])
         if normaliser:
             for rel, found in linter.reformatted(written, normaliser).items():
@@ -3630,6 +3650,8 @@ def main() -> int:
             say("⚠️ ", "a linter your tree declares could not be run, so what this run writes was not linted by it")
             for hook in linter.unsupported:
                 item(hook)
+            for line in stale_pin_remedy(linter.unsupported):
+                detail(line)
 
         def where_it_was(rel: str) -> str:
             """The note a conflict carries when its change has nowhere to land."""
@@ -3783,6 +3805,8 @@ def main() -> int:
             say("⚠️ ", f"{len(normaliser.unsupported)} declared formatter(s) could not be run here")
             for hook in normaliser.unsupported:
                 item(hook)
+            for line in stale_pin_remedy(normaliser.unsupported):
+                detail(line)
             # **Scoped by the same predicate as the plain path, and it was not.**
             # node-zero's v0.32.0 replay: a comment-only `paths.py` conflict was listed
             # here as "merged without them" while the run without the flag, on the

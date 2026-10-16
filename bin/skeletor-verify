@@ -4257,12 +4257,17 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
     # longer black-clean there: stash.flow's case, where the forecast was flake8's.
     narrowed = re.sub(r"(?m)^line-length = \d+$", "line-length = 20", shipped_pyproject, count=1)
 
-    def forecast(disk: str, hooks: Optional[str], project: str = shipped_pyproject) -> Tuple[dict, str]:
+    def forecast(disk: str, hooks: Optional[str], project: str = shipped_pyproject,
+                 dry_run: bool = True, upgrade: Path = SKELETOR / "bin" / "skeletor-upgrade") -> Tuple[dict, str]:
         """`hooks` is the `.pre-commit-config.yaml` text, or `None` for no file at all."""
         (tree / subject).write_text(disk, encoding="utf-8")
         pyproject.write_text(project, encoding="utf-8")
         record = json.loads(pristine)
         record["files"][subject] = hashlib.sha256(disk.encode("utf-8")).hexdigest()
+        if hooks is not None:
+            # Recorded as untouched, so a config that differs from the render is
+            # one the template moved and this run replaces.
+            record["files"][config.name] = hashlib.sha256(hooks.encode("utf-8")).hexdigest()
         manifest_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
         if hooks is None:
             config.unlink()
@@ -4270,8 +4275,8 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
             config.write_text(hooks, encoding="utf-8")
         try:
             done = subprocess.run(
-                [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--no-base", "--dry-run",
-                 "--json"],
+                [sys.executable, str(upgrade), str(tree), "--no-base",
+                 *(["--dry-run"] if dry_run else ["--allow-dirty", "--allow-untagged"]), "--json"],
                 cwd=tree, capture_output=True, text=True, timeout=600,
             )
             try:
@@ -4304,6 +4309,31 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
         ("no hook config is a stated reason, not a clean forecast", "x = 1\n", None,
          lambda new, payload: new == {} and not payload.get("lint_consulted") and bool(payload.get("lint_reason"))),
     ]
+    # **One instant for both tool classes** (dream-doll, proto.pilot): the tree's
+    # config pins flake8 off the installed version and the template's render
+    # repins it, so a linter built after the write reads the new pin and the apply
+    # reports a different tool set from the dry run. Both must name the old pin.
+    started = time.time()
+    flake8_rev = re.search(r"(PyCQA/flake8\n[ \t]+rev: )(\S+)", shipped)
+    if flake8_rev is None:
+        results.append(Result("lint forecast: the fixture pins flake8 by rev", False, time.time() - started, ""))
+        return results
+    behind = shipped.replace(flake8_rev.group(0), flake8_rev.group(1) + "0.0.1")
+    # From the clean clone, both runs: an applying run from a checkout with
+    # uncommitted template edits is refused. See `set_arg_gate`.
+    clean_upgrade = clean_skeletor(workdir) / "bin" / "skeletor-upgrade"
+    dry, _ = forecast("x = 1\n", behind, upgrade=clean_upgrade)
+    applied, output = forecast("x = 1\n", behind, dry_run=False, upgrade=clean_upgrade)
+    stale = [hook for hook in dry.get("lint_unsupported", []) if "tree pins 0.0.1" in hook]
+    ok = (bool(stale) and applied.get("lint_unsupported") == dry.get("lint_unsupported")
+          and config.name in applied.get("updated", []) and "pip install -r scripts/requirements.txt" in output)
+    results.append(Result(
+        "lint forecast: a pin the release moves is read at one instant, dry run and apply alike", ok,
+        time.time() - started,
+        "" if ok else f"dry {dry.get('lint_unsupported')}, applied {applied.get('lint_unsupported')}, "
+                      f"updated {applied.get('updated')}\n{output[-1500:]}",
+    ))
+
     for label, disk, hooks, holds in cases:
         started = time.time()
         payload, output = forecast(disk, *hooks) if isinstance(hooks, tuple) else forecast(disk, hooks)
