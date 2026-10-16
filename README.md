@@ -338,7 +338,7 @@ modes, and a tree can be both:
 ```bash
 bin/skeletor-upgrade ../my-project --dry-run        # what would change; never refused, writes nothing
 bin/skeletor-upgrade ../my-project --rehearse       # the dry run, then the tree's own gates before and after
-bin/skeletor-upgrade ../my-project --ref v0.55.1    # apply, rendering from a released tag
+bin/skeletor-upgrade ../my-project --ref v0.56.0    # apply, rendering from a released tag
 ```
 
 | When | Reach for |
