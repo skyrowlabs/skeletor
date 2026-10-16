@@ -1326,6 +1326,13 @@ from. It counts commands, not lines, since v0.57.0: how a reader's document
 joins its commands is presentation, and a line count reported mind.head's docs
 converging on the template as a shrinking agreement.
 
+**The tree's own floor lives in a file no release ships**, `tests/setup_block_floor.json`,
+since v0.57.1. A rendered default and a measured value in one field conflicted
+in every tree whose floor had risen whenever a release moved the default, and a
+three-way merge cannot tell "deliberately above the template" from "not yet
+ported" — proto.pilot's `--ported` left a patch over a correct resolution. The
+template's number stays in `setup_block_budget.json`; the local file outranks it.
+
 That last one forces a second gate, and the split is the interesting part.
 `bin/skeletor-verify` sets `gated_language = "python"`: a node tree is scaffolded
 but its own test suite is never run. So the shipped test can never check itself
