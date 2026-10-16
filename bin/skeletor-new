@@ -124,8 +124,8 @@ def setup_commands(language: str) -> List[str]:
     **Step two installs the clone-local config too**, joined with `&&` rather
     than given a line: `.git/config` is not tracked, so every clone after the
     first had `check pre-push` red on a merge driver and a commit template nobody
-    had told it to install. A new line would move the shared-prefix floor
-    `test_setup_blocks_agree.py` pins in every adopter tree.
+    had told it to install. The floor `test_setup_blocks_agree.py` pins counts
+    `&&`-split commands, so the joining is for the reader, not the ratchet.
 
     **The python steps are unconditional, and `--language` only ever adds.**
     They used to be guarded by `language in ("python", "both")`, which reads as
@@ -278,7 +278,7 @@ def substitutions(args) -> Dict[str, str]:
         # own. `tests/test_setup_blocks_agree.py` ratchets on it and cannot
         # derive it: by the time that test runs, the placeholder is gone and
         # the only thing left to measure is the answer.
-        "SETUP_SHARED_PREFIX": str(len(setup_commands(args.language))),
+        "SETUP_SHARED_PREFIX": str(sum(len(step.split("&&")) for step in setup_commands(args.language))),
     }
 
 

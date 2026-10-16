@@ -1317,12 +1317,14 @@ into a file that ships at every point.
 reader writes, and it enrolled **zero blocks** in a node tree, where `scanned(...,
 least=2)` correctly turns a silent nothing into a red. The predicate names both.
 
-**The floor is language-dependent** — 2 shared lines for `python`, 3 once node
-joins. A `min_shared_prefix` baked into the template would be right for one
-`--language` and red on arrival for the others, which is invariant 6 with the
-axis changed from time to space. It is rendered instead, from
-`len(setup_commands(language))`, which is the same source the blocks themselves
-come from.
+**The floor is language-dependent** — one command more once node joins. A
+`min_shared_prefix` baked into the template would be right for one `--language`
+and red on arrival for the others, which is invariant 6 with the axis changed
+from time to space. It is rendered instead, from the `&&`-split command count of
+`setup_commands(language)`, which is the same source the blocks themselves come
+from. It counts commands, not lines, since v0.57.0: how a reader's document
+joins its commands is presentation, and a line count reported mind.head's docs
+converging on the template as a shrinking agreement.
 
 That last one forces a second gate, and the split is the interesting part.
 `bin/skeletor-verify` sets `gated_language = "python"`: a node tree is scaffolded

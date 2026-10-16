@@ -2825,9 +2825,9 @@ def check_setup_blocks_agree(tree: Path, tier: str, language: str) -> Result:
     So this asks the generator's half of the question, which is the half no
     tree can ask about itself:
 
-    * `{{SETUP_SHARED_PREFIX}}` is rendered from `len(setup_commands())` and the
+    * `{{SETUP_SHARED_PREFIX}}` is the `&&`-split command count of `setup_commands()`; the
       shipped ratchet asserts equality with the measured depth. If a document's
-      first *unshared* line ever became shared, the rendered floor would sit one
+      first *unshared* command ever became shared, the rendered floor would sit one
       below the truth and every fresh scaffold would be red on arrival — the one
       outcome this repository refuses. That is an assumption about template
       prose, held here where all three languages are generated.
@@ -2852,7 +2852,8 @@ def check_setup_blocks_agree(tree: Path, tier: str, language: str) -> Result:
     floor = json.loads(budget.read_text(encoding="utf-8"))["min_shared_prefix"]
 
     depth = 0
-    for column in zip(*blocks.values()):
+    split = ([part.strip() for line in lines for part in line.split("&&") if part.strip()] for lines in blocks.values())
+    for column in zip(*split):
         if len(set(column)) != 1:
             break
         depth += 1
@@ -2861,8 +2862,11 @@ def check_setup_blocks_agree(tree: Path, tier: str, language: str) -> Result:
     if depth != floor:
         problems.append(
             f"the rendered floor is {floor} and the blocks actually agree on {depth} leading "
-            f"line(s); a fresh {language} scaffold is red on arrival"
+            f"command(s); a fresh {language} scaffold is red on arrival"
         )
+    for name, lines in sorted(blocks.items()):
+        if not any("scripts/install_project.py" in line for line in lines):
+            problems.append(f"{name} never runs scripts/install_project.py, which every CI toolchain job does")
     for name, lines in sorted(blocks.items()):
         installed = {
             match.group("target")

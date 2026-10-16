@@ -224,11 +224,13 @@ node tree is scaffolded but its own suite is never executed here, and the drift
 check the template ships — `tests/test_setup_blocks_agree.py`, prototyped by
 stash.flow — has two inputs that both vary along exactly that axis. Its
 enrolment predicate matched `pip install -r <file>` only, which found **zero
-blocks** in a node tree; and its ratchet floor is 2 shared lines for `python`
-and 3 once node joins, so a number baked into the template is right for one
-`--language` and red on arrival for the others. The floor is rendered from
-`len(setup_commands(language))` now, and this gate checks the rendered pin
-against the measured depth for every configuration.
+blocks** in a node tree; and its ratchet floor grows by one when node joins,
+so a number baked into the template is right for one `--language` and red on
+arrival for the others. The floor is rendered from the `&&`-split command count
+of `setup_commands(language)` now, and this gate checks the rendered pin
+against the measured depth for every configuration. It counts commands rather
+than lines because mind.head folded its own install line into the template's
+line one and a line count read the docs moving closer as drift.
 
 That split is the useful part. **Same artifact, two questions, two homes**: the
 tree asks whether its three setup blocks have drifted since it was scaffolded,
