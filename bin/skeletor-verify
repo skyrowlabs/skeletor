@@ -10518,6 +10518,43 @@ def newest_floor_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     ] + [parenthesised_except_gate(tree)]
 
 
+def oldest_floor_gate(tier: str, workdir: Path) -> List[Result]:
+    """Every rendered `.py` compiles on a real interpreter of the oldest floor skeletor accepts.
+
+    `ast.parse(..., feature_version=(3, 11))` accepts a PEP 701 f-string that
+    3.11 cannot parse, measured, so only the interpreter answers. v0.56.0 shipped
+    one in `check_workflow_drift.py` and every 3.11 tree's CI would have failed
+    to import it. CI installs this interpreter beside the default, so there it
+    is required; locally a missing one is skipped loudly.
+    """
+    started = time.time()
+    floor = load_scaffolder().OLDEST_FLOOR
+    interpreter = shutil.which(f"python{floor}")
+    if interpreter is None:
+        if os.environ.get("CI"):
+            return [Result(f"python {floor}: interpreter not on PATH in CI", False, 0.0, "verify.yml installs it")]
+        return [Result(f"python {floor} floor compiles: python{floor} not on PATH — SKIPPED", True, 0.0, "")]
+    tree = workdir / f"oldest-floor-{floor}" / "tree"
+    if tree.exists():
+        shutil.rmtree(tree.parent)
+    code, output = run(
+        [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-new"), str(tree), "--name", "Probe",
+         "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--language", "both", "--python", floor],
+        cwd=SKELETOR,
+    )
+    if code != 0:
+        return [Result(f"python {floor} floor: scaffold", False, time.time() - started, output[-1500:])]
+    files = sorted(str(p) for p in tree.rglob("*.py") if ".venv" not in p.parts and "node_modules" not in p.parts)
+    checker = "import ast, sys\nfor f in sys.argv[1:]:\n    ast.parse(open(f, encoding='utf-8').read(), f)\n"
+    code, output = run([interpreter, "-c", checker, *files], cwd=tree)
+    return [Result(
+        f"python {floor} floor: all {len(files)} rendered .py files parse on a real python{floor}",
+        code == 0 and bool(files),
+        time.time() - started,
+        output[-1500:],
+    )]
+
+
 def parenthesised_except_gate(tree: Path) -> Result:
     """No `except (A, B):` without `as` in a rendered tree, asked of the source and not of black.
 
@@ -11175,6 +11212,7 @@ def main() -> int:
         results += cli_rename_gate(workdir)
         results += rehearse_gate(workdir, venv_python)
         results += newest_floor_gate(fullest, workdir, venv_python)
+        results += oldest_floor_gate(fullest, workdir)
 
         # Beside it, and the one that would have stopped v0.22.0: a tree that
         # also contains the ADOPTER's own `python -m` package. Every other

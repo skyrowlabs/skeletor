@@ -1246,6 +1246,13 @@ def report_a_dry_run(
     return 0
 
 
+#: The oldest `--python` floor this template is verified at. `bin/skeletor-verify`
+#: compiles every rendered file with a real interpreter of this version, because
+#: `ast.parse(feature_version=)` accepts 3.12-only f-strings: v0.56.0 shipped one
+#: and a 3.11 tree could not import the file (proto.pilot's rehearsal).
+OLDEST_FLOOR = "3.11"
+
+
 def version_key(version: str) -> Tuple[int, ...]:
     """`"3.9"` sorts below `"3.12"`, which string comparison gets backwards."""
     return tuple(int(part) for part in version.split(".") if part.isdigit())
@@ -1375,6 +1382,13 @@ def main() -> int:
     #
     # The flag rather than a special case, because the next scaffold-time
     # invariant belongs behind the same door instead of growing its own escape.
+    if version_key(args.python) < version_key(OLDEST_FLOOR) and not args.reproducing:
+        print(
+            f"❌ --python {args.python} is older than {OLDEST_FLOOR}, the oldest floor this template is "
+            "verified at. Its own files may use syntax your floor cannot parse, and nothing checks."
+        )
+        return 1
+
     floor, widest_file = line_length_floor()
     if args.line_length < floor and not args.reproducing:
         print(
