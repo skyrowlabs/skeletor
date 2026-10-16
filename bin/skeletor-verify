@@ -58,7 +58,7 @@ SCAFFOLDER = SKELETOR / "bin" / "skeletor-new"
 #: on a missing argument rather than on the thing it is asking about, which is
 #: a false red — and a false red on a gate about a false green is the worst
 #: possible pair to be reading at once.
-EXTRA_PACKAGES = ["pytest", "pytest-timeout", "pytest-cov", "click", "actionlint-py==1.7.12.24"]
+EXTRA_PACKAGES = ["pytest", "pytest-timeout", "pytest-cov", "click", "actionlint-py==1.7.12.25"]
 
 #: Lint hooks whose args are read out of the generated tree's own
 #: `.pre-commit-config.yaml` rather than repeated here. Copying the args would

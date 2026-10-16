@@ -259,7 +259,7 @@ jobs:
 
       - name: pyright (whole project)
         run: |
-          pip install pyright==1.1.411
+          pip install pyright==1.1.414
           pyright --project pyrightconfig.json
 
   # ── Node ────────────────────────────────────────────────────────────────

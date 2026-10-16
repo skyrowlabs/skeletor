@@ -68,14 +68,14 @@ repos:
   # shellcheck is installed. It does not check that an action reference resolves.
   # Its exemptions live in `.github/actionlint.yaml`, which it reads itself.
   - repo: https://github.com/Mateusz-Grzelinski/actionlint-py
-    rev: v1.7.12.24
+    rev: v1.7.12.25
     hooks:
       - id: actionlint
 
   # ── Python ──────────────────────────────────────────────────────────────
   # Delete this block for a project with no Python.
   - repo: https://github.com/PyCQA/flake8
-    rev: 7.3.0
+    rev: 7.4.1
     hooks:
       - id: flake8
         # Matches CI's **blocking** step exactly — syntax errors and undefined
@@ -102,14 +102,14 @@ repos:
         types: [python]
 
   - repo: https://github.com/psf/black
-    rev: 26.5.1
+    rev: 26.10.1
     hooks:
       - id: black
         args: ['--line-length={{LINE_LENGTH}}']
         types: [python]
 
   - repo: https://github.com/PyCQA/isort
-    rev: 9.0.1
+    rev: 9.0.2
     hooks:
       - id: isort
         args: ['--profile=black', '--line-length={{LINE_LENGTH}}']
@@ -129,7 +129,7 @@ repos:
         name: Type check with Pyright (whole project)
         language: node
         entry: scripts/lint_pyright_gate.py --project pyrightconfig.json
-        additional_dependencies: ['pyright@1.1.411']
+        additional_dependencies: ['pyright@1.1.414']
         # Whole-project on purpose, and so pass_filenames is false: the check has
         # no per-file scoping, which means ONE stale error anywhere blocks every
         # commit repo-wide. That is the intended pressure — fix errors when you
