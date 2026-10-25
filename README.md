@@ -70,30 +70,6 @@ end of the CI matrix.
 
 ## What's in the box
 
-```mermaid
-flowchart LR
-    OVL["overlays<br/>--language · --agent"]
-    S(["<b>skeletor</b>"])
-    CORE["<b>core</b><br/>CLI · rules · docs · tests · CI"]
-    GOV["<b>governed</b><br/>+ worktrees · drift · ratchets"]
-    AGT["<b>agentic</b><br/>+ subagents · skills · jobs"]
-    OVL -.- S
-    S --> CORE --> GOV --> AGT
-
-    classDef default fill:#111820,stroke:#c3b391,stroke-width:1.5px,color:#e8edf4
-    classDef root fill:#c3b391,stroke:#c3b391,color:#05090e
-    classDef core fill:#111820,stroke:#38bdf8,stroke-width:2px,color:#e8edf4
-    classDef gov fill:#111820,stroke:#2dd4bf,stroke-width:2px,color:#e8edf4
-    classDef agt fill:#111820,stroke:#a78bfa,stroke-width:2px,color:#e8edf4
-    classDef overlay fill:#0b1016,stroke:#7a8fa8,stroke-dasharray:4 3,color:#e8edf4
-    class S root
-    class CORE core
-    class GOV gov
-    class AGT agt
-    class OVL overlay
-    linkStyle default stroke:#7a8fa8,stroke-width:1.5px
-```
-
 ### skeletor's own tools
 
 `bin/skeletor --help` lists these; each also runs directly by its path.
