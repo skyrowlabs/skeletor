@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/skeletor.svg" alt="skeletor — a management skeleton for new projects. One command, and the tree governs itself from its first commit." width="100%">
+  <img src="docs/assets/hero.svg" alt="skeletor — a management skeleton for new projects. One command, and the tree governs itself from its first commit." width="100%">
 </p>
 
 <p align="center">
