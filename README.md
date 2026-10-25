@@ -1,113 +1,74 @@
 <p align="center">
-  <img src="docs/assets/skeletor.svg" alt="skeletor — a management skeleton for new projects" width="100%">
+  <img src="docs/assets/skeletor.svg" alt="skeletor — a management skeleton for new projects. One command, and the tree governs itself from its first commit." width="100%">
 </p>
 
-# skeletor
+<p align="center">
+  <a href="https://github.com/skyrowlabs/skeletor/tags"><img src="https://img.shields.io/github/v/tag/skyrowlabs/skeletor?sort=semver&label=version&labelColor=1c2633&color=c3b391" alt="version"></a>
+  <a href="https://github.com/skyrowlabs/skeletor/actions/workflows/verify.yml"><img src="https://img.shields.io/github/actions/workflow/status/skyrowlabs/skeletor/verify.yml?branch=main&label=verify&labelColor=1c2633" alt="verify"></a>
+  <a href="docs/TIERS.md"><img src="https://img.shields.io/badge/tiers-core%20%C2%B7%20governed%20%C2%B7%20agentic-38bdf8?labelColor=1c2633" alt="tiers: core, governed, agentic"></a>
+  <img src="https://img.shields.io/badge/python-3.12%2B-a78bfa?labelColor=1c2633" alt="python 3.12+">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/skyrowlabs/skeletor?labelColor=1c2633&color=7a8fa8" alt="license"></a>
+</p>
 
-[![version](https://img.shields.io/github/v/tag/skyrowlabs/skeletor?sort=semver&label=version)](https://github.com/skyrowlabs/skeletor/tags) [![verify](https://img.shields.io/github/actions/workflow/status/skyrowlabs/skeletor/verify.yml?branch=main&label=verify)](https://github.com/skyrowlabs/skeletor/actions/workflows/verify.yml) [![license](https://img.shields.io/github/license/skyrowlabs/skeletor?style=flat)](LICENSE)
+<p align="center">
+  <a href="#quick-start"><b>Quick start</b></a> ·
+  <a href="#pick-a-tier"><b>Pick a tier</b></a> ·
+  <a href="#whats-in-the-box"><b>What's in the box</b></a> ·
+  <a href="#staying-current"><b>Staying current</b></a> ·
+  <a href="docs/DESIGN_RATIONALE.md"><b>Design rationale</b></a>
+</p>
 
-A **project shell generator**. Run one command in a blank repo and you get a
-tree that governs itself from the first commit: documented conventions an agent
-loads every session, a docs lifecycle, marker-based tests, cost-aware CI,
-versioning, and optionally a scheduled self-maintenance layer.
-
-It is an **executable that copies real files** — not a guide an agent reads and
-then hand-writes files from. And it keeps moving after it has run: a scaffolded
-tree records how it was made, so a later template change reaches it as a
-three-way merge rather than as a diff you apply by hand.
-
-**[Quick start](#quick-start)** · **[Choosing what you get](#choosing-what-you-get)** · **[What's in the box](#whats-in-the-box)** · **[Staying current](#staying-current)** · **[Changing the template](#changing-the-template)** · **[Design rationale](docs/DESIGN_RATIONALE.md)**
-
----
+<p align="center">
+  <img src="docs/assets/pillars.svg" alt="Copies real files: an executable, not a guide an agent paraphrases. Governs itself: agent rules, a docs lifecycle, marker tests and cost-aware CI, all green on the first commit. Keeps moving: the tree records how it was made, so a later template change arrives as a three-way merge." width="100%">
+</p>
 
 ## Quick start
 
-Three ways in, in order of how little you have to remember.
-
-| | How | When |
-| - | --- | ---- |
-| **1** | Say *"Set up this project using skeletor."* | The `/new-project` skill is installed (`bin/skeletor-install-skill`) |
-| **2** | Say *"Read `AGENTS.md` in your skeletor checkout and follow it to set up this repo."* | Any agent, nothing installed |
-| **3** | Run `bin/skeletor-new` yourself | You want to see every argument |
-
-The skill carries no procedure of its own. It records where skeletor lives and
-hands off to [`AGENTS.md`](AGENTS.md), so the two routes cannot drift apart.
-
-To run it yourself from the target repo, with `$SKELETOR` set to wherever you
-cloned this one:
+Ask your agent *"Set up this project using skeletor."* once the skill is
+installed with `bin/skeletor-install-skill`, or point any agent at
+[`AGENTS.md`](AGENTS.md). Or run it yourself from the target repo:
 
 ```bash
 "$SKELETOR"/bin/skeletor-new . --force \
   --name "My Project" --cli mp --tagline "What it is." --tier core
 ```
 
-Then set up the generated tree. These lines are the scaffold's own Setup block,
-the same in its `README.md`, `AGENTS.md` and `docs/DEVELOPMENT.md`:
+Then set up the generated tree. **Every new clone runs these**, because the
+hooks and the merge driver live in `.git/config`:
 
 ```bash
-python -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt && .venv/bin/python scripts/install_project.py
-.venv/bin/pre-commit install --install-hooks && .venv/bin/python scripts/git/install_merge_drivers.py
-./mp check pre-push     # every host-runnable CI gate; green on a fresh tree
+python -m venv .venv
+.venv/bin/pip install -r scripts/requirements.txt
+.venv/bin/python scripts/install_project.py
+.venv/bin/pre-commit install --install-hooks
+.venv/bin/python scripts/git/install_merge_drivers.py
+./mp check pre-push        # every host-runnable CI gate, green on a fresh tree
 ```
 
-> [!NOTE]
-> Line 1 installs the project itself only once `pyproject.toml` declares
-> `[project]`. Line 2 installs the git hooks and the clone-local config — the
-> `regen-docs` merge driver and `commit.template` — which live in `.git/config`,
-> so **every new clone runs it**, not just the first.
+Adopting into a repo that already has code? [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md).
 
-[`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md) takes it from there, including
-adoption into a repository that already has code.
+## Pick a tier
 
----
-
-## Choosing what you get
-
-### Tiers
-
-| Tier | Adds |
-| ---- | ---- |
-| `core` | Agent rules, lazy-loading docs index, plan lifecycle, CLI, marker tests, CI gate, versioning |
-| `governed` | Multi-agent tree safety, scoped commits, worktrees, drift checks, ratchets |
-| `agentic` | Subagents, `/implement` + `/release` skills, a scheduled-job registry |
-
-See [`docs/TIERS.md`](docs/TIERS.md) for what each costs. **Pick the one you
-will maintain, not the one that looks most thorough.**
-
-### The five flags that change what is in the tree
-
-Everything else renders a name into a file. These decide what ships:
-
-| Flag | Question it answers |
-| ---- | ------------------- |
-| `--tier` | How much governance will you maintain? |
-| `--versioning` | **Does anything deploy this?** `release-please` for a published artifact, whose users have no `.git` and so need a tracked `VERSION`; `tag` for a repository run from a checkout, where `git describe` already knows. `tag` is a *subtraction* — the same files, minus four |
-| `--agent` | `claude` ships `.claude/` tooling; `none` omits it. The conventions in `docs/rules/` are plain markdown and ship either way, because nothing auto-loads them for any vendor |
-| `--language` | Your **product's** language. Not the shell's — `cli/`, `tests/` and `scripts/` are python at every tier, so this only ever adds a second toolchain |
-| `--shell-package` | What the shell's python package is **called** (default `cli`). It renames a directory and nothing else |
-
-`--python` is a **floor**, not the interpreter you happen to run: it renders
-into pyright's `pythonVersion` and black's `target-version`, which both mean
-*at least this*. `--python-ceiling` adds the other end, and CI runs a matrix
-over the pair — the two failure modes a matrix catches both live at the ends.
+<p align="center">
+  <img src="docs/assets/tiers.svg" alt="core: agent rules, docs lifecycle, project CLI, marker tests, gated CI, versioning. governed adds multi-agent tree safety, scoped commits, worktrees, drift checks and ratchets. agentic adds subagents, the /implement and /release skills, and a scheduled-job registry." width="100%">
+</p>
 
 > [!TIP]
-> **Rename the shell if your product already owns `cli/`** — the most
-> collided-with directory name in a python monorepo. sky.boss moved their
-> product out of `cli/` so this template's shell could have it, and paid 119
-> failing tests mid-flight. Renaming is cheap here because the package never
-> names itself: command groups are found through `__name__` and `__path__`,
-> `__main__.py` imports relatively, and the tests go through `tests/shell.py`.
-> Decide at scaffold time — `--set-arg` cannot usefully change it later, since
-> an upgrade would render the package under the new name as a set of new files.
+> **Pick the tier you will maintain, not the one that looks most thorough.**
+> [`docs/TIERS.md`](docs/TIERS.md) has the cost of each.
 
----
+| Flag | What it decides |
+| ---- | --------------- |
+| `--tier` | How much governance you will maintain |
+| `--versioning` | **Does anything deploy this?** `release-please` if yes; `tag` if it runs from a checkout |
+| `--agent` | `claude` ships `.claude/`; `none` omits it. The rules in `docs/rules/` ship either way |
+| `--language` | Your *product's* language. The shell is python at every tier |
+| `--shell-package` | Rename `cli/` if your product already owns it. Decide at scaffold time |
+
+`--python` is a floor (default `3.12`), and `--python-ceiling` adds the other
+end of the CI matrix.
 
 ## What's in the box
-
-skeletor has two halves: the tools you run from this checkout, and the tree they
-write into your repository. The tiers are cumulative — each adds to the one
-before it — and the overlays apply on top of whichever you pick.
 
 ```mermaid
 %%{init: {"flowchart": {"wrappingWidth": 420}}}%%
@@ -143,9 +104,7 @@ flowchart TB
 
 ### skeletor's own tools
 
-`bin/skeletor` is the entry point — `bin/skeletor --help` lists these, and each
-is still runnable directly by the path below. The table is generated from the
-files, because the hand-written one it replaced had lost three of the eight:
+`bin/skeletor --help` lists these; each also runs directly by its path.
 
 <!-- GENERATED bin/skeletor — do not hand-edit; run `bin/skeletor --markdown`. -->
 
@@ -164,13 +123,12 @@ files, because the hand-written one it replaced had lost three of the eight:
 
 ### In the generated tree
 
-The **Tier** column says which tier ships it: `C` = core, `G` = governed,
-`A` = agentic (cumulative). Expand a section for the detail.
+One project CLI, `./<cli>`, whose command groups are **discovered by module**,
+so an overlay adds one without patching an import list. The **Tier** column
+says which tier ships each piece: `C` core, `G` governed, `A` agentic.
 
-#### The project CLI (`./<cli>`)
-
-One discoverable entry point. Command groups are **discovered by module**, so an
-overlay can add one without patching an import list.
+<details>
+<summary><strong>The project CLI</strong></summary>
 
 | Group | Subcommands | Tier |
 | ----- | ----------- | :--: |
@@ -183,6 +141,8 @@ overlay can add one without patching an import list.
 | `commit` | Scoped commit that skips pre-commit's repo-wide stash | G |
 | `worktree` | `new` · `drop` · `list` · `holders` | G |
 | `report` | `<job>` · `cron` · `watch` | A |
+
+</details>
 
 <details>
 <summary><strong>Conventions and agent tooling</strong></summary>
@@ -321,81 +281,47 @@ Every one is runnable locally with the same invocation CI uses.
 
 </details>
 
----
-
 ## Staying current
 
-A scaffold is a starting point that keeps moving. There are **two** adoption
-modes, and a tree can be both:
-
-| You have | Manifest | How template changes reach you |
-| -------- | -------- | ------------------------------ |
-| A scaffolded tree | `.skeletor.json` | `bin/skeletor-upgrade` — renders your base, renders ours, three-way merges |
-| Files you copied by hand | `.skeletor-components.json` | `bin/skeletor-components report` — provenance only, no automatic upgrade |
-
-### Upgrading a scaffolded tree
+A scaffolded tree records how it was made in `.skeletor.json`. Files you copied
+by hand get provenance only, through `bin/skeletor-components report`.
 
 ```bash
-bin/skeletor-upgrade ../my-project --dry-run        # what would change; never refused, writes nothing
-bin/skeletor-upgrade ../my-project --rehearse       # the dry run, then the tree's own gates before and after
-bin/skeletor-upgrade ../my-project --ref v0.56.0    # apply, rendering from a released tag
+bin/skeletor-upgrade ../my-project --dry-run       # what would change; writes nothing
+bin/skeletor-upgrade ../my-project --rehearse      # ...then your own gates, before and after
+bin/skeletor-upgrade ../my-project --ref v0.57.1   # apply, rendering from a released tag
 ```
 
-| When | Reach for |
-| ---- | --------- |
-| You want to know which of your gates a release turns red, not just which files conflict | `--rehearse` (add `--quick` to skip the suites). It applies the upgrade in a throwaway worktree beside your tree and runs `check pre-push` there |
-| The run refuses because skeletor's checkout is past its newest tag | `--ref <tag>`, so your manifest records a version somebody chose. `--allow-untagged` is the escape |
-| A conflict, and you ported the change by hand | `--ported`, which advances the recorded base without touching your bytes |
-| A conflict that is only your formatter's doing | `--normalise`, which runs your own formatters over both template sides first |
-| A file reads as edited and you want to see what it differs from | `--show <path>` |
-| A flag the template gained after you scaffolded | `--set-arg <flag>=<value>` |
-
 > [!IMPORTANT]
-> **What an upgrade will not do.** It never writes a conflict marker into your
-> tree, never commits, and never deletes. A file you edited is merged only if
-> the merge is clean; a conflict leaves your file exactly as it was and puts the
-> template's version in `tmp/upgrade/`. **A file skeletor wrote and you deleted
-> is not put back** — partial adoption is a set of deletions, and a decision
-> that has to be re-made on a schedule is not a decision.
+> **An upgrade never writes a conflict marker, never commits, and never
+> deletes.** A conflict leaves your file exactly as it was and puts the
+> template's version in `tmp/upgrade/`. A file skeletor wrote and you deleted
+> stays deleted.
 
-**A tree scaffolds once**, so every argument it records is fixed at that
-moment. `--set-arg` changes an argument for *this render only*: your base still
-renders from the recorded values, and the difference arrives as an ordinary
-template change. Change a rendered value that way rather than by editing the
-file. An edited file leaves the record saying the old value, which is what the
-base still renders, so that hunk conflicts on every upgrade while the tree
-stays green and current.
-
----
+`--ported`, `--normalise`, `--show` and `--set-arg` cover hand-ported conflicts,
+formatter noise, a file that reads as edited, and a flag added after you
+scaffolded: `bin/skeletor-upgrade --help`.
 
 ## Changing the template
 
-**The scaffold is the test.** There is no test suite for skeletor itself: a
-template change is verified by generating a tree and running *that tree's* own
-gates against it.
+**The scaffold is the test.** Generate every configuration, then run each
+tree's own gates against it:
 
 ```bash
-bin/skeletor-verify                     # every tier x every language
-bin/skeletor-verify --tier core --keep  # one tier, trees left behind to inspect
+bin/skeletor-verify                      # every tier x every language
+bin/skeletor-verify --tier core --keep   # narrow a debug loop
 ```
 
-Run it after any edit under `template/`, and run all tiers when the edit touches
-`template/core/` — `governed` and `agentic` compose on top of it. `--tier` is
-for narrowing a debug loop, not for a final check.
-
-A scaffold whose first check is red teaches that red is normal, so the
-definition of done here is that a fresh tree passes its own gates. The grid
-generates every configuration rather than one because **tier composition is the
-question no single tree can ask**: a reference that resolves in the tree you
-tested and dangles in the tree somebody else scaffolds is a defect only the
-generator can see.
+Run all tiers when an edit touches `template/core/`, since `governed` and
+`agentic` compose on top of it.
 
 > [!WARNING]
-> **Never run `black` directly on `template/`.** It sees `{{PLACEHOLDER}}`
-> rather than the value it renders to, so its line-length decisions are made
-> against the wrong widths. Scaffold a tree, format there, port the change back.
+> **Never run `black` directly on `template/`.** It measures the placeholders,
+> not the values they render to. Scaffold a tree, format there, port the change
+> back.
 
-### Repository layout
+<details>
+<summary><strong>Repository layout</strong></summary>
 
 | Path | What it is |
 | ---- | ---------- |
@@ -411,30 +337,21 @@ generator can see.
 | `docs/DESIGN_RATIONALE.md` | The incident behind each mechanism |
 | `docs/MAINTENANCE.md` | The weekly pass, and what an agent running it must not do |
 
----
+</details>
 
-## The idea
+<p align="center"><img src="docs/assets/rule.svg" alt="" width="100%"></p>
 
 > A rule that two files can express is a rule that will drift, and the copy that
 > is wrong is always the one being read.
 
-Where a set of things must be checked, the set is **discovered** by pattern — any
-test file with a marker, any CI job that boots the stack — rather than maintained
-as a list. Exemptions live in an allowlist **with a written reason**, which is
-what turns a divergence from a failure into a decision.
-
-The second idea is smaller and matters as much: **write the reason next to the
-rule.** A rule whose reason is written down can be evaluated when it becomes
-inconvenient. A rule without one gets deleted by whoever trips over it first.
-
----
+So sets are **discovered** by pattern rather than listed, and every rule
+carries its reason. [`docs/DESIGN_RATIONALE.md`](docs/DESIGN_RATIONALE.md) has
+the incident behind each one.
 
 ## License
 
 MIT — see [`LICENSE`](LICENSE). Copyright (c) 2026 SKYROW LABS LLC.
 
-**What you scaffold is yours.** The files `bin/skeletor-new` writes into your
-repository carry no notice requirement and no attribution to skeletor. License
-the result however you like — [`NOTICE`](NOTICE) says so explicitly, because a
-scaffolding tool whose output dragged its own copyright into every project would
-be one nobody could use for the thing it is for.
+**What you scaffold is yours.** The files `bin/skeletor-new` writes carry no
+notice requirement and no attribution to skeletor; [`NOTICE`](NOTICE) says so
+explicitly.
