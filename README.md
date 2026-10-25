@@ -71,21 +71,14 @@ end of the CI matrix.
 ## What's in the box
 
 ```mermaid
-%%{init: {"flowchart": {"wrappingWidth": 420}}}%%
-flowchart TB
-    BIN["<b>bin/ — run from this checkout</b><br/>start · new · install-skill<br/>stay current · upgrade · components<br/>prove a change · verify<br/>upkeep · maintain · check-pins · bump"]
-    OVL["<b>overlays, any tier</b><br/>--language python · node<br/>--agent claude → .claude/"]
+flowchart LR
+    OVL["overlays<br/>--language · --agent"]
     S(["<b>skeletor</b>"])
-    subgraph TIERS["the tree it writes into your repository"]
-        direction LR
-        CORE["<b>core</b><br/>CLI · check test docs bug task inbox doctor<br/>rules · docs lifecycle · validation gates<br/>marker tests · gated CI · lint + pyright<br/>Release Please or tag"]
-        GOV["<b>governed</b> — adds to core<br/>commit · worktree · tree_lock<br/>workflow drift · nightly coverage<br/>Dependabot · CODEOWNERS"]
-        AGT["<b>agentic</b> — adds to governed<br/>implementer · tester · documenter<br/>/implement · /release<br/>scheduled-job registry"]
-        CORE --> GOV --> AGT
-    end
-    BIN --- S
+    CORE["<b>core</b><br/>CLI · rules · docs · tests · CI"]
+    GOV["<b>governed</b><br/>+ worktrees · drift · ratchets"]
+    AGT["<b>agentic</b><br/>+ subagents · skills · jobs"]
     OVL -.- S
-    S --> TIERS
+    S --> CORE --> GOV --> AGT
 
     classDef default fill:#111820,stroke:#c3b391,stroke-width:1.5px,color:#e8edf4
     classDef root fill:#c3b391,stroke:#c3b391,color:#05090e
@@ -98,7 +91,6 @@ flowchart TB
     class GOV gov
     class AGT agt
     class OVL overlay
-    style TIERS fill:#05090e,stroke:#617791,color:#7a8fa8
     linkStyle default stroke:#7a8fa8,stroke-width:1.5px
 ```
 
