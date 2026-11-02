@@ -58,7 +58,7 @@ SCAFFOLDER = SKELETOR / "bin" / "skeletor-new"
 #: on a missing argument rather than on the thing it is asking about, which is
 #: a false red — and a false red on a gate about a false green is the worst
 #: possible pair to be reading at once.
-EXTRA_PACKAGES = ["pytest", "pytest-timeout", "pytest-cov", "click", "actionlint-py==1.7.12.25"]
+EXTRA_PACKAGES = ["pytest", "pytest-timeout", "pytest-cov", "click", "pre-commit", "actionlint-py==1.7.12.25"]
 
 #: Lint hooks whose args are read out of the generated tree's own
 #: `.pre-commit-config.yaml` rather than repeated here. Copying the args would
@@ -3974,6 +3974,68 @@ def empty_clone_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: bo
     )
     results.append(Result("empty clone: a clone with history still needs --force",
                           code != 0 and "--force" in output, time.time() - started, output))
+    return results
+
+
+def secrets_contract_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """What a credentials registry reads out of a tree, and the key scan it ships.
+
+    `scripts/env_shape.py --json` is the interface sky.vault calls instead of
+    parsing `.env.example` itself, so it is run, not imported: a `core` tree
+    declares no secret, an `agentic` tree exactly the heartbeat URL it tags. The
+    tree's own parity test asks whether its tags are well formed; whether the
+    template tagged the right names in each tier is this side's question.
+
+    `detect-private-key` is run through the tree's own pre-commit config, since a
+    hook that matches something the template ships is red on arrival. A planted
+    key header must turn it red, or a clean run proves nothing.
+    """
+    results: List[Result] = []
+    for tier, expected in (("core", []), ("agentic", ["HEARTBEAT_REPO_REPORT"])):
+        tree = workdir / f"{tier}-python"
+        if not tree.exists():
+            continue
+        started = time.time()
+        proc = subprocess.run(
+            [str(venv_python), "scripts/env_shape.py", "--json"],
+            cwd=str(tree), capture_output=True, text=True, env=subprocess_env(None),
+        )
+        try:
+            payload = json.loads(proc.stdout)
+            got, names = payload["secrets"], payload["names"]
+        except (ValueError, KeyError, TypeError):
+            payload, got, names = None, None, []
+        results.append(
+            Result(
+                f"{tier}: env_shape --json declares secrets {expected}",
+                proc.returncode == 0 and got == expected and bool(names),
+                time.time() - started,
+                f"exit {proc.returncode}, secrets {got}, {len(names)} name(s)\n{proc.stdout}{proc.stderr}",
+            )
+        )
+
+    if not results:
+        return [Result("secrets contract: found neither a core nor an agentic python tree", False, 0.0, str(workdir))]
+    tree = workdir / "agentic-python"
+    if not tree.exists():
+        return results
+    started = time.time()
+    hook = [str(venv_python), "-m", "pre_commit", "run", "detect-private-key", "--all-files"]
+    code, output = run(hook, cwd=tree)
+    if code != 0 and "detect private key" not in output.lower():
+        results.append(Result("⚠️  detect-private-key: SKIPPED, the hook could not be fetched", True,
+                              time.time() - started, output))
+        return results
+    results.append(Result("agentic: detect-private-key is clean on a fresh tree", code == 0,
+                          time.time() - started, output))
+    planted = tree / "planted_key.txt"
+    planted.write_text("-----BEGIN " + "OPENSSH PRIVATE KEY-----\nAAAA\n", encoding="utf-8")
+    git_in(tree, "add", "planted_key.txt")
+    code, output = run(hook, cwd=tree)
+    git_in(tree, "rm", "--cached", "--quiet", "planted_key.txt")
+    planted.unlink()
+    results.append(Result("agentic: detect-private-key catches a planted key header",
+                          code != 0 and "planted_key.txt" in output, time.time() - started, output))
     return results
 
 
@@ -11352,6 +11414,9 @@ def main() -> int:
         if allow_tree.exists():
             gate = allowlist_gate(allow_tree, venv_python)
             gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        for gate in secrets_contract_gate(workdir, venv_python):
             results.append(gate)
 
         for gate in dirty_ref_gate(workdir):

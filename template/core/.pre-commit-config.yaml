@@ -61,6 +61,10 @@ repos:
         exclude: '^(pyrightconfig\.json|\.vscode/settings\.json)$'
       - id: check-added-large-files
         args: ['--maxkb=512']
+      # Content, where `forbid-env-files` above is file names only: a private
+      # key pasted into any file. Narrow on purpose — it looks for key headers,
+      # not tokens — and a wider scanner is a decision with a measurement behind it.
+      - id: detect-private-key
 
   # ── Workflows ───────────────────────────────────────────────────────────
   # Checks your edits to `.github/workflows/` as GitHub Actions: expressions,
