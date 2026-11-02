@@ -1211,8 +1211,8 @@ def _gating_shape(tier: str, workdir: Path, shape: str, base: str, release: str)
             f"gating/{shape}: full_suite and docs_only DIFFER on a ready code PR",
             code_pr["fullSuite"] is False and code_pr["docsOnly"] is False,
             time.time() - started,
-            f"fullSuite={code_pr['fullSuite']} docs_only={code_pr['docsOnly']} — `node` and `unit-tests` "
-            f"gate on `docs_only != true` and run; `lint`, `integration` and `ui` gate on "
+            f"fullSuite={code_pr['fullSuite']} docs_only={code_pr['docsOnly']} — `node` "
+            f"gates on `docs_only != true` and runs; `lint`, `integration` and `ui` gate on "
             f"`full_suite == true` and do not. This is the ONLY event where the two disagree, so it is "
             "the only one that distinguishes the split from a single condition.",
         )

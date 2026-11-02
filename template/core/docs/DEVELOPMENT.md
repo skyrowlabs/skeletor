@@ -99,16 +99,16 @@ Full rules: [`docs/rules/testing.md`](rules/testing.md).
 
 | Event                          | What runs                              | ~min |
 | ------------------------------ | -------------------------------------- | ---- |
-| Draft PR, docs-only            | `CI Gate` alone                        | ~1   |
+| Draft PR, docs-only            | `CI Gate` + `pytest`                   | ~4   |
 | Draft PR carrying code         | `CI Gate` + `Node` + `pytest`          | ~5   |
 <!-- SCAFFOLD-IF-DIFFER {{BASE_BRANCH}} {{RELEASE_BRANCH}} -->
-| Ready PR → `{{BASE_BRANCH}}`, docs-only | `CI Gate` alone               | ~1   |
+| Ready PR → `{{BASE_BRANCH}}`, docs-only | `CI Gate` + `pytest`          | ~4   |
 | Ready PR → `{{BASE_BRANCH}}`, code      | `CI Gate` + `Node` + `pytest` | ~5   |
-| Ready PR → `{{RELEASE_BRANCH}}`, docs-only | `CI Gate` alone            | ~1   |
+| Ready PR → `{{RELEASE_BRANCH}}`, docs-only | `CI Gate` + `pytest`       | ~4   |
 | Ready PR → `{{RELEASE_BRANCH}}`, code      | **everything**             | full |
 <!-- /SCAFFOLD-IF -->
 <!-- SCAFFOLD-IF-SAME {{BASE_BRANCH}} {{RELEASE_BRANCH}} -->
-| Ready PR, docs-only            | `CI Gate` alone                        | ~1   |
+| Ready PR, docs-only            | `CI Gate` + `pytest`                   | ~4   |
 | Ready PR carrying code         | **everything**                         | full |
 <!-- /SCAFFOLD-IF -->
 | Ready PR opened by Dependabot  | **everything** — deliberately exempt   | full |
@@ -126,14 +126,14 @@ Three things about this table are load-bearing:
    `paths-ignore` on the trigger: a required check that never reports at all
    blocks the PR forever.
 
-   **A matrix job is the exception, and `pytest` is why.** The unit suite runs
-   once per interpreter, as `pytest <version>`, and when its `if:` skips it on a
-   docs-only change GitHub never expands the matrix: one check reports, named
-   `pytest ${{ matrix.python }}` with the expression unexpanded, so a
-   protection requiring `pytest <version>` waits forever on a pull request
-   whose every check is green. **Require `pytest`, never `pytest <version>`.**
-   `pytest` is one job that `needs:` the matrix and always reports — pass when
-   every leg passed or the gate chose docs-only, fail otherwise. A protection
+   **The unit suite is never gated, docs-only included**, because its tests
+   read `docs/` — plans, tables, references — so a docs-only change is what
+   they judge. It runs once per interpreter, as `pytest <version>`, and a
+   skipped matrix reports one check with the expression unexpanded, so a
+   protection requiring `pytest <version>` can wait forever.
+   **Require `pytest`, never `pytest <version>`.** `pytest` is one job that
+   `needs:` the matrix and always reports — pass when every leg passed, fail
+   otherwise, including when the gate failed and nothing ran. A protection
    set up before that job existed names the per-version contexts; no file in
    this tree can change that setting, so check it.
 

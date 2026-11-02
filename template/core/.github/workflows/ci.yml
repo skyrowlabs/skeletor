@@ -288,8 +288,9 @@ jobs:
   # under a condition that has since changed is not wrong, but it stops being
   # about today the moment nobody says which world it was measured in.
   #
-  # `docs_only != 'true'` is `unit-tests`' condition and it is the right one
-  # here for `unit-tests`' reason: **the node job is the product's own suite.**
+  # `docs_only != 'true'` is the right condition here because **the node job
+  # is the product's own suite**, which a docs change cannot reach. The python
+  # unit suite has no condition at all: its tests do read `docs/`.
   # `lint` and `integration` can afford `full_suite` because a lint finding is
   # not a broken build; a product that does not typecheck is.
   #
@@ -400,18 +401,18 @@ jobs:
         run: npm run --if-present format:check
 
   # ── Unit tests ──────────────────────────────────────────────────────────
-  # Ungated by full_suite: the host-side suite is minutes, and it is the check
-  # most likely to catch the thing a docs-only detector got wrong.
+  # Ungated, by `docs_only` too: the host-side suite is minutes, and tests here
+  # read `docs/` (plans, tables, references), so a docs-only change is exactly
+  # what they judge. Gated, a red tree merged green (skeletor#4, from mind.head).
   unit-tests:
     # The interpreter is in the NAME so a run says which leg failed: the matrix
     # makes one job report as several, and legs sharing a name are
     # indistinguishable on the checks list. **Do not require these names.** They
-    # report only when the matrix runs — skipped, it reports once under the
-    # unexpanded expression — so a protection naming `pytest <version>` blocks
-    # every docs-only pull request. Protection requires `pytest`, the job below.
+    # report only when the matrix runs — skipped (a failed gate), it reports
+    # once under the unexpanded expression — and change whenever the matrix
+    # does. Protection requires `pytest`, the job below.
     name: pytest ${{ matrix.python }}
     needs: gate
-    if: needs.gate.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     # `--python` is a FLOOR — it renders into pyrightconfig's `pythonVersion`
     # and black's `target-version`, both of which mean "at least this". CI used
@@ -491,40 +492,33 @@ jobs:
         run: python scripts/check_skip_budget.py --suite unit
 
   # ── The unit suite's one name ─────────────────────────────────────────
-  # The matrix above reports once per leg, as `pytest <version>` — and only when
-  # it runs. Skipped by the job-level `if` on a docs-only change, GitHub never
-  # expands the matrix, so it reports ONE check named `pytest ${{ matrix.python }}`
-  # with the expression unexpanded, and a branch protection that requires
-  # `pytest 3.12` waits on it forever. stash.flow's docs-only pull requests were
-  # BLOCKED with every check green or skipped; the other gated jobs are not
-  # matrices, so they report skipped under their real names and pass.
-  #
-  # So protection requires THIS: one static name whatever the matrix holds, so
-  # nobody has to read the leg names off a run to set it up, and a change to the
-  # matrix costs no protection edit. `docs/DEVELOPMENT.md` says the same to a
-  # reader deciding what to require, which is where one looks. It passes when
-  # the matrix passed, or was skipped because the gate chose docs-only; it fails
-  # when a leg failed or was cancelled, and when the gate itself did not pass —
-  # a skip caused by a failed classifier is not a docs-only skip.
+  # The matrix above reports once per leg, as `pytest <version>`, and a skipped
+  # matrix reports ONE check with the expression unexpanded — so a protection
+  # naming `pytest 3.12` can wait forever (stash.flow's PRs were blocked so).
+  # Protection requires THIS: one static name whatever the matrix holds.
+  # `docs/DEVELOPMENT.md` says the same to a reader deciding what to require.
+  # It passes only when the matrix passed. The suite has no condition of its
+  # own, so a skip means the gate failed, and a skip is never a pass.
   unit-tests-result:
     name: pytest
     needs: [gate, unit-tests]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: The matrix passed, or was skipped for a docs-only change
+      - name: The matrix passed
         env:
           GATE: ${{ needs.gate.result }}
           UNIT: ${{ needs.unit-tests.result }}
         run: |
           if [ "$GATE" != "success" ]; then
-            echo "::error::the gate did not pass ($GATE), so the unit suite's skip means nothing"
+            echo "::error::the gate did not pass ($GATE), so the unit suite did not run"
             exit 1
           fi
-          case "$UNIT" in
-            success|skipped) echo "unit suite: $UNIT" ;;
-            *) echo "::error::unit suite: $UNIT"; exit 1 ;;
-          esac
+          if [ "$UNIT" != "success" ]; then
+            echo "::error::unit suite: $UNIT"
+            exit 1
+          fi
+          echo "unit suite: $UNIT"
 
   # ── Integration ─────────────────────────────────────────────────────────
   # Gated on full_suite. When it is skipped it still REPORTS `skipped`, which
