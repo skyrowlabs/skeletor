@@ -173,9 +173,12 @@ git commit -m "docs: fill in the scaffold markers"
 The shell's own commit already exists — `skeletor-new` made it, which is what
 gives `git diff` and `check reports` a HEAD to work against from the start, so
 `git log` shows it before you write anything. This commit carries your Step 4
-edits, not the scaffold. If you scaffolded into a repository that already had
-history, the scaffolder committed nothing and this is the first commit after
-all — read `git log` rather than assuming either.
+edits, not the scaffold. An empty clone — `gh repo create` then `git clone`, a
+`.git` with no commits — counts as fresh: the scaffold commit lands on the
+clone's own branch, and you cut the base branch from it. If you scaffolded into
+a repository that already had history or files, the scaffolder committed
+nothing and this is the first commit after all — read `git log` rather than
+assuming either.
 
 Conventional commits are enforced by the hook you just installed. One subject
 line.

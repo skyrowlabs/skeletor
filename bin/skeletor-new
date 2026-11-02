@@ -1098,6 +1098,31 @@ def lost_entries(before: str, after: str, limit: int = 12) -> List[str]:
     return lost[:limit] + ([f"…and {len(lost) - limit} more"] if len(lost) > limit else [])
 
 
+def has_history(target: Path) -> bool:
+    """Whether the repository at `target` has a commit for HEAD to name."""
+    return subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD"], cwd=str(target), capture_output=True
+    ).returncode == 0
+
+
+def is_empty_clone(target: Path) -> bool:
+    """`target` is its own repository with no history and nothing but `.git`.
+
+    Its own: a `.git` *file* is a linked worktree, and a toplevel elsewhere means
+    git answers for a parent. Nothing staged either, since an index entry is
+    somebody's decision even when the working tree is empty.
+    """
+    if not (target / ".git").is_dir() or [p.name for p in target.iterdir()] != [".git"]:
+        return False
+    top = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=str(target), capture_output=True, text=True
+    )
+    if top.returncode != 0 or Path(top.stdout.strip()).resolve() != target:
+        return False
+    staged = subprocess.run(["git", "ls-files"], cwd=str(target), capture_output=True, text=True)
+    return not has_history(target) and staged.returncode == 0 and not staged.stdout.strip()
+
+
 def existing_files(target: Path) -> Set[str]:
     """What is in the tree before skeletor touches anything.
 
@@ -1421,7 +1446,13 @@ def main() -> int:
     refuse_a_dirty_render(args.allow_dirty or args.dry_run)
 
     target = Path(args.target).expanduser().resolve()
-    populated = target.exists() and any(target.iterdir())
+    # An empty clone (`gh repo create` + `git clone`) holds a `.git` and
+    # nothing else, and is as fresh as an empty directory: no `--force`, and
+    # the scaffold gets its first commit. Counting the `.git` as content sent
+    # it down the adoption path, which commits nothing, so its first
+    # `check pre-push` was red on `commit subjects` with no HEAD to read.
+    fresh_clone = is_empty_clone(target)
+    populated = target.exists() and any(target.iterdir()) and not fresh_clone
     # A dry run is not refused here. Looking before you decide is the whole
     # point, and being told to pass `--force` in order to find out what
     # `--force` would destroy is the shape this flag exists to remove. The
@@ -1622,6 +1653,9 @@ def main() -> int:
             print("   Untracked, the suites that enumerate with `git ls-files` find nothing and")
             print("   their empty-scope guards fire — `check pre-push` is red on a tree nobody")
             print("   has touched. Unstage with `git reset` if you want them separated.")
+            if not has_history(target):
+                print("   This repository has no commits yet, so `check pre-push` also stays red")
+                print("   on `commit subjects` until you make the first one.")
         elif staged is not None:
             print()
             print("⚠️  could not stage what was written:")
@@ -1634,8 +1668,18 @@ def main() -> int:
             print("   They are on disk and invisible to every check that asks git what exists.")
 
     committed = False
-    if not args.no_git and not (target / ".git").exists():
-        subprocess.run(["git", "init", "-q", "-b", args.base_branch], cwd=str(target), check=False)
+    first_branch = args.base_branch
+    if not args.no_git and (fresh_clone or not (target / ".git").exists()):
+        if fresh_clone:
+            # Commit on the branch the clone's HEAD already names (GitHub's
+            # default, usually the release branch), never renaming it: that name
+            # is the remote's, and the base branch is cut from it afterwards.
+            head = subprocess.run(
+                ["git", "symbolic-ref", "--short", "HEAD"], cwd=str(target), capture_output=True, text=True
+            )
+            first_branch = head.stdout.strip() or args.base_branch
+        else:
+            subprocess.run(["git", "init", "-q", "-b", args.base_branch], cwd=str(target), check=False)
         # Actually make the first commit. "Governs itself from its first commit"
         # is not true of a tree that has no commits: `git diff`, `check reports`
         # and every worktree command need a HEAD to compare against, and the
@@ -1666,7 +1710,9 @@ def main() -> int:
     print(f"   tier: {args.tier} ({' + '.join(overlays)})   files: {len(written)}")
     print(f"   CLI:  ./{cli_name}")
     if committed:
-        print(f"   git:  first commit on '{args.base_branch}'")
+        print(f"   git:  first commit on '{first_branch}'")
+        if first_branch != args.base_branch:
+            print(f"         then cut the base branch from it: git switch -c {args.base_branch}")
     print()
     print("Next:")
     print(f"   cd {target}")

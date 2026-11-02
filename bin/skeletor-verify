@@ -3920,6 +3920,63 @@ def branch_gate(tier: str, workdir: Path) -> List[Result]:
     return results
 
 
+def empty_clone_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
+    """An empty clone scaffolds like an empty directory, and nothing wider does.
+
+    A fresh `gh repo create` + `git clone` holds only a `.git` with an unborn
+    HEAD. The scaffolder counted that `.git` as content, went down the adoption
+    path and committed nothing, so the first `check pre-push` was red on
+    `commit subjects`. Every other fixture here is a directory with no `.git`,
+    so the grid never saw it. Found by skyrow-workspace scaffolding sky.vault.
+
+    The negative half: a clone that HAS history is still somebody's repository,
+    so it still needs `--force`. A fix that loosened the check to "only `.git`"
+    would pass the first half and adopt over a real history without asking.
+    """
+    results: List[Result] = []
+    started = time.time()
+    base = workdir / "empty-clone"
+    run(["git", "init", "--quiet", "--bare", "-b", "main", str(base / "remote.git")], cwd=workdir)
+    target = base / "clone"
+    run(["git", "clone", "--quiet", str(base / "remote.git"), str(target)], cwd=workdir)
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Clone", "--tagline", "t",
+         "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
+        cwd=workdir,
+    )
+    results.append(Result("empty clone: scaffolds without --force", code == 0, time.time() - started, output))
+    if code != 0:
+        return results
+    _, branch = git_in(target, "symbolic-ref", "--short", "HEAD")
+    _, status = git_in(target, "status", "--porcelain")
+    problems = []
+    if branch.strip() != "main":
+        problems.append(f"HEAD moved to {branch.strip()!r}; the clone's own branch is 'main'")
+    if status.strip():
+        problems.append("left uncommitted:\n" + status)
+    if "git switch -c develop" not in output:
+        problems.append("the report does not say to cut the base branch from the clone's branch")
+    results.append(Result("empty clone: committed on the clone's branch, nothing left over",
+                          not problems, time.time() - started, "\n".join(problems)))
+    (target / ".venv").symlink_to(venv_python.parents[1])
+    for gate in gates(target, venv_python, pyright_ok):
+        gate.label = f"empty clone: {gate.label}"
+        results.append(gate)
+
+    started = time.time()
+    held = base / "with-history"
+    run(["git", "init", "--quiet", "-b", "main", str(held)], cwd=workdir)
+    git_in(held, "commit", "--quiet", "--allow-empty", "-m", "chore: theirs")
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(held), "--allow-dirty", "--name", "Held", "--tagline", "t",
+         "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
+        cwd=workdir,
+    )
+    results.append(Result("empty clone: a clone with history still needs --force",
+                          code != 0 and "--force" in output, time.time() - started, output))
+    return results
+
+
 def rescaffold_gate(tier: str, workdir: Path) -> List[Result]:
     """Scaffold twice into the same tree, and require the manifest not to move.
 
@@ -11280,6 +11337,10 @@ def main() -> int:
             results.append(gate)
 
         for gate in branch_gate(fullest, workdir):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        for gate in empty_clone_gate(fullest, workdir, venv_python, pyright_ok):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 
