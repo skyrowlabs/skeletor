@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import base64
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -4036,6 +4037,72 @@ def secrets_contract_gate(workdir: Path, venv_python: Path) -> List[Result]:
     planted.unlink()
     results.append(Result("agentic: detect-private-key catches a planted key header",
                           code != 0 and "planted_key.txt" in output, time.time() - started, output))
+    results.extend(leak_scan_gate(workdir, venv_python))
+    return results
+
+
+def fetch_gitleaks(workdir: Path, version: str) -> Tuple[Optional[Path], str]:
+    """The release binary CI installs, checksum-verified; `(None, why)` when unreachable."""
+    import tarfile
+    import urllib.request
+
+    base = f"https://github.com/gitleaks/gitleaks/releases/download/v{version}"
+    asset = f"gitleaks_{version}_linux_x64.tar.gz"
+    target = workdir / "gitleaks-bin"
+    try:
+        sums = urllib.request.urlopen(f"{base}/gitleaks_{version}_checksums.txt", timeout=60).read().decode()
+        blob = urllib.request.urlopen(f"{base}/{asset}", timeout=120).read()
+    except OSError as error:
+        return None, str(error)
+    expected = next((ln.split()[0] for ln in sums.splitlines() if ln.endswith(" " + asset)), None)
+    if expected != hashlib.sha256(blob).hexdigest():
+        return None, f"checksum mismatch for {asset}"
+    target.mkdir(exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(blob)) as archive:
+        archive.extract("gitleaks", target, filter="data")
+    return target / "gitleaks", ""
+
+
+def leak_scan_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """Every scaffold commit scans clean under the tree's own pinned gitleaks.
+
+    CI scans the commits a change adds, and a tree's first push adds the
+    scaffold commit, so a template file gitleaks flags is red on arrival in
+    every repository. It is not hypothetical: the manifest records a hash per
+    shipped path, and a path containing `secret` made that line read as a
+    credential. A planted token must turn the scan red, or clean proves nothing.
+    """
+    trees = sorted(p for p in workdir.iterdir() if p.is_dir() and re.fullmatch(r"(core|governed|agentic)-\w+", p.name))
+    if not trees:
+        return [Result("leak scan: found no tree to scan", False, 0.0, str(workdir))]
+    started = time.time()
+    code, version = run([str(venv_python), "scripts/leak_scan.py", "--pinned"], cwd=trees[0])
+    if code != 0:
+        return [Result("leak scan: --pinned names the hook's version", False, time.time() - started, version)]
+    binary, why = fetch_gitleaks(workdir, version.strip())
+    if binary is None:
+        return [Result(f"⚠️  leak scan: SKIPPED, gitleaks {version.strip()} could not be fetched", True,
+                       time.time() - started, why)]
+    path = {"PATH": f"{binary.parent}{os.pathsep}{os.environ.get('PATH', '')}"}
+    results: List[Result] = []
+    for tree in trees:
+        started = time.time()
+        code, output = run([str(venv_python), "scripts/leak_scan.py", "--range", "-1"], cwd=tree, env_extra=path)
+        results.append(Result(f"{tree.name}: leak scan of the scaffold commit is clean", code == 0,
+                              time.time() - started, output))
+    tree = trees[-1]
+    started = time.time()
+    leak = tree / "planted_leak.py"
+    # High entropy on purpose: gitleaks drops a low-entropy match, so a
+    # repeated pattern is a plant that never lands and reads as a broken gate.
+    token = base64.b64encode(hashlib.sha256(b"skeletor-verify plant").digest()).decode()
+    leak.write_text('TOKEN = "ghp_' + token.replace("+", "").replace("/", "")[:36] + '"\n', encoding="utf-8")
+    git_in(tree, "add", "planted_leak.py")
+    git_in(tree, "commit", "--quiet", "--no-verify", "-m", "chore: plant")
+    code, output = run([str(venv_python), "scripts/leak_scan.py", "--range", "-1"], cwd=tree, env_extra=path)
+    git_in(tree, "reset", "--quiet", "--hard", "HEAD~1")
+    results.append(Result(f"{tree.name}: leak scan catches a planted token", code == 1 and "planted_leak.py" in output,
+                          time.time() - started, output))
     return results
 
 

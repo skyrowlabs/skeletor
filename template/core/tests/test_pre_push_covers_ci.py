@@ -94,12 +94,16 @@ def _markers() -> frozenset:
 #: A blocking check `pre-push` does not run, and the reason, which is checked
 #: against the thing it exempts on every run.
 #:
-#: `nostack` is a fact about the check: it needs services this host does not
-#: have, and that stays true however the tree changes. There is deliberately no
-#: second kind — an exemption because *nobody got round to it* is the state this
-#: file exists to make visible, not to license.
+#: Each entry is a fact about the check that stays true however the tree
+#: changes: services this host does not have, or a binary it need not have.
+#: An exemption because *nobody got round to it* is the state this file exists
+#: to make visible, not to license.
 UNREACHABLE = {
     "pytest:integration": "needs the stack up and seeded; a host run has no services to talk to",
+    "script:scripts/leak_scan.py": (
+        "needs the gitleaks binary, which CI installs and a host need not have; "
+        "the gitleaks commit hook scans the same changes as each one is staged"
+    ),
 }
 
 
