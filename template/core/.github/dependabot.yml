@@ -1,22 +1,14 @@
+# Version updates. Monthly: Dependabot *alerts* (`{{CLI}} doctor` checks they are
+# on) report a vulnerable version as soon as one is published, so this file only
+# has to keep pins from drifting. Weekly was noise in jam.sense.
 version: 2
 
 updates:
+  # scripts/requirements.txt pins the toolchain every gate runs.
   - package-ecosystem: pip
     directory: /scripts
     schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    labels: [dependencies]
-    commit-message:
-      prefix: build
-      include: scope
-
-  - package-ecosystem: npm
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     open-pull-requests-limit: 5
     labels: [dependencies]
     commit-message:
@@ -30,4 +22,4 @@ updates:
     labels: [dependencies, ci]
     commit-message:
       prefix: ci
-      include: scope
+      include: scope{{DEPENDABOT_NPM}}

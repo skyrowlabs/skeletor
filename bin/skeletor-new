@@ -246,6 +246,14 @@ def substitutions(args) -> Dict[str, str]:
         "PROJECT_NAME": args.name or slug.replace("-", " ").replace(".", " ").title(),
         "PROJECT_SLUG": slug,
         "TAGLINE": args.tagline,
+        # Only a tree with a package.json has an npm ecosystem to update.
+        "DEPENDABOT_NPM": (
+            "\n\n  - package-ecosystem: npm\n    directory: /\n    schedule:\n      interval: monthly\n"
+            "    open-pull-requests-limit: 5\n    labels: [dependencies]\n    commit-message:\n"
+            "      prefix: build\n      include: scope"
+            if args.language in ("node", "both")
+            else ""
+        ),
         # The tagline as a python string literal, for the one file that holds it as data.
         "TAGLINE_PY": json.dumps(args.tagline, ensure_ascii=False),
         "BADGES": badges(args, slug),
