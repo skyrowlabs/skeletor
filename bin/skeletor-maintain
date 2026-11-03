@@ -169,7 +169,8 @@ def pin_verdict() -> Tuple[bool, str, bool]:
         report += "\n\n🅰️  " + f"{len(stale)} allowlist entry/entries no longer exempt anything:\n"
         report += "\n".join(f"   · {line}" for line in stale)
 
-    unreachable = [f.pin.key for f in findings if f.status == "unknown"]
+    # A pin ahead of the registry is a question the sweep raised, not answered.
+    unreachable = [f.pin.key for f in findings if f.status in ("unknown", "ahead")]
     return bool(blocking or stale), report.strip(), not unreachable
 
 

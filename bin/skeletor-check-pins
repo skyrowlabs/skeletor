@@ -70,7 +70,7 @@ class Pin:
 class Finding:
     pin: Pin
     latest: Optional[str]
-    status: str             # current | behind | disagrees | unknown | allowlisted
+    status: str             # current | behind | ahead | disagrees | unknown | allowlisted
     note: str = ""
 
 
@@ -266,6 +266,16 @@ def compare(pin: Pin, latest: str) -> bool:
     return _tuple(latest)[:depth] > _tuple(pin.version)[:depth]
 
 
+def ahead(pin: Pin, latest: str) -> bool:
+    """True if the pin names a version newer than any the registry reports.
+
+    Never current: it is a typo, a yanked release, or a pre-release the lookup
+    filters out, and a ✅ beside it would claim a check that found a mismatch.
+    """
+    depth = pin.precision or len(re.findall(r"\d+", pin.version))
+    return _tuple(pin.version)[:depth] > _tuple(latest)[:depth]
+
+
 # ── allowlist ────────────────────────────────────────────────────────────────
 
 def allowlisted() -> Dict[str, str]:
@@ -300,13 +310,15 @@ def evaluate() -> List[Finding]:
         elif compare(pin, latest):
             status = "allowlisted" if key in exempt else "behind"
             findings.append(Finding(pin, latest, status, exempt.get(key, note)))
+        elif ahead(pin, latest):
+            findings.append(Finding(pin, latest, "ahead", "newer than the registry's latest: typo, yank or pre-release?"))
         else:
             findings.append(Finding(pin, latest, "current", note))
-    order = {"disagrees": 0, "behind": 1, "unknown": 2, "allowlisted": 3, "current": 4}
+    order = {"disagrees": 0, "behind": 1, "ahead": 2, "unknown": 3, "allowlisted": 4, "current": 5}
     return sorted(findings, key=lambda f: (order[f.status], f.pin.key))
 
 
-MARKS = {"current": "✅", "behind": "⬆️", "disagrees": "❌", "unknown": "❔", "allowlisted": "🅰️"}
+MARKS = {"current": "✅", "behind": "⬆️", "ahead": "⚠️", "disagrees": "❌", "unknown": "❔", "allowlisted": "🅰️"}
 
 
 def stale_exemptions(findings: List[Finding]) -> List[str]:

@@ -9655,24 +9655,38 @@ def maintain_summary_gate() -> List[Result]:
     try:
         loader.exec_module(module)
 
-        class _Unreachable:
-            """Every pin looked up and no registry answered — the network case."""
+        # `ahead` is the second unanswered status: a pin newer than the
+        # registry's latest is a mismatch the sweep found, never a ✅.
+        real_load_tool = module.load_tool
+        for status in ("unknown", "ahead"):
 
-            @staticmethod
-            def evaluate():
-                return [types.SimpleNamespace(status="unknown", pin=types.SimpleNamespace(key="npm:nothing"))]
+            class _Unanswered:
+                @staticmethod
+                def evaluate(status=status):
+                    return [types.SimpleNamespace(status=status, pin=types.SimpleNamespace(key="npm:nothing"))]
 
-            @staticmethod
-            def stale_exemptions(_findings):
-                return []
+                @staticmethod
+                def stale_exemptions(_findings):
+                    return []
 
-            @staticmethod
-            def render(_findings, _markdown):
-                return "❔ npm:nothing"
+                @staticmethod
+                def render(_findings, _markdown):
+                    return "npm:nothing"
 
-        module.load_tool = lambda _path, _name: _Unreachable
-        if module.pin_verdict()[2]:
-            findings.append("pin_verdict reported every pin measured while every finding was 'unknown'")
+            module.load_tool = lambda _path, _name, tool=_Unanswered: tool
+            if module.pin_verdict()[2]:
+                findings.append(f"pin_verdict reported every pin measured while every finding was {status!r}")
+
+        # And `evaluate()` must produce `ahead` from a real comparison, or the
+        # stub above tests a status nothing emits.
+        pins = real_load_tool(SKELETOR / "bin" / "skeletor-check-pins", "_pins_ahead")
+        planted = pins.Pin("pypi", "black", "99.0.0")
+        pins.discover = lambda: {planted.key: planted}
+        pins.latest_version = lambda _pin: ("26.1.0", "")
+        pins.allowlisted = lambda: {}
+        got = [f.status for f in pins.evaluate()]
+        if got != ["ahead"]:
+            findings.append(f"a pin at 99.0.0 against a latest of 26.1.0 was classified {got}, not ['ahead']")
 
         module.declared_upstreams = lambda: ({}, Path("/nonexistent"), "stub")
         if module.upstream_verdict()[2]:
