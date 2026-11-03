@@ -1034,7 +1034,7 @@ DECISIONS = (
     ),
     # The row two-branch trees LOSE. It ran the entire suite before the reorder,
     # because the release-branch test fired above the classifier. A docs-only
-    # release candidate is now the gate alone, which is this file's premise
+    # release candidate is now the gate and the unit suite, which is this file's premise
     # applied to the one base it used to exempt itself from. release-please's
     # own pull request is unaffected: `VERSION` and the release manifest are not
     # in `DOC_PATTERNS`, so it classifies as code and takes the row below.

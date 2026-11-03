@@ -117,7 +117,8 @@ Never commit directly to `{{RELEASE_BRANCH}}`.
 `gh pr create --draft`. Mark it ready only when you believe it is green.
 
 CI jobs are gated by cost: a draft PR carrying code runs the cheap ones and skips the
-expensive ones, and a docs-only PR runs the gate alone whether it is draft or ready — that
+expensive ones, and a docs-only PR runs the gate and the unit suite whether it is draft or
+ready — that
 is the other rule, and it decides first. `.github/scripts/docs-only.cjs` decides both, and
 is the only place that does; `ci.yml` says which job is in which class.
 

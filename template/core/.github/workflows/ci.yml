@@ -32,7 +32,7 @@ name: CI
 #      every PR was opened ready and pushed to four to six times.
 #
 # So: a draft carrying code runs the cheap jobs, a docs-only change runs the
-# gate alone whether draft or ready, a ready PR runs what its base branch earns,
+# gate and the unit suite whether draft or ready, a ready PR runs what its base branch earns,
 # and the heavy suite runs only where its verdict changes a decision. The
 # decision order is `.github/scripts/docs-only.cjs` and nowhere else — this
 # sentence said "draft PRs run the gate job alone" for five releases while the
@@ -222,8 +222,8 @@ jobs:
   # FULL-SUITE-BECAUSE: every gate in this job also runs in the pre-commit
   # hooks and in `{{CLI}} check pre-push`, so a pull request that skips it is
   # not one nobody has linted — and a lint finding is not a broken build. The
-  # jobs that execute this repository's own code are gated on `docs_only`
-  # instead, because for those a skip is a question nobody asked.
+  # node job is gated on `docs_only` instead, because for it a skip is a
+  # question nobody asked; the unit suite is not gated at all (see its header).
   lint:
     name: Lint & Types
     needs: gate
