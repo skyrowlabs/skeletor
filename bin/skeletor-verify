@@ -10110,6 +10110,10 @@ def already_applied_gate() -> Result:
         problems.append("a reflowed prose port does not read as applied")
     if upgrader.already_applied(prose_base, prose_ours, reflowed, prose=False):
         problems.append("outside prose, a reflow reads as applied — whitespace is meaning in code")
+    # A template change that IS a reflow is invisible once whitespace collapses,
+    # so it must be merged rather than read as present everywhere (v0.61.0's AGENTS.md).
+    if upgrader.already_applied(prose_ours, reflowed, prose_ours, prose=True):
+        problems.append("a reflow-only template change reads as already applied to a file that lacks it")
     tags = [tag for tag in run(["git", "tag", "--sort=v:refname"], cwd=SKELETOR)[1].split() if tag.startswith("v")]
     swept = 0
     for old, new in zip(tags, tags[1:]):

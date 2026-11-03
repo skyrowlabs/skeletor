@@ -2174,6 +2174,10 @@ def already_applied(base: str, ours: str, theirs: str, prose: bool = False) -> b
         return " ".join(text.split())
 
     if prose:
+        # A change that is only a reflow vanishes under that collapse, so every
+        # file would read as carrying it; it cannot be detected, so it is merged.
+        if flat(base) == flat(ours):
+            return False
         theirs_flat, ours_flat = flat(theirs), flat(ours)
     for tag, low, high, low2, high2 in difflib.SequenceMatcher(a=old, b=new, autojunk=False).get_opcodes():
         if tag in ("insert", "replace"):
