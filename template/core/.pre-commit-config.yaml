@@ -89,7 +89,7 @@ repos:
   # ── Python ──────────────────────────────────────────────────────────────
   # Delete this block for a project with no Python.
   - repo: https://github.com/PyCQA/flake8
-    rev: 7.4.1
+    rev: 7.5.0
     hooks:
       - id: flake8
         # Matches CI's **blocking** step exactly — syntax errors and undefined

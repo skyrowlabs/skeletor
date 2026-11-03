@@ -158,7 +158,9 @@ def discover() -> Dict[str, Pin]:
             # the same reason the `uses:` pattern is restricted to YAML: a
             # version in prose is documentation, not a pin in effect.
             if path.suffix != ".md":
-                for match in re.finditer(r"['\"]([A-Za-z0-9_.-]+)==([\d.]+)['\"]", line):
+                # A version ends in a digit: `"tool==1.7.12." + "24"` is a fixture
+                # assembled to dodge another detector, not a pin.
+                for match in re.finditer(r"['\"]([A-Za-z0-9_.-]+)==(\d+(?:\.\d+)*)['\"]", line):
                     add("pypi", match.group(1), match.group(2), path, index)
             # workflow steps. Restricted to YAML because the same string in
             # prose or in a comment is documentation, not a pin — this script
