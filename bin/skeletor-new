@@ -154,7 +154,9 @@ def setup_commands(language: str) -> List[str]:
 def badges(args, slug: str) -> str:
     """The README badge row — empty unless `--org` names a real owner.
 
-    Two badges, and neither one *stores* a value. That is the whole constraint:
+    A non-`public` `--visibility` gets one static badge naming it; the default is
+    `private` because that wrong guess shows to the owner, and the other one does not.
+    For a public repository, two badges, and neither one *stores* a value. That is the whole constraint:
     a hard-coded `version-0.1.0` badge would be a third home for a number whose
     first two are the git tag and `VERSION`, and Release Please bumps both
     without ever touching the README — so it would be correct until the first
@@ -183,6 +185,12 @@ def badges(args, slug: str) -> str:
     """
     if args.org == ORG_UNSET:
         return ""
+    if args.visibility != "public":
+        # Every badge below reads GitHub, and GitHub answers "repo not found" to
+        # an anonymous reader of a private repo — while rendering fine for its
+        # logged-in owner, the one person who would fix it. So a non-public row
+        # states the visibility and nothing GitHub would have to serve.
+        return f"![repo: {args.visibility}](https://img.shields.io/badge/repo-{args.visibility}-informational)\n\n"
     repo = f"{args.org}/{slug}"
     if args.versioning == "tag":
         # `git tag -a` creates a TAG, not a GitHub Release — that object only
@@ -967,6 +975,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--org",
         default=ORG_UNSET,
         help="the GitHub owner: CODEOWNERS, and the README badges, which are omitted without it",
+    )
+    parser.add_argument(
+        "--visibility",
+        choices=["private", "internal", "public"],
+        default="private",
+        help=(
+            "who can read the repository; decides the README badge row when --org is given. "
+            "public: live release and CI badges. private/internal (default): one static "
+            "`repo: <visibility>` badge, because GitHub-reading badges 404 for anonymous readers "
+            "of a private repo while rendering fine for its owner. When it changes later: "
+            "skeletor-upgrade --set-arg --visibility=public"
+        ),
     )
     parser.add_argument("--timezone", default="UTC", help="the timezone the crontab fires in (agentic tier)")
     # Not the flag to reach for when scaffolding into a repository that already

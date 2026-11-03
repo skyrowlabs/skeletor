@@ -3479,7 +3479,17 @@ mis-shaped, which is the line this repository already draws.
 
 ### Badges
 
-Two, and only when `--org` names a real owner. Neither one *stores* a value,
+**A badge that reads GitHub only works for a public repository.** For a private
+one, shields' `github/*` endpoints answer "repo not found" and Actions'
+`badge.svg` answers 404, to anonymous readers only. The owner is logged in and
+sees every badge render, so the person who could fix it never sees the problem.
+skyrow-workspace found it in 10 of 14 READMEs (`skyrow-workspace@358d437`).
+`--visibility` therefore defaults to `private`, which renders one static
+`repo: private` badge: that wrong guess is visible to the owner, and the other
+one is not. A repository that goes public changes the value with
+`skeletor-upgrade --set-arg --visibility=public`.
+
+For a public repository: two, and only when `--org` names a real owner. Neither one *stores* a value,
 which is the whole constraint: a hard-coded `version-0.1.0` badge would be a
 third home for a number whose first two are the git tag and `VERSION`, and
 Release Please bumps both without ever touching the README — correct until the

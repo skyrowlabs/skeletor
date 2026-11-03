@@ -3449,7 +3449,7 @@ def versioning_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: boo
 
 
 def badge_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
-    """`--org` decides whether the README carries badges, and the default is none.
+    """`--org` decides whether the README carries badges, `--visibility` which ones.
 
     Both halves are the check, and the absent half is the one that matters. A
     badge names a repository; the `--org` default names one that does not exist,
@@ -3491,7 +3491,7 @@ def badge_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     started = time.time()
     code, output = run(
         [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Badged", "--slug", "badged", "--tagline", "t",
-         "--cli", CLI_NAME, "--tier", tier, "--language", "both", "--org", "acme",
+         "--cli", CLI_NAME, "--tier", tier, "--language", "both", "--org", "acme", "--visibility", "public",
          "--release-branch", "trunk", "--no-git"],
         cwd=workdir,
     )
@@ -3515,6 +3515,27 @@ def badge_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
             not missing,
             time.time() - started,
             f"missing from README: {missing}" if missing else readme[:400],
+        )
+    )
+
+    # The default visibility is private, and a private row must name no URL
+    # that GitHub serves: shields' `github/*` and Actions' own `badge.svg` both
+    # 404 for an anonymous reader and render for the owner, so only this sees it.
+    hidden = workdir / "badged-private"
+    started = time.time()
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(hidden), "--allow-dirty", "--name", "Badged", "--slug", "badged",
+         "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--org", "acme", "--no-git"],
+        cwd=workdir,
+    )
+    head = (hidden / "README.md").read_text()[:400] if code == 0 else output
+    leaks = [n for n in ("img.shields.io/github/", "/badge.svg", "github.com/acme") if n in head]
+    results.append(
+        Result(
+            "badges: private by default, and nothing GitHub would have to serve",
+            code == 0 and head.startswith("# Badged\n\n![repo: private](") and not leaks,
+            time.time() - started,
+            f"leaks: {leaks}\n{head}" if leaks else head,
         )
     )
 

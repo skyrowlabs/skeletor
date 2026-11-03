@@ -83,7 +83,8 @@ bin/skeletor-new ../<target-dir> \
   --release-branch main \
   --python 3.12 \
   --line-length 120 \
-  --org my-github-org
+  --org my-github-org \
+  --visibility private
 ```
 
 For `--tier agentic`, also pass `--timezone America/Chicago` (or wherever the
