@@ -118,9 +118,8 @@ Never commit directly to `{{RELEASE_BRANCH}}`.
 
 CI jobs are gated by cost: a draft PR carrying code runs the cheap ones and skips the
 expensive ones, and a docs-only PR runs the gate and the unit suite whether it is draft or
-ready — that
-is the other rule, and it decides first. `.github/scripts/docs-only.cjs` decides both, and
-is the only place that does; `ci.yml` says which job is in which class.
+ready — that is the other rule, and it decides first. `.github/scripts/docs-only.cjs`
+decides both, and is the only place that does; `ci.yml` says which job is in which class.
 
 This named the five jobs by name for one release, which is a claim about *your* workflow
 rather than about the rule — a tree that had renamed or dropped one got a sentence that was
