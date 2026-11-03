@@ -17,6 +17,7 @@ and the second person to need it writes it again.
 | `{{CLI}} bug`    | Capture an out-of-scope defect without widening scope |
 | `{{CLI}} task`   | Capture small work that is not a defect              |
 | `{{CLI}} doctor` | Account facts no file can state (release PRs, required checks) |
+| `{{CLI}} settings` | Set GitHub settings to `scripts/repo_settings.py`; previews unless `--apply` |
 | `{{CLI}} inbox`  | Every open capture per lane, and every job at its cap |
 
 Run `./{{CLI}} <group> --help` for the current commands — the help is generated

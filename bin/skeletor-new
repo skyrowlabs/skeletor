@@ -246,6 +246,8 @@ def substitutions(args) -> Dict[str, str]:
         "PROJECT_NAME": args.name or slug.replace("-", " ").replace(".", " ").title(),
         "PROJECT_SLUG": slug,
         "TAGLINE": args.tagline,
+        # The tagline as a python string literal, for the one file that holds it as data.
+        "TAGLINE_PY": json.dumps(args.tagline, ensure_ascii=False),
         "BADGES": badges(args, slug),
         "CLI": cli,
         "CLI_ENV_PREFIX": prefix,

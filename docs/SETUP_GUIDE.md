@@ -187,6 +187,12 @@ gh repo create <org>/<slug> --private --source=. --push
 git switch -c develop && git push -u origin develop
 ```
 
+Then the repository's own settings: merge method, branch deletion, auto-merge,
+wiki, Dependabot alerts, and secret scanning where the repository is public.
+They are declared in `scripts/repo_settings.py`, each with its reason.
+`./<cli> settings` lists what differs and `./<cli> settings --apply` writes it
+(an admin token is needed). `./<cli> doctor` reports each one afterwards.
+
 Then set branch protection. **The rules here are counter-intuitive and cost real
 money if you get them backwards:**
 
