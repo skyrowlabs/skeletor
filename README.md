@@ -256,7 +256,7 @@ by hand get provenance only, through `bin/skeletor-components report`.
 
 ```bash
 bin/skeletor-upgrade ../my-project --dry-run       # what would change; writes nothing
-bin/skeletor-upgrade ../my-project --rehearse      # ...then your own gates, before and after
+bin/skeletor-upgrade ../my-project --rehearse      # ...then your own gates and hooks, before and after
 bin/skeletor-upgrade ../my-project --ref v0.57.1   # apply, rendering from a released tag
 ```
 

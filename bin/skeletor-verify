@@ -10815,6 +10815,11 @@ def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
     matching absolute path parts read every file as skipped (sky.boss). The
     third run commits a failing test of the tree's own first, so the gate is red
     on both sides and only the failing test IDs can name what the release added.
+
+    The hook case ships a `language: fail` hook aimed at README.md, which the
+    tree already has: `check pre-push` never runs it, so only the hook rehearsal
+    can name it (mind.head). Every other hook is skipped, read from the tree's
+    own config, so no hook environment is installed from cold.
     """
     started = time.time()
     own = workdir / "rehearse-skeletor"
@@ -10838,16 +10843,24 @@ def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
         "def test_probe():\n    assert {}\n"
     )
     beside = 'any(p.name == "rehearse" for p in Path(__file__).resolve().parents)'
+    hooks_config = own / "template" / "core" / ".pre-commit-config.yaml"
+    shipped_hooks = hooks_config.read_text(encoding="utf-8")
+    plant = (
+        "\n  - repo: local\n    hooks:\n      - id: rehearsal-plant\n        name: rehearsal plant\n"
+        "        entry: a hook this release adds refuses\n        language: fail\n        files: ^README\\.md$\n"
+    )
+    skip = ",".join(re.findall(r"^\s*- id: (\S+)", (tree / ".pre-commit-config.yaml").read_text(), re.M))
 
-    def release(verdict: str) -> None:
+    def release(verdict: str, hook: bool = False) -> None:
         probe.write_text(body.format(verdict), encoding="utf-8")
+        hooks_config.write_text(shipped_hooks + (plant if hook else ""), encoding="utf-8")
         git_in(own, "add", "-A")
         git_in(own, "commit", "--quiet", "-m", f"scratch: a template test that asserts {verdict}")
 
     def rehearse() -> Tuple[int, str]:
         done = subprocess.run(
             [sys.executable, str(own / "bin" / "skeletor-upgrade"), str(tree), "--rehearse", "--allow-untagged"],
-            cwd=tree, capture_output=True, text=True, timeout=1800,
+            cwd=tree, capture_output=True, text=True, timeout=1800, env={**os.environ, "SKIP": skip},
         )
         return done.returncode, done.stdout + done.stderr
 
@@ -10866,7 +10879,11 @@ def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
         release(verdict)
         code, output = rehearse()
         named = "turns 1 gate(s) red" in output and "· unit tests" in output
-        quiet = "none it turned red" in output and "applied with:" in output
+        quiet = (
+            "none it turned red" in output
+            and "pre-commit hook(s) over every tracked file, none it turned red" in output
+            and "applied with:" in output
+        )
         ok = untouched() and (code == 1 and named if wants_red else code == 0 and quiet)
         label = (
             "a release that fails a test names `unit tests`"
@@ -10877,6 +10894,22 @@ def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
                               "" if ok else f"exit {code}, untouched={untouched()}\n{output[-2500:]}"))
 
     started = time.time()
+    release(beside, hook=True)
+    landed = "rehearsal-plant" in git_in(own, "show", "HEAD", "--", str(hooks_config))[1]
+    code, output = rehearse()
+    ok = (
+        landed
+        and untouched()
+        and code == 1
+        and "turns 1 pre-commit hook(s) red" in output
+        and "· rehearsal plant" in output
+        and "README.md" in output
+    )
+    results.append(Result("rehearse: a hook the release adds, red over an existing file, is named with the file",
+                          ok, time.time() - started, "" if ok else f"exit {code}, landed={landed}\n{output[-2500:]}"))
+
+    started = time.time()
+    release(failing)
     (tree / "tests" / "test_adopter_red.py").write_text(body.format(failing), encoding="utf-8")
     git_in(tree, "add", "tests/test_adopter_red.py")
     git_in(tree, "commit", "--quiet", "-m", "test: a failure of the tree's own")

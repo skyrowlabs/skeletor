@@ -2263,6 +2263,64 @@ def gate_table(tree: Path, quick: bool) -> Tuple[Optional[Dict[str, bool]], str]
     return (table or None), output
 
 
+_HOOK_ROW = re.compile(r"^(.+?)\.{3,}(?:\([^)]*\))?(Passed|Failed|Skipped)$")
+
+
+def hook_table(tree: Path) -> Tuple[Optional[Dict[str, bool]], Dict[str, List[str]], str]:
+    """`({hook: passed}, {hook: its output}, output)` from `pre-commit run --all-files`; `None` if it cannot run.
+
+    `check pre-push` runs the linters directly and no other hook, so a hook a
+    release adds never meets the tree's existing files there: mind.head's key
+    fixtures passed every gate and refused every commit touching them. All
+    files, because a later commit of any one of them meets the hook whole.
+    Tracked files only, as pre-commit reads them. Fixers rewrite; callers reset.
+    """
+    binary = tree / ".venv" / "bin" / "pre-commit"
+    if not binary.exists():
+        return None, {}, f"no {binary.relative_to(tree)} to run the hooks with"
+    env = {**os.environ, "PATH": f"{binary.parent}{os.pathsep}{os.environ.get('PATH', '')}"}
+    try:
+        done = subprocess.run([str(binary), "run", "--all-files", "--color", "never"], cwd=tree, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=3600)
+    except subprocess.TimeoutExpired:
+        return None, {}, "pre-commit ran past an hour"
+    table: Dict[str, bool] = {}
+    blocks: Dict[str, List[str]] = {}
+    current = None
+    for line in done.stdout.splitlines():
+        row = _HOOK_ROW.match(line.rstrip())
+        if row:
+            current = row.group(1).strip()
+            table[current] = row.group(2) != "Failed"
+            blocks[current] = []
+        elif current is not None and line.strip():
+            blocks[current].append(line.rstrip())
+    return (table or None), blocks, done.stdout
+
+
+def report_hooks(
+    before: Optional[Dict[str, bool]], after: Optional[Dict[str, bool]], blocks: Dict[str, List[str]], logs: Path
+) -> int:
+    """Say which pre-commit hooks this upgrade turns red over existing files; 1 when any does or either run failed."""
+    if before is None or after is None:
+        say("⚠️ ", f"rehearsal: the pre-commit hooks did not run {'before' if before is None else 'after'} "
+                   "the upgrade, so nothing is known about them")
+        detail(f"Their output is in {logs}.")
+        return 1
+    turned = [hook for hook, ok in after.items() if not ok and before.get(hook, True)]
+    if not turned:
+        say("✅", f"rehearsal: {len(after)} pre-commit hook(s) over every tracked file, none it turned red")
+        return 0
+    say("❌", f"rehearsal: the upgrade turns {len(turned)} pre-commit hook(s) red over files you already have")
+    for hook in turned:
+        detail(f"· {hook}")
+        for line in blocks.get(hook, [])[:10]:
+            detail(f"    {line}")
+    detail("A commit touching any file named there is refused until it is fixed or excluded beside the hook.")
+    detail(f"Full output: {logs / 'hooks-after.log'}")
+    return 1
+
+
 def rehearsal_argv(argv: List[str], target: str) -> List[str]:
     """This run's arguments minus the target and the flags that make it a rehearsal."""
     out, dropped = [], False
@@ -2323,10 +2381,13 @@ def rehearse(args: argparse.Namespace) -> int:
                 (stage_tree / borrowed).symlink_to(target / borrowed)
         mode = " ".join(passthrough) or "no flags"
         where = "beside the tree" if stage.parent == target.parent else f"under {stage.parent}"
-        say("🎭", f"rehearsal: `check pre-push{' --quick' if args.quick else ''}` before and after, in a worktree "
-                  f"{where}; the upgrade is applied with: {mode}")
+        say("🎭", f"rehearsal: `check pre-push{' --quick' if args.quick else ''}` and the pre-commit hooks "
+                  f"before and after, in a worktree {where}; the upgrade is applied with: {mode}")
         before, before_out = gate_table(stage_tree, args.quick)
         failing_before = failing_tests(stage_tree)
+        hooks_before, _, hooks_before_out = hook_table(stage_tree)
+        # Fixer hooks rewrote files; the upgrade must meet the tree as it was.
+        subprocess.run(["git", "-C", str(stage_tree), "reset", "--hard", "--quiet"], capture_output=True)
         applied = subprocess.run([*me, str(stage_tree), *passthrough, "--json"], capture_output=True, text=True)
         changed = subprocess.run(
             ["git", "-C", str(stage_tree), "status", "--porcelain"], capture_output=True, text=True
@@ -2339,14 +2400,19 @@ def rehearse(args: argparse.Namespace) -> int:
             return forecast.returncode or (1 if applied.returncode else 0)
         after, after_out = gate_table(stage_tree, args.quick)
         failing_after = failing_tests(stage_tree)
+        hooks_after, hook_blocks, hooks_after_out = hook_table(stage_tree)
     finally:
         git("worktree", "remove", "--force", str(stage_tree))
         shutil.rmtree(stage, ignore_errors=True)
     (logs / "before.log").write_text(before_out, encoding="utf-8")
     (logs / "after.log").write_text(after_out, encoding="utf-8")
+    (logs / "hooks-before.log").write_text(hooks_before_out, encoding="utf-8")
+    (logs / "hooks-after.log").write_text(hooks_after_out, encoding="utf-8")
     held_back(applied.stdout)
     added = sorted(failing_after - failing_before)
-    return report_rehearsal(before, after, after_out, logs, added) or forecast.returncode
+    gates = report_rehearsal(before, after, after_out, logs, added)
+    hooks = report_hooks(hooks_before, hooks_after, hook_blocks, logs)
+    return gates or hooks or forecast.returncode
 
 
 def failing_tests(tree: Path) -> set:
@@ -2511,7 +2577,8 @@ def main() -> int:
         "--rehearse",
         action="store_true",
         help="the dry run, then the upgrade applied in a throwaway worktree with the tree's own "
-        "`check pre-push` run before and after it: which gates this release turns red. Writes nothing "
+        "`check pre-push` and `pre-commit run --all-files` before and after it: which gates and hooks "
+        "this release turns red. Writes nothing "
         "to the tree. Untracked files (tmp/, .env) are not carried into the rehearsal.",
     )
     parser.add_argument("--quick", action="store_true", help="with --rehearse: `check pre-push --quick`, no suites")
