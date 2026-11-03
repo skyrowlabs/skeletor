@@ -1,15 +1,13 @@
-# Default owner for everything.
-#
-# SCAFFOLD: if `{{ORG}}` is an organisation, GitHub rejects a bare `@{{ORG}}`
-# on every line ("Unknown owner") and no review is ever requested — measured
-# on proto.pilot through `gh api repos/{owner}/{repo}/codeowners/errors`, five
-# errors for five lines. Name a team (`@{{ORG}}/<team>`) or a user, then
-# delete this note. A user account is accepted as rendered.
-*                           @{{ORG}}
+# Who reviews what. Rendered from `skeletor-new --owner`: a user (`@name`) or a
+# team (`@org/team`). A bare `@org` is rejected by GitHub ("Unknown owner") and
+# requests no review at all; proto.pilot had five such lines. Without `--owner`
+# every rule below is commented out, and `{{CLI}} doctor` reports that nobody owns
+# anything: uncomment them with a real owner.
+{{CODEOWNER_PREFIX}}*                           {{CODEOWNER}}
 
 # The governance layer. A change here changes how every other change is
 # reviewed, so it gets read even when the diff looks mechanical.
-/.claude/                   @{{ORG}}
-/.github/workflows/         @{{ORG}}
-/.pre-commit-config.yaml    @{{ORG}}
-/scripts/docs/              @{{ORG}}
+{{CODEOWNER_PREFIX}}/.claude/                   {{CODEOWNER}}
+{{CODEOWNER_PREFIX}}/.github/workflows/         {{CODEOWNER}}
+{{CODEOWNER_PREFIX}}/.pre-commit-config.yaml    {{CODEOWNER}}
+{{CODEOWNER_PREFIX}}/scripts/docs/              {{CODEOWNER}}

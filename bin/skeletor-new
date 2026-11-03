@@ -246,6 +246,7 @@ def substitutions(args) -> Dict[str, str]:
         "PROJECT_NAME": args.name or slug.replace("-", " ").replace(".", " ").title(),
         "PROJECT_SLUG": slug,
         "TAGLINE": args.tagline,
+        "CODEOWNER": args.owner or "@<user-or-org/team>",
         # Only a tree with a package.json has an npm ecosystem to update.
         "DEPENDABOT_NPM": (
             "\n\n  - package-ecosystem: npm\n    directory: /\n    schedule:\n      interval: monthly\n"
@@ -254,6 +255,7 @@ def substitutions(args) -> Dict[str, str]:
             if args.language in ("node", "both")
             else ""
         ),
+        "CODEOWNER_PREFIX": "" if args.owner else "# ",
         # The tagline as a python string literal, for the one file that holds it as data.
         "TAGLINE_PY": json.dumps(args.tagline, ensure_ascii=False),
         "BADGES": badges(args, slug),
@@ -984,7 +986,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--org",
         default=ORG_UNSET,
-        help="the GitHub owner: CODEOWNERS, and the README badges, which are omitted without it",
+        help="the GitHub owner the README badges name; they are omitted without it",
+    )
+    parser.add_argument(
+        "--owner",
+        # Empty rather than None: a None is never recorded, and an upgrade must replay it.
+        default="",
+        help=(
+            "who CODEOWNERS requests review from: @user or @org/team (a bare @org is rejected by "
+            "GitHub). Without it the rules ship commented out and `doctor` reports the gap"
+        ),
     )
     parser.add_argument(
         "--visibility",
@@ -1403,6 +1414,13 @@ def main() -> int:
             f"❌ --shell-package {name!r} is not usable. It must be a python identifier that is not "
             "a keyword — the tree imports it by name — and must not be a path this template already "
             f"ships at the root: {', '.join(sorted(taken))}."
+        )
+        return 1
+
+    if args.owner and not re.fullmatch(r"@[A-Za-z0-9-]+(/[A-Za-z0-9._-]+)?", args.owner):
+        print(
+            f"❌ --owner {args.owner!r} is not an owner CODEOWNERS accepts. Give `@user` or "
+            "`@org/team`; a bare organisation is rejected by GitHub and requests no review."
         )
         return 1
 

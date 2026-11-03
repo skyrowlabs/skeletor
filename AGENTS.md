@@ -99,8 +99,10 @@ work against, and no `regen-docs` merge driver, whose definition lives in
 Add `--org <github-org>` if you know it, and `--timezone <tz>` for the agentic
 tier. With `--org`, pass `--visibility public` if the repository is public: the
 default, `private`, ships a static `repo: private` badge instead of release and
-CI badges, which an anonymous reader of a private repository cannot load. Full
-flags: `skeletor-new --help`.
+CI badges, which an anonymous reader of a private repository cannot load. At
+`governed` and above, pass `--owner @user` or `--owner @org/team` for
+CODEOWNERS. A bare organisation requests no review, and without the flag the
+rules ship commented out. Full flags: `skeletor-new --help`.
 
 **Check whether the repository already has a `cli/` before you run it.** The
 shell's package ships under that name, which is the most collided-with directory

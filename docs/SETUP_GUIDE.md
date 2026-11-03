@@ -84,6 +84,7 @@ bin/skeletor-new ../<target-dir> \
   --python 3.12 \
   --line-length 120 \
   --org my-github-org \
+  --owner @my-github-org/maintainers \
   --visibility private
 ```
 
