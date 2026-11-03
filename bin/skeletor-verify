@@ -9705,6 +9705,44 @@ def maintain_summary_gate() -> List[Result]:
     ]
 
 
+def new_flag_gate(workdir: Path) -> List[Result]:
+    """A flag the record predates is announced, and `--set-arg` can set it on that run.
+
+    v0.61.0's `--visibility` entered all seven adopters' records at its default
+    with nothing on screen, and `--set-arg` refused it until a second upgrade had
+    recorded it (stash.flow, sky.boss). Simulated by deleting a default-valued
+    flag from a fresh record, which leaves the base render unchanged.
+    """
+    started = time.time()
+    result, tree = scaffold("core", "python", workdir, name="new-flag")
+    if not result.ok:
+        return [Result(f"new flag: {result.label}", False, result.seconds, result.output)]
+    manifest = tree / ".skeletor.json"
+    record = json.loads(manifest.read_text(encoding="utf-8"))
+    if record["args"][-2:] != ["--timezone", "UTC"]:
+        return [Result("new flag: the record no longer ends --timezone UTC; the plant cannot land", False,
+                       time.time() - started, str(record["args"]))]
+    record["args"] = record["args"][:-2]
+    manifest.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    run(["git", "commit", "-qam", "plant: a record that predates --timezone"], cwd=tree)
+    upgrade = [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--dry-run",
+               "--from-dir", str(SKELETOR)]
+    results = []
+    code, output = run(upgrade, cwd=tree)
+    results.append(Result("new flag: a defaulted flag the record lacks is announced",
+                          code == 0 and "📌 new flag --timezone=UTC" in output, time.time() - started, output))
+    started = time.time()
+    code, output = run(upgrade + ["--set-arg", "--timezone=America/Chicago"], cwd=tree)
+    results.append(Result("new flag: --set-arg sets it on the run that introduces it",
+                          code == 0 and "not recorded; the new default" in output and "📌" not in output,
+                          time.time() - started, output))
+    started = time.time()
+    code, output = run(upgrade + ["--set-arg", "--no-such-flag=x"], cwd=tree)
+    results.append(Result("new flag: a flag the template does not ship is still refused",
+                          code != 0 and "does not ship it either" in output, time.time() - started, output))
+    return results
+
+
 def upstream_record_gate() -> List[Result]:
     """The public record carries no pointer into a private checkout.
 
@@ -11443,6 +11481,7 @@ def main() -> int:
         venv_python = make_venv(workdir, args.quiet)
         results.append(shadow_gate(workdir, venv_python))
         results.append(dirty_scope_gate(workdir))
+        results += new_flag_gate(workdir)
         results.append(coverage_gate(workdir, venv_python))
         pyright_ok, pyright_note = warm_pyright(venv_python)
         if not args.quiet:

@@ -78,6 +78,8 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -1463,7 +1465,21 @@ RENAMES_A_PATH = {"--shell-package"}
 CLI_RENAME = "--cli"
 
 
-def set_args(recorded: List[str], args) -> Tuple[List[str], Dict[str, Tuple[str, str]]]:
+def head_flag_defaults(head_src: Path) -> Dict[str, str]:
+    """Every value-taking flag the head scaffolder parses, with its default as recorded."""
+    loader = importlib.machinery.SourceFileLoader("_head_skeletor_new", str(head_src / "bin" / "skeletor-new"))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return {
+        action.option_strings[0]: "" if action.default is None else str(action.default)
+        for action in module.build_parser()._actions
+        if action.option_strings and action.nargs != 0
+    }
+
+
+def set_args(
+    recorded: List[str], args, head_src: Optional[Path] = None
+) -> Tuple[List[str], Dict[str, Tuple[str, str]]]:
     """The arguments the HEAD render uses, with `--set-arg` applied.
 
     ## The gap
@@ -1545,11 +1561,20 @@ def set_args(recorded: List[str], args) -> Tuple[List[str], Dict[str, Tuple[str,
             )
         if flag == CLI_RENAME and not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", value):
             die(f"--cli {value!r} is not a name a wrapper file can take: lowercase letters, digits, - and _")
+        if flag not in updated and head_src is not None:
+            # A flag the head template ships and the record predates: the run
+            # that introduces it is the one that must be able to set it, or the
+            # default is recorded first and overriding it costs a second upgrade.
+            known = head_flag_defaults(head_src)
+            if flag in known:
+                updated += [flag, value]
+                applied[flag] = (f"{known[flag]} (not recorded; the new default)", value)
+                continue
         if flag not in updated:
             die(
                 f"{flag} is not among this tree's recorded arguments, so there is nothing to change.\n"
                 f"   Recorded: {' '.join(sorted(a for a in updated if a.startswith('--')))}\n"
-                "   A flag the record does not carry arrives by upgrading to a template that ships it."
+                "   The template this run renders does not ship it either."
             )
         index = updated.index(flag) + 1
         applied[flag] = (updated[index], value)
@@ -2704,7 +2729,7 @@ def main() -> int:
         # above rendered from `recorded` and must keep doing so: it is the
         # statement of how this tree was actually made, and every classification
         # in this tool is a comparison against it.
-        ours_args, set_args_applied = set_args(recorded, args)
+        ours_args, set_args_applied = set_args(recorded, args, head_src)
         if set_args_applied:
             say("→", f"{len(set_args_applied)} argument(s) changed for this render")
             for flag, (was, now) in sorted(set_args_applied.items()):
@@ -2739,6 +2764,14 @@ def main() -> int:
             return 0
         if set_args_applied:
             report_reach(head_src, recorded, workdir, target, hashes, head_files, set_args_applied)
+        # A flag the head render records and this tree's record lacks is a
+        # decision taken by default; say so, since nothing else on screen will.
+        head_args = json.loads((head_tree / MANIFEST_NAME).read_text(encoding="utf-8")).get("args") or []
+        for index, flag in enumerate(head_args):
+            if flag.startswith("--") and flag not in recorded and flag not in set_args_applied:
+                value = head_args[index + 1] if index + 1 < len(head_args) and not head_args[index + 1].startswith("--") else ""
+                say("📌", f"new flag {flag}{'=' + value if value else ''}: not in this tree's record, so its default applies")
+                detail(f"If that is wrong for this tree, set it on this run: --set-arg {flag}=<value>")
 
         # Where the render's own source stands, said plainly, because until now
         # this report answered "is it dirty" and nothing else — and committing
