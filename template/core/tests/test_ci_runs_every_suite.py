@@ -118,6 +118,10 @@ def test_coverage_is_measured_over_the_registrys_scheduled_suites():
         if "--cov" not in text or path.name == "ci.yml":
             continue
         assert REGISTRY_LOOP in text, f"{path.name} measures coverage over a list of its own"
+        read_first = re.search(r"^\s*suites=\$\(.*" + re.escape(REGISTRY_LOOP), text, re.M)
+        assert (
+            read_first and '[ -n "$suites" ]' in text
+        ), f"{path.name} loops over the registry without failing when it cannot be read (stash.flow)"
         assert f"--suite {commands.SCHEDULED_KEY}" in text, f"{path.name} checks coverage under another key"
         unscheduled = sorted(selections(text) - scheduled)
         assert not unscheduled, f"{path.name} measures suites the registry does not schedule: {unscheduled}"
