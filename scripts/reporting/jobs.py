@@ -354,6 +354,22 @@ JOBS: list[Job] = [
 # rule sits at the bottom of it rather than at the top.
 
 
+# skeletor's weekly maintenance pass, scheduled where the other jobs are rather
+# than by a systemd timer (docs/MAINTENANCE.md). Monday, after pins.yml posts.
+JOBS += [
+    Job(
+        key="maintain",
+        module="maintain",
+        cadence="Mon 08:47",
+        cron="47 8 * * 1",
+        writes="—",
+        commits=True,
+        heartbeat_var="HEARTBEAT_MAINTAIN",
+        agent=False,
+    )
+]
+
+
 # ── Skeletor's again below this line ─────────────────────────────────────────
 #
 # The space is bounded on both sides for the reason `scripts/paths.py` measures:
