@@ -107,3 +107,8 @@ def test_the_labels_dependabot_applies_are_read_from_its_config(tmp_path):
     )
     assert scanned(repo_settings.dependabot_labels(config), "labels", least=2) == ["dependencies", "ci"]
     assert repo_settings.dependabot_labels(tmp_path / "absent.yml") == []
+    config.write_text(
+        "updates:\n  - package-ecosystem: pip\n    labels:\n      - dependencies\n      - 'ci'\n    schedule:\n",
+        encoding="utf-8",
+    )
+    assert repo_settings.dependabot_labels(config) == ["dependencies", "ci"], "block style must be read too"
