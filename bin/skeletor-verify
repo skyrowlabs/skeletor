@@ -1131,6 +1131,33 @@ console.log(JSON.stringify(out));
 """
 
 
+def dependabot_config_gate(tree: Path) -> Result:
+    """The rendered dependabot.yml has a cooldown everywhere and ignores exactly the double-pinned lint tools.
+
+    Asked here, of the render, and not by the tree: a tree may own its
+    dependabot.yml (`skeletor-upgrade --own`), and a tree test reading that file
+    was red in sky.boss, whose own config labels nothing.
+    """
+    started = time.time()
+    config = (tree / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+    config = "\n".join(line.split("#", 1)[0] for line in config.splitlines())
+    entries = re.split(r"^  - package-ecosystem:", config, flags=re.MULTILINE)[1:]
+    parity = (tree / "tests" / "test_lint_tool_parity.py").read_text(encoding="utf-8")
+    tools = re.search(r"^TOOLS = (\{.*\})$", parity, re.MULTILINE)
+    problems = []
+    if not entries or not tools:
+        problems.append(f"found {len(entries)} ecosystems and {'a' if tools else 'no'} TOOLS map: nothing to check")
+    else:
+        wanted = set(ast.literal_eval(tools.group(1)).values())
+        problems += [f"{e.split()[0]}: no cooldown" for e in entries if "cooldown:" not in e]
+        pip = next((e for e in entries if e.split()[0] == "pip"), "")
+        ignored = set(re.findall(r"dependency-name:\s*(\S+)", pip))
+        if ignored != wanted:
+            problems.append(f"pip ignores {sorted(ignored)}; the lint parity test pins {sorted(wanted)}")
+    return Result("dependabot.yml: a cooldown on every ecosystem, and the double-pinned lint tools ignored",
+                  not problems, time.time() - started, "\n".join(problems))
+
+
 def dependabot_hold_gate(tree: Path) -> Result:
     """`dependabot-hold.cjs` merges a patch or minor bump and holds every case jam.sense learned to hold."""
     started = time.time()
@@ -11715,6 +11742,7 @@ def main() -> int:
             results.append(gate)
 
         results.append(dependabot_hold_gate(workdir / f"{fullest}-python"))
+        results.append(dependabot_config_gate(workdir / f"{fullest}-python"))
         for gate in gating_gate(fullest, workdir):
             results.append(gate)
 
