@@ -9,6 +9,8 @@
 # on the same file is otherwise unexplainable.
 
 click>=8.1
+# scripts/rehearse_scheduled.py reads workflows with it.
+pyyaml>=6.0
 
 pytest>=8.0
 pytest-timeout>=2.3

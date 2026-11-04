@@ -184,6 +184,23 @@ def merge_drivers() -> None:
     sys.exit(script("scripts/git/install_merge_drivers.py", "--check"))
 
 
+@check.command()
+@click.option("--plan", is_flag=True, help="print what would run, run nothing")
+@click.option("--workflow", "workflows", multiple=True, help="one workflow file name; repeatable")
+@click.option("--keep", is_flag=True, help="leave the worktree and venv behind")
+def scheduled(plan: bool, workflows: tuple, keep: bool) -> None:
+    """Rehearse each scheduled workflow here: a worktree at HEAD, a clean venv.
+
+    No pull request runs a scheduled job, so this is the only way to see one
+    pass before its first night. scripts/rehearse_scheduled.py says what it
+    can and cannot stand in for.
+    """
+    args = ["--plan"] * plan + ["--keep"] * keep
+    for name in workflows:
+        args += ["--workflow", name]
+    sys.exit(script("scripts/rehearse_scheduled.py", *args))
+
+
 @check.command(name="pre-push")
 @click.option("--quick", is_flag=True, help="lint and docs only — skip the test suites")
 def pre_push(quick: bool) -> None:

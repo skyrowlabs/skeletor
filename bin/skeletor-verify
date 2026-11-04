@@ -730,6 +730,10 @@ def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
         results.append(Result(f"{CLI_NAME} {' '.join(command)}", code == 0, time.time() - started, output))
 
     results.append(check_docs_gate_sees_the_tree(tree))
+    # Every scheduled workflow this configuration ships reads as a plan.
+    started = time.time()
+    code, output = run([f"./{CLI_NAME}", "check", "scheduled", "--plan"], cwd=tree)
+    results.append(Result(f"{CLI_NAME} check scheduled --plan", code == 0, time.time() - started, output))
     results += check_empty_suite_is_not_red(tree, venv_python)
     results.append(check_upgrade_is_noop(tree))
     results.append(check_upgrade_json_is_pure(tree))
@@ -4485,6 +4489,42 @@ def cron_notice_gate(workdir: Path) -> List[Result]:
     ok = "report cron --check" not in quiet and f"would change {registry}" in loud and "report cron --check" in loud
     return [Result("cron notice: a changed job registry names `report cron --check`, an unchanged one does not",
                    ok, time.time() - started, f"--- current ---\n{quiet[-600:]}\n--- moved ---\n{loud[-900:]}")]
+
+
+def scheduled_rehearsal_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """The nightly rehearses green in a clean venv, and a dependency only it needs is caught.
+
+    No pull request runs a scheduled job (sky.boss). The plant drops `pytest-cov`
+    from the requirements: the grid's shared venv still has it, so the tree's own
+    suite stays green, and only the rehearsal's clean venv can see the gap.
+    """
+    started = time.time()
+    result, tree = scaffold("governed", "python", workdir, name="scheduled")
+    if not result.ok:
+        return [Result(f"scheduled rehearsal: {result.label}", False, result.seconds, result.output)]
+    (tree / ".venv").symlink_to(venv_python.parents[1])
+    rehearse = [f"./{CLI_NAME}", "check", "scheduled"]
+    code, green = run(rehearse, cwd=tree)
+    results = [Result("scheduled rehearsal: a fresh governed tree's nightly passes in a clean venv",
+                      code == 0 and "rehearsed green" in green, time.time() - started, green[-1500:])]
+    requirements = tree / "scripts" / "requirements.txt"
+    text = requirements.read_text(encoding="utf-8")
+    planted = "\n".join(line for line in text.splitlines() if not line.startswith("pytest-cov")) + "\n"
+    if planted == text:
+        return results + [Result("scheduled rehearsal: the plant found no pytest-cov line", False, 0.0, text)]
+    requirements.write_text(planted, encoding="utf-8")
+    git_in(tree, "commit", "-qam", "plant: the nightly's coverage plugin is not installed")
+    started = time.time()
+    code, red = run(rehearse, cwd=tree)
+    suite, unit = run([str(venv_python), "-m", "pytest", "tests/", "-m", "unit", "-q"], cwd=tree,
+                      env_extra={"PYTHONPATH": str(tree)})
+    caught = code == 1 and "unrecognized arguments: --cov" in red and suite == 0
+    worktrees = git_in(tree, "worktree", "list")[1].strip().splitlines()
+    results.append(Result("scheduled rehearsal: a dependency only the nightly needs is red here and nowhere else",
+                          caught, time.time() - started, f"{red[-1500:]}\n--- unit ---\n{unit[-400:]}"))
+    results.append(Result("scheduled rehearsal: leaves no worktree registered", len(worktrees) == 1, 0.0,
+                          "\n".join(worktrees)))
+    return results
 
 
 def pending_added_gate(workdir: Path) -> List[Result]:
@@ -12009,6 +12049,7 @@ def main() -> int:
         results += owned_gate(workdir)
         results += pending_added_gate(workdir)
         results += cron_notice_gate(workdir)
+        results += scheduled_rehearsal_gate(workdir, venv_python)
         for gate in sidecar_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)

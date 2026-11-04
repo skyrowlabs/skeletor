@@ -224,3 +224,19 @@ Full rules: [`docs/rules/output.md`](rules/output.md).
 Step 3 matters more than it looks. A local venv that has drifted from CI's
 pinned interpreter produces failures that exist in one environment and not the
 other, and the tool names are identical, so the version never occurs to anyone.
+
+### A scheduled workflow
+
+No pull request runs a job triggered by `schedule:`, so its first real run is
+the night after the merge. Run it here first:
+
+```bash
+./{{CLI}} check scheduled --plan   # what would run, and where it would stop
+./{{CLI}} check scheduled          # run it: a worktree at HEAD, a clean venv
+```
+
+A clean venv is the point. A dependency only that job needs is missing there
+and present in your `.venv`, so the rehearsal fails and your own suite passes.
+What it cannot stand in for (another action, a secret, a condition beyond
+`github.event_name`) stops the job, and the job is reported as not rehearsed,
+never as passing. `scripts/rehearse_scheduled.py` has the rules.
