@@ -265,6 +265,10 @@ it would do is commit somebody's work in progress.
 
 ### Weekly, on this machine
 
+**This checkout schedules it through its own job registry**: skeletor is a
+scaffold of itself at `agentic`, and `skel report maintain` is the job, installed
+with `./skel report cron --install`. The timer below is for a checkout that is not.
+
 A systemd **user** timer. No root, no secret anywhere, and nothing about the
 repository has to change.
 

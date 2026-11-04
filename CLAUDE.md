@@ -98,7 +98,7 @@ tree and running that tree's own gates. A scaffold whose first check is red
 teaches the user that red is normal, so "a fresh tree passes its own gates" is
 the definition of done here.
 
-**This repository is also a scaffold of itself, at `core`.** `cli/`, `scripts/`,
+**This repository is also a scaffold of itself, at `agentic`.** `cli/`, `scripts/`,
 `tests/`, `./skel` and the root workflows are a render of `template/`, recorded
 in `.skeletor.json`, so `./skel check pre-push` holds skeletor to the rules it
 ships, and an upgrade here is the first adopter's upgrade. Three things keep the
@@ -111,6 +111,10 @@ two roles apart:
 - Upgrade from a released tag only, `bin/skeletor-upgrade . --ref <tag>`, so a
   broken HEAD cannot upgrade itself into the breakage. Edit `template/`, never
   the render; the render follows at the next tag.
+
+One scheduled job is switched on here: `maintain`, appended in `jobs.py`'s seam,
+runs `bin/skeletor-maintain --agent` on Mondays (Jeston, 2026-11-04). The jobs a
+fresh tree turns on are off in `scripts/reporting_schedule_allowlist.yaml`.
 
 `bin/skeletor-verify` remains the test of the template. The self-tree's suite
 tests this checkout, which is one configuration, already adopted.
