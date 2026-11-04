@@ -155,37 +155,89 @@ def report_stale(stale: List[Path], target: Path, because: List[str]) -> None:
         detail(f"… and {len(stale) - 10} more")
 
 
-#: The upgrade report, written beside the sidecars by every real run and replaced
-#: by the next. Its sections are the one copy of the format: this tool fills the
-#: mechanical ones and each judgment section carries its own prompt, so a session
-#: upgrading the tree in or out of a round writes the same report. A file of
-#: yours by this name in `tmp/upgrade/` is overwritten; nothing else there is.
+#: The upgrade report, written beside the sidecars by every real run. Its
+#: sections are the one copy of the format, matching the workspace round's
+#: contract: this tool fills what it can count and each judgment section carries
+#: its own prompt. A file of yours by this name in `tmp/upgrade/` is overwritten.
 REPORT_NAME = "REPORT.md"
 
-#: `(heading, prompt)` for the sections this tool cannot fill, in report order;
-#: `None` marks where the mechanical sections go.
+#: `(heading, prompt)` in report order; `None` marks a section this tool fills.
 REPORT_SECTIONS: Tuple[Tuple[str, Optional[str]], ...] = (
-    ("VERDICT", "One line: clean, ported or blocked, and on what."),
+    ("VERDICT", "One word: upgraded | upgraded-with-conflicts | blocked | declined."),
     ("METRICS", None),
     ("BRANCH", None),
     ("CONFLICTS", None),
-    ("GATES", "What the tree's gates said after this run, as run: `check pre-push`, `check scheduled`."),
-    ("FEEDBACK-FOR-SKELETOR", "Defects in the template or the upgrade, each with the file and line you verified."),
-    ("SUGGESTIONS", "Changes you would make, ranked, each with a recommendation."),
+    ("GATES", "What the tree's gates said after the upgrade, as run, and which went red because of it."),
+    (
+        "FEEDBACK-FOR-SKELETOR",
+        "Defects in the template or the upgrade, each line opening with a `[kebab-slug]` naming the defect,"
+        " and whether you ran or read it. Nothing rather than padding.",
+    ),
+    (
+        "SUGGESTIONS",
+        "Up to three things skeletor does not do that this tree built for itself, each slugged, with this"
+        " tree's evidence and what is specific to it. `none` rather than inventing one.",
+    ),
     ("FOR-THE-OWNER", "Decisions only this repository's owner can make. Empty is a fine answer."),
     ("NOTES", "Anything else worth keeping."),
 )
 
+#: The METRICS keys, each a `key: integer` line. One this tool cannot count is
+#: `<fill in>`, which a parser reads as unreported rather than as 0.
+REPORT_METRICS = ("conflicts", "gate-failures-on-arrival", "declines", "findings")
+UNFILLED = "<fill in>"
+CONFLICT_ENTRY = re.compile(r"^- `([^`]+)`:")
 
-def write_report(patches: Path, facts: Dict[str, List[str]], title: str) -> Path:
-    """`tmp/upgrade/REPORT.md`: the mechanical sections filled, the rest prompted."""
+
+def previous_report(patches: Path, title: str) -> Dict[str, List[str]]:
+    """The last report's sections, if it describes the same upgrade (`title`).
+
+    A `--ported` run is the same upgrade as the run it finishes, and replacing
+    that report wholesale made every conflicted upgrade read clean (proto.pilot).
+    """
+    report = patches / REPORT_NAME
+    lines = report.read_text(encoding="utf-8").splitlines() if report.exists() else []
+    if f"# Upgrade report: {title}" not in lines[:3]:
+        return {}
+    sections: Dict[str, List[str]] = {}
+    current = None
+    for line in lines:
+        if line.startswith("### "):
+            current = sections.setdefault(line[4:].strip(), [])
+        elif current is not None:
+            current.append(line)
+    return {heading: [line for line in body if line.strip()] for heading, body in sections.items()}
+
+
+def write_report(
+    patches: Path, title: str, pending: Dict[str, str], tally: str, branch: str, previous: Dict[str, List[str]]
+) -> Path:
+    """`tmp/upgrade/REPORT.md`: what this tool can count filled, the rest prompted or carried forward."""
+    conflicts = [f"- `{rel}`: {what}" for rel, what in pending.items()]
+    for line in previous.get("CONFLICTS", []):
+        found = CONFLICT_ENTRY.match(line)
+        if found and found.group(1) not in pending:
+            resolved = "resolved by hand after the first run"
+            conflicts.append(line if resolved in line else f"- `{found.group(1)}`: {resolved}")
+    carried = {}
+    for line in previous.get("METRICS", []):
+        key, _, value = line.partition(":")
+        if key.strip() in REPORT_METRICS and value.strip().isdigit():
+            carried[key.strip()] = value.strip()
+    carried["conflicts"] = str(len(conflicts))
+    filled = {
+        "METRICS": [f"<!-- {tally} -->"] + [f"{key}: {carried.get(key, UNFILLED)}" for key in REPORT_METRICS],
+        "BRANCH": previous.get("BRANCH") or [branch],
+        "CONFLICTS": conflicts or ["None."],
+    }
     lines = [
-        "<!-- Written by skeletor-upgrade for this run; the next real run replaces it. -->",
         f"# Upgrade report: {title}",
+        "",
+        "<!-- Written by skeletor-upgrade; a run of the same upgrade keeps what you filled in. -->",
     ]
     for heading, prompt in REPORT_SECTIONS:
-        lines += ["", f"## {heading}", ""]
-        lines += facts[heading] if prompt is None else [f"<!-- {prompt} -->"]
+        body = filled[heading] if prompt is None else previous.get(heading) or [f"<!-- {prompt} -->"]
+        lines += ["", f"### {heading}", "", *body]
     patches.mkdir(parents=True, exist_ok=True)
     report = patches / REPORT_NAME
     report.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -3778,48 +3830,29 @@ def main() -> int:
 
         report = None
         if not args.dry_run:
+            title = f"{ref} → {head_ref}"
+            # Read before clearing nothing: `clear_sidecars` spares REPORT.md by suffix.
+            previous = previous_report(patches, title)
             branch = subprocess.run(
                 ["git", "-C", str(target), "branch", "--show-current"], capture_output=True, text=True
             ).stdout.strip()
-            counts = {
-                "added": added,
-                "updated": updated,
-                "merged": merged,
-                "conflicted": conflicted,
-                "collided": collided,
-                "declined": declined,
-                "no longer shipped": dropped,
-            }
-            unresolved = [
-                f"- `{rel}`: conflict, the template's diff is `tmp/upgrade/{rel}.patch`" for rel in conflicted
-            ]
-            unresolved += [
-                f"- `{rel}`: yours before the template's, which is `tmp/upgrade/{rel}.new`" for rel in collided
-            ]
+            counts = {"added": added, "updated": updated, "merged": merged, "left for you": pending}
+            tally = "This run: " + ", ".join(f"{len(rels)} {name}" for name, rels in counts.items()) + "."
+            if declined:
+                tally += f" {len(declined)} file(s) you deleted before stay deleted; that is not a decline."
             report = write_report(
                 patches,
+                title,
                 {
-                    "METRICS": [
-                        (
-                            f"- recorded base: {ref} → {head_ref}"
-                            if advanced
-                            else (
-                                f"- recorded base: held at {ref}, {len(pending)} file(s) pending; head is {head_ref}"
-                                if pending
-                                else f"- recorded base: {ref}, unchanged, as nothing applied; head is {head_ref}"
-                            )
-                        ),
-                        "- " + ", ".join(f"{len(rels)} {name}" for name, rels in counts.items()),
-                    ],
-                    "BRANCH": [
-                        f"- {branch or 'detached HEAD'} at {(pre_upgrade or 'no commit')[:12]}, before this run;"
-                        " nothing here is committed"
-                    ],
-                    "CONFLICTS": unresolved or ["None."],
+                    **{rel: f"conflict, the template's diff is `tmp/upgrade/{rel}.patch`" for rel in conflicted},
+                    **{rel: f"yours before the template's, which is `tmp/upgrade/{rel}.new`" for rel in collided},
                 },
-                f"{ref} → {head_ref}",
+                tally,
+                f"{branch or 'detached HEAD'} from base {(pre_upgrade or 'no commit')[:12]}; commit: {UNFILLED}",
+                previous,
             )
-            say("📝", f"{report.relative_to(target)}: the mechanical sections are filled; the rest are yours")
+            kept = " (what you filled in is kept)" if previous else ""
+            say("📝", f"{report.relative_to(target)}: the counted sections are filled; the rest are yours{kept}")
 
         if args.json:
             print(
