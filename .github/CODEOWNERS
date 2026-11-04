@@ -1,0 +1,13 @@
+# Who reviews what. Rendered from `skeletor-new --owner`: a user (`@name`) or a
+# team (`@org/team`). A bare `@org` is rejected by GitHub ("Unknown owner") and
+# requests no review at all; proto.pilot had five such lines. Without `--owner`
+# every rule below is commented out, and `skel doctor` reports that nobody owns
+# anything: uncomment them with a real owner.
+# *                           @<user-or-org/team>
+
+# The governance layer. A change here changes how every other change is
+# reviewed, so it gets read even when the diff looks mechanical.
+# /.claude/                   @<user-or-org/team>
+# /.github/workflows/         @<user-or-org/team>
+# /.pre-commit-config.yaml    @<user-or-org/team>
+# /scripts/docs/              @<user-or-org/team>

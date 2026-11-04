@@ -19,6 +19,7 @@ and makes the relevant part harder to find, not easier.
 | **Shelved / parked work**  | TODO/README.md               | `docs/TODO/README.md`               |
 | **Was this built before?** | todo_index.json              | `docs/todo_index.json`              |
 | **Reports of any kind**    | reports/README.md            | `docs/reports/README.md`            |
+| **Agentic Automation** | AGENTIC_AUTOMATION.md | `docs/AGENTIC_AUTOMATION.md` |
 | **Design Rationale — Where Each Mechanism Came From** | DESIGN_RATIONALE.md | `docs/DESIGN_RATIONALE.md` |
 | **Maintaining skeletor** | MAINTENANCE.md | `docs/MAINTENANCE.md` |
 | **Setup Guide — Standing Up a Project Shell** | SETUP_GUIDE.md | `docs/SETUP_GUIDE.md` |

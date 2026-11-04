@@ -214,8 +214,12 @@ the night after the merge. Run it here first:
 
 ```bash
 ./skel check scheduled --plan   # what would run, and where it would stop
-./skel check scheduled          # run it: a worktree at HEAD, a clean venv
+./skel check scheduled          # run it: the working tree, a clean venv
 ```
+
+It rehearses the working tree as `git add -A` would commit it, so run it straight
+after an upgrade, before committing. It exits 2 when no job could be rehearsed in
+full: nothing was checked, and that is not a pass.
 
 A clean venv is the point. A dependency only that job needs is missing there
 and present in your `.venv`, so the rehearsal fails and your own suite passes.
