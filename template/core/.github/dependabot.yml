@@ -19,7 +19,7 @@ updates:
     # tests/test_lint_tool_parity.py is red until both agree, so a bump of one
     # alone could never pass CI and never merge. Bump both by hand, or take the
     # template's next upgrade. A tool you add to that test's `TOOLS` goes here
-    # too, and the same file's last test is red until it does.
+    # too: test_dependabot_never_bumps_a_lint_pin_alone is red until it does.
     ignore:
       - dependency-name: black
       - dependency-name: flake8
