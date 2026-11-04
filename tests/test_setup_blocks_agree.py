@@ -1,0 +1,352 @@
+"""The setup steps are copied into several documents; nothing keeps them together.
+
+Every document that tells a reader how to start carries the install steps. Which
+documents those are is a property of **your** tree, not of this file: enrolment
+is by content, and a document is in the comparison for as long as its block
+still installs something. A fresh scaffold enrols three; a tree that has since
+moved its venv line out of one of them enrols two, correctly and silently.
+
+They were rendered from one source when this repository was scaffolded, and the
+generator left. **The drift starts at the moment the guarantee ends**, which is
+why this check lives here and not in the generator: there, one substitution
+fills every copy, and a check would be asserting that a regex produced the same
+value more than once.
+
+That is the coordinate-system rule on a different face from the path gate.
+`test_docs_name_real_paths.py` moved into this tree because the population is
+larger here. This one is here because the failure mode **does not exist** in the
+generator at all — volume was only ever a symptom of where a thing can go wrong.
+
+Rule 11 in `AGENTS.md` already requires this: when two files describe the same
+environment, a drift check owns the pair. It went unbuilt because a sentence was
+standing in for it — *"rendered from the same source as the README's"* — which
+discharged the rule by assertion. Deleting that sentence is what made the
+requirement visible and unmet.
+
+## Two checks, because only one half has an authority
+
+**Which requirements file gets installed is checked against the tree**, where
+`scripts/paths.py` names one and every `ci.yml` job that runs the toolchain
+installs from it. Three documents disagreeing about a filename is a vote with no
+tiebreaker; a document disagreeing with the toolchain is a defect with a
+direction. Both directions are checked, and they catch opposite mistakes: a doc
+naming a file nothing installs is a *stale* step, and a doc omitting the
+toolchain entirely is a *missing* one. The second is not hypothetical — see
+`setup_commands()` in the generator, whose docstring records the release where
+a whole language shipped without it.
+
+**The shared prefix is checked doc-to-doc**, where no authority exists, so it is
+a ratchet rather than an assertion — see `test_the_shared_prefix_has_not_shrunk`.
+
+## Enrolment, and why it names two toolchains
+
+A fenced `bash` block that installs dependencies — `pip install -r <file>` or
+`npm install`. Naming only the first is what a python-only reader writes, and it
+enrolled **nothing at all** in a node tree, where a scan that finds nothing is a
+check that passes having looked at nothing.
+
+One exclusion, and it is a property of the block rather than a name in a list: a
+block that opens by changing directory has declared it is setting up something
+else. A sub-component with its own toolchain and its own requirements file is
+right to differ, and it gets more common as a tree grows rather than less.
+Residual, stated because it is real: a block that says "cd there first" in prose
+instead of in the fence re-enrols and false-positives. The remedy is to put the
+`cd` in the fence, which is better documentation anyway.
+
+Built as a prototype by stash.flow, whose adopted tree is where the drift and
+the sub-component false positive both actually existed.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+import pytest
+
+pytestmark = [pytest.mark.unit]
+
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which owns
+# every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from repo_files import reference_docs  # noqa: E402
+from scanning import scanned  # noqa: E402
+from scripts import install_project  # noqa: E402
+from scripts.paths import GITHUB_DIR, PROJECT_ROOT, REQUIREMENTS, TESTS_DIR  # noqa: E402
+from scripts.yaml_text import read_uncommented  # noqa: E402
+
+#: A shell block a reader is meant to run. `bash` only: a ```text block is an
+#: illustration and a ```console block is a transcript.
+_FENCE = re.compile(r"```bash\n(?P<body>.*?)```", re.DOTALL)
+
+#: A `pip install` and the rest of its command, stopping at a newline or a shell
+#: separator so the arguments of one install cannot bleed into the next.
+_PIP_INSTALL = re.compile(r"pip install\b(?P<args>[^\n;&|]*)")
+
+#: Every `-r <file>` within those arguments. **Every**, and that is the point:
+#: this was one regex, `pip install\s+-r\s+(?P<target>...)`, which matches the
+#: first `-r` on a line and stops — `pip install -r a -r b -r c` measured as
+#: `['a']`. Two of its three callers fail loudly when they under-collect, so
+#: they would have been found; the third checks each documented file against
+#: what CI installs and simply never looks at the second one, which is a silent
+#: pass on exactly the line most likely to be wrong. sky.boss found it with a
+#: CI step installing a toolchain no document was ever checked against.
+_DASH_R = re.compile(r"-r\s+(?P<target>[\w./-]+)")
+
+#: The step every CI toolchain job runs to install the project itself.
+INSTALL_PROJECT = "scripts/install_project.py"
+
+#: Installing dependencies, in either toolchain this tree can carry.
+_INSTALLS = re.compile(r"pip install\s+-r\s+[\w./-]+|npm install")
+
+
+def requirements_in(text: str) -> list:
+    """Every requirements file `text` installs from, in order of appearance.
+
+    A list rather than a set because the callers want different things from it
+    and one of them reports the offending name — deduplicating here would make
+    a message name a file that is not the one on the line.
+    """
+    return [
+        match.group("target")
+        for install in _PIP_INSTALL.finditer(text)
+        for match in _DASH_R.finditer(install.group("args"))
+    ]
+
+
+#: The template's floor, written by the generator, because the number of shared
+#: commands depends on which toolchains the tree was scaffolded with.
+BUDGET = TESTS_DIR / "setup_block_budget.json"
+
+#: **Your** floor, once it differs from the template's. No release ships or touches
+#: this file, so a raised floor never conflicts with a release that moves the
+#: rendered one (proto.pilot): a merge cannot tell "deliberately above" from "unported".
+LOCAL_FLOOR = TESTS_DIR / "setup_block_floor.json"
+
+
+def pinned_floor(budget, local) -> tuple:
+    """`(floor, the file it came from)`: yours when it exists, else the template's."""
+    source = local if local.exists() else budget
+    return json.loads(source.read_text(encoding="utf-8"))["min_shared_prefix"], source
+
+
+def _strip_comment(line: str) -> str:
+    """`./skel check pre-push   # green on a fresh tree` → the command.
+
+    The comment is the one thing these blocks are *expected* to differ on: the
+    same command is annotated for a reader of `AGENTS.md` and left bare in the
+    `README`. Comparing them raw would report the annotation as drift, and the
+    fix a reader would reach for is to delete the annotation.
+    """
+    return line.split("#", 1)[0].rstrip()
+
+
+def setup_blocks() -> dict:
+    """`{document: [command lines]}` for blocks that install dependencies.
+
+    Enrolment and its one exclusion are argued in the module docstring.
+    """
+    found = {}
+    for doc in reference_docs():
+        for match in _FENCE.finditer(doc.read_text(encoding="utf-8")):
+            lines = [_strip_comment(line) for line in match.group("body").splitlines()]
+            lines = [line for line in lines if line.strip()]
+            if not any(_INSTALLS.search(line) for line in lines):
+                continue
+            if any(line.strip().startswith("cd ") for line in lines):
+                continue
+            found[str(doc.relative_to(PROJECT_ROOT))] = lines
+    return found
+
+
+def ci_requirements() -> set:
+    """Every requirements file CI installs from, in a workflow or a local action, comments masked.
+
+    `scripts/yaml_text.py` owns the masking and carries the two gates that
+    learned it the expensive way: a commented-out `pip install` is prose to a
+    reader and a substring match to a naive scan. Local actions count because a
+    workflow's `uses: ./.github/actions/<name>` runs their steps (sky.boss).
+    """
+    found = set()
+    sources = [*(GITHUB_DIR / "workflows").glob("*.yml"), *(GITHUB_DIR / "actions").glob("*/action.yml")]
+    for source in sorted(sources):
+        found.update(requirements_in(read_uncommented(source)))
+    return found
+
+
+def commands(lines: list) -> list:
+    """The block's commands, one per `&&` link, so joining two lines is not drift."""
+    return [part.strip() for line in lines for part in line.split("&&") if part.strip()]
+
+
+def shared_prefix(blocks: dict) -> int:
+    """How many leading commands every enrolled block currently agrees on.
+
+    Commands, not lines: mind.head took a release that folded its own install
+    line into line one, and a line count read the docs moving closer as drift.
+    """
+    if len(blocks) < 2:
+        return 0
+    depth = 0
+    # Not strict: the agreement ends at the shortest block, which is what this measures.
+    for column in zip(*(commands(lines) for lines in blocks.values()), strict=False):
+        if len(set(column)) != 1:
+            break
+        depth += 1
+    return depth
+
+
+def test_the_scan_finds_blocks_to_compare():
+    """`least=2` because a drift check over one block is not a drift check.
+
+    With a single block every comparison below is between a thing and itself:
+    the prefix is its own length and no two lines can disagree. That reads
+    identical to agreement, which is the state this file exists to distinguish.
+    """
+    scanned(setup_blocks(), "fenced bash setup blocks installing dependencies", least=2)
+    scanned(ci_requirements(), "requirements files installed by a CI workflow")
+
+
+def test_the_scan_sees_every_requirements_file_on_a_line():
+    """The parser, against the case that produced a silent pass.
+
+    A fixture rather than a tree fact, and deliberately: the template ships no
+    multi-`-r` line today, so a check over the tree would be green under the
+    broken regex and the correct one alike — the convenient case cannot
+    discriminate. The string below is the shape an adopter's CI takes the moment
+    it grows a second requirements file, which is when the scan stops looking.
+    """
+    assert requirements_in("pip install -r a.txt -r b/c.txt -r d.txt") == ["a.txt", "b/c.txt", "d.txt"]
+    # Two installs on separate lines are two installs, and neither swallows the
+    # other's arguments — `[^\n;&|]` is what stops the first `args` group
+    # running to the end of the file.
+    assert requirements_in("pip install -r a.txt\nnpm install\npip install -r b.txt") == ["a.txt", "b.txt"]
+    assert requirements_in("pip install -r a.txt && pip install -r b.txt") == ["a.txt", "b.txt"]
+    # A `pip install` with no `-r` contributes nothing rather than a false one.
+    assert requirements_in("pip install pre-commit") == []
+
+
+def test_the_prefix_counts_commands_however_they_are_joined():
+    """The same three commands on one line or on two agree to the end."""
+    assert shared_prefix({"a": ["x && y && z"], "b": ["x && y", "z"]}) == 3
+    assert shared_prefix({"a": ["x && y"], "b": ["x", "w"]}) == 1
+
+
+def test_no_setup_block_invents_a_requirements_file():
+    """A document may not send a reader to a file nothing installs from."""
+    authoritative = ci_requirements()
+    for doc, lines in sorted(setup_blocks().items()):
+        for line in lines:
+            # Every `-r` on the line, not the first. A second requirements file
+            # is exactly where a document goes stale, because it is the one
+            # somebody appended without re-reading the workflow.
+            for target in requirements_in(line):
+                if target not in authoritative:
+                    pytest.fail(
+                        f"{doc} tells a reader to install from `{target}`, which no CI "
+                        f"workflow installs from. CI installs {sorted(authoritative)}. Either the "
+                        "document is stale or the workflow is — they cannot both be the setup."
+                    )
+
+
+def test_every_setup_block_installs_the_host_toolchain():
+    """The other direction, which catches a missing step rather than a wrong one.
+
+    This tree's CLI, docs pipeline, lint gates and test suite are python at
+    every language — `cli/`, `tests/` and `scripts/` ship at the base tier — so
+    a setup block that does not install `scripts/requirements.txt` documents a
+    quick start whose next line cannot run. It is checked against the one file
+    `scripts/paths.py` names and every toolchain job in `ci.yml` installs, rather than
+    against the other blocks, because "all three agree and all three are wrong"
+    is maximally consistent and doc-to-doc has nothing to say about it.
+    """
+    target = REQUIREMENTS.relative_to(PROJECT_ROOT).as_posix()
+    for doc, lines in sorted(setup_blocks().items()):
+        installed = {target for line in lines for target in requirements_in(line)}
+        assert target in installed, (
+            f"{doc}'s setup block never installs `{target}`, so a reader who follows it has no "
+            f"CLI, no lint tools and no test runner — it installs {sorted(installed) or 'nothing'}. "
+            "Every tier ships a python toolchain whatever `--language` added on top of it."
+        )
+
+
+def missing_the_project(blocks: dict, project) -> list:
+    """Blocks that never run `scripts/install_project.py`, when there is a project to install.
+
+    CI's jobs run it, so a block without it installs less than CI (proto.pilot).
+    A tree whose `pyproject.toml` has no `[project]` may leave it out (sky.boss).
+    """
+    if project is None:
+        return []
+    return sorted(doc for doc, lines in blocks.items() if not any(INSTALL_PROJECT in line for line in lines))
+
+
+def test_every_setup_block_installs_the_project_when_there_is_one():
+    """The planted case is a fixture: a fresh tree has no `[project]` to install."""
+    assert missing_the_project({"README.md": ["x"]}, ".[dev]") == ["README.md"]
+    assert missing_the_project({"README.md": ["x"]}, None) == []
+    missing = missing_the_project(setup_blocks(), install_project.target())
+    assert not missing, (
+        f"{missing} never run `{INSTALL_PROJECT}`, so a fresh clone that follows them installs "
+        f"less than CI does: the project ({install_project.target()}) is left out."
+    )
+
+
+def test_the_shared_prefix_has_not_shrunk():
+    """The half with no authority, so a ratchet rather than an assertion.
+
+    Three documents disagreeing about a command is a vote with no tiebreaker,
+    and picking one as canonical would be inventing an authority this check does
+    not have. What can be defended without one is that **the agreement does not
+    quietly get smaller**: the depth is measured, not chosen, and a commit that
+    shortens it has to say so.
+
+    It ratchets **up**, which is the opposite of the skip and coverage budgets
+    and for the same reason they go down — the direction that needs no argument
+    is the one nobody has to be talked into.
+
+    A block's own tail is deliberately unchecked. A document may add
+    `cp .env.example .env` or three commands of its own, and those are per-file
+    by design. Only the agreed head is anybody's shared claim.
+
+    **Both messages name the enrolled documents, because a rise has two
+    readings.** The blocks got tighter, or one of them left the comparison — and
+    a document whose block stops installing anything drops out with nothing said
+    about it. That is not invisible, which is the useful part: fewer blocks
+    almost always agree further, so the departure surfaces here as a rise. It
+    surfaces *unreadably* if the list is missing, and it was: the shrunk branch
+    named the blocks and the grown branch did not, so the case an upgrade
+    actually produces was the one with no way to tell the two apart.
+    proto.pilot met exactly that, arriving at 4 against a floor of 2 with two
+    documents enrolled and no line saying which.
+    """
+    blocks = setup_blocks()
+    floor, source = pinned_floor(BUDGET, LOCAL_FLOOR)
+    depth = shared_prefix(blocks)
+    pin = f'write {{"min_shared_prefix": {depth}}} to {LOCAL_FLOOR.relative_to(PROJECT_ROOT).as_posix()}'
+    assert depth >= floor, (
+        f"the setup blocks agreed on {floor} leading commands and now agree on {depth}. "
+        f"Blocks: {sorted(blocks)}. Either a shared setup step drifted in one document and "
+        f"not the others — fix it — or the divergence is intended, in which case {pin} in "
+        f"the same commit, with the reason in the commit message (floor read from {source.name})."
+    )
+    assert depth == floor, (
+        f"the setup blocks now agree on {depth} leading commands, above the pinned {floor}. "
+        f"Blocks: {sorted(blocks)}. Either they got tighter, or a document left the "
+        "comparison — its block stopped installing anything, so it is no longer being "
+        "checked against the others. Read that list before raising the floor.\n  "
+        f"Then {pin} in this commit, or the gain is not locked in and the next drift back to "
+        f"{floor} passes silently (floor read from {source.name}; {BUDGET.name} is the template's)."
+    )
+
+
+def test_your_floor_outranks_the_template_s(tmp_path):
+    """Either direction: a tree may pin above or below the rendered floor."""
+    budget, local = tmp_path / "budget.json", tmp_path / "local.json"
+    budget.write_text('{"min_shared_prefix": 5}', encoding="utf-8")
+    assert pinned_floor(budget, local) == (5, budget)
+    local.write_text('{"min_shared_prefix": 7}', encoding="utf-8")
+    assert pinned_floor(budget, local) == (7, local)

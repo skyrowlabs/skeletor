@@ -128,7 +128,7 @@ The tooling lives in `.claude/` and is omitted by `--agent none`:
 | Tooling | Detail | Tier |
 | ------- | ------ | :--: |
 | Permission allowlist | `settings.json` — pre-approved git/gh/lint/CLI calls | C |
-| Session bootstrap | `hooks/session-start.sh` installs the host toolchain in remote sessions | C |
+| Session bootstrap | `.claude/hooks/session-start.sh` installs the host toolchain in remote sessions | C |
 | Subagents | `implementer` · `tester` · `documenter` | A |
 | Skills | `/implement` (plan → code → tests → docs → filed) · `/release` (phased, stops for a human) | A |
 

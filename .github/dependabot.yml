@@ -1,0 +1,48 @@
+# Version updates. Monthly: Dependabot *alerts* (`skel doctor` checks they are
+# on) report a vulnerable version as soon as one is published, so this file only
+# has to keep pins from drifting. Weekly was noise in jam.sense.
+#
+# `cooldown` holds a release back five days before proposing it: a hijacked
+# package is usually caught and yanked inside that window, and
+# dependabot-auto-merge.yml would otherwise merge it the night it lands.
+# skeletor's own copy, owned (`--own`): version updates are off. The pins
+# here are renders of template/, so a bump lands in the template through
+# bin/skeletor-bump and reaches this tree by its own upgrade. Security updates
+# are not governed by this limit and still open.
+version: 2
+
+updates:
+  # scripts/requirements.txt pins the toolchain every gate runs.
+  - package-ecosystem: pip
+    directory: /scripts
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 5
+    # Pinned twice, here and in .pre-commit-config.yaml, and
+    # tests/test_lint_tool_parity.py is red until both agree, so a bump of one
+    # alone could never pass CI and never merge. Bump both by hand, or take the
+    # template's next upgrade. skeletor checks this list against that test's
+    # tool set when it renders the file; nothing here does, since a tree may own it.
+    ignore:
+      - dependency-name: black
+      - dependency-name: flake8
+      - dependency-name: isort
+      - dependency-name: pyright
+    open-pull-requests-limit: 0
+    labels: [dependencies]
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 5
+    open-pull-requests-limit: 0
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: ci
+      include: scope

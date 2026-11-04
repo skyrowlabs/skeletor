@@ -483,7 +483,7 @@ second only once the first has been useful.
 4. Watch it: `./mp report watch`.
 
 When adding a job later, follow `docs/AGENTIC_AUTOMATION.md` § Adding a job. Five
-of its six steps are enforced by `tests/test_reporting_jobs.py`; only the crontab
+of its six steps are enforced by `template/agentic/tests/test_reporting_jobs.py`; only the crontab
 install is not, because this repo cannot see that host.
 
 **Decide `fix_policy` explicitly.** It defaults to `none` on purpose: a job added

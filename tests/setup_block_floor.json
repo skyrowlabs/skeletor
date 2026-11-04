@@ -1,0 +1,9 @@
+{
+  "_comment": [
+    "This tree's own floor for tests/test_setup_blocks_agree.py; no release ships this file.",
+    "AGENTS.md and README.md show a reader how to set up a tree skeletor GENERATES, and",
+    "docs/DEVELOPMENT.md how to set up this one. They share the venv and the requirements",
+    "install, and nothing after: a different tree comes next."
+  ],
+  "min_shared_prefix": 2
+}

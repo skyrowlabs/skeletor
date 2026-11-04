@@ -1,0 +1,38 @@
+name: Unit setup
+description: >-
+  The interpreter and every dependency the unit suite imports. Every workflow that
+  runs the unit suite installs through this, so one edit here reaches all of them.
+
+# A tree whose suite needs more than scripts/requirements.txt (its own
+# requirements file, a system package) adds the step here. sky.boss's nightly
+# failed at import because its ci.yml had learned its own requirements and the
+# nightly's copy of the steps had not.
+
+inputs:
+  python-version:
+    description: The interpreter to install.
+    required: true
+  # Passed through to setup-python, so a caller keeps its pip cache without
+  # forking this file (proto.pilot dropped `cache: pip` on four legs rather than fork).
+  cache:
+    description: setup-python's `cache`, e.g. pip; empty is no cache.
+    required: false
+    default: ''
+  cache-dependency-path:
+    description: setup-python's `cache-dependency-path`; empty is its default.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v7
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: ${{ inputs.cache }}
+        cache-dependency-path: ${{ inputs.cache-dependency-path }}
+    - run: pip install -r scripts/requirements.txt
+      shell: bash
+    - name: Install the project, if it is one
+      run: python scripts/install_project.py
+      shell: bash

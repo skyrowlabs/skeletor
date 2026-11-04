@@ -1,0 +1,23 @@
+# Host-side toolchain: the CLI, the docs pipeline, and the lint gates.
+#
+# Lint tool versions MUST match .pre-commit-config.yaml. Neither file is
+# canonical: a pip updater can only ever write this one — .github/dependabot.yml
+# points Dependabot here — so a mismatch means make them agree, at
+# whichever version you mean.
+# tests/test_lint_tool_parity.py fails if they diverge — two versions of a
+# formatter disagree about real formatting, and a local pass with a CI failure
+# on the same file is otherwise unexplainable.
+
+click>=8.1
+# scripts/rehearse_scheduled.py reads workflows with it.
+pyyaml>=6.0
+
+pytest>=8.0
+pytest-timeout>=2.3
+pytest-cov>=5.0
+
+flake8==7.5.0
+black==26.10.1
+isort==9.0.2
+pyright==1.1.414
+pre-commit>=4.0

@@ -27,7 +27,7 @@ Every significant mechanism in this shell is an application of this:
 
 | Two copies that drifted            | What replaced them                              |
 | ---------------------------------- | ----------------------------------------------- |
-| Crontab string + CLI commands      | `scripts/reporting/jobs.py` — both derived      |
+| Crontab string + CLI commands      | `template/agentic/scripts/reporting/jobs.py` — both derived |
 | README queue order + job's sort     | `scripts/docs/queue_order.py` — both import it  |
 | Five ways to compute "since when"   | `scripts/docs/release_window.py`                |
 | Dev compose file + CI compose file  | `check_compose_drift.py` + a reasoned allowlist |
@@ -222,7 +222,7 @@ What that cost, measured in the template as it stood:
 | Symptom                                             | What it actually was                        |
 | --------------------------------------------------- | -------------------------------------------- |
 | `⏸️` defined in no file, spelled in three            | two spellings already differed by a space    |
-| The gate table reimplemented in `cli/commit.py`      | a second renderer of one result             |
+| The gate table reimplemented in `template/governed/cli/commit.py` | a second renderer of one result             |
 | `--json` on four scripts, parseable on one           | JSON and `❌` lines sharing one stdout       |
 | No `--json` on either ratchet                        | the two numbers a dashboard most wants       |
 
@@ -853,8 +853,8 @@ positive.
 
 ### A gate that only runs in the reader's coordinate system
 
-`docs/rules/testing.md` told every generated tree to *"use the fixtures in
-`tests/fixtures.py`"*. No tier has ever shipped that file. A prescription, in a
+`docs/rules/testing.md` told every generated tree to to use the fixtures in a
+`fixtures.py` under `tests/`. No tier has ever shipped that file. A prescription, in a
 rules file, naming a helper the reader does not have — present since the
 template first existed, found by stash.flow from an adopted tree.
 
@@ -4079,8 +4079,8 @@ the repository, shifting one component left:
 
 ```
 https://github.com/skyrowlabs/skeletor.git   -> skyrowlabs   correct
-/home/jeston/skyrow.labs/skeletor            -> skyrow.labs  correct
-/home/jeston/skyrow.labs/skeletor/.          -> skeletor     wrong
+/srv/work/skeletor                           -> work         correct
+/srv/work/skeletor/.                         -> skeletor     wrong
 ```
 
 So the repository's own name arrived through the input designed to name the
@@ -4328,7 +4328,7 @@ this repository keeps arriving at — **same artifact, two questions, two homes.
 `json_hook_gate` asks the generator's question: does the config I hand over work
 for the file set I ship, in every configuration, and is every exemption still
 earning its place. `tests/test_json_hook_covers_tracked_files.py` asks the
-tree's: does *your* `.vscode/extensions.json` parse. The second carries the
+tree's: does *your* editor's `extensions.json` parse. The second carries the
 `unit` marker, so `ci.yml` blocks on it — which is strictly more than the hook
 ever did.
 
@@ -5688,3 +5688,26 @@ were in it; `--quick` is there for a tree whose suite costs minutes.
 `rehearse_gate` manufactures a release from its own skeletor clone — a template
 test that passes, then one that fails — so the quiet case and the red case are
 both asserted. A rehearsal that never reports red passes the first alone.
+
+## skeletor scaffolds itself, and `template/` is foreign to it
+
+The grid builds every tree it tests, so it never meets a tree that lived through
+an upgrade, carries files of its own, or was written by somebody else. A
+self-scaffold puts the generator inside one. Four designs were measured on a
+clone (2026-11-03): a literal `--force` in place overwrote five files skeletor
+must keep and read `template/` as its own source; a sibling dogfood repo holds
+only what we put in it; rehearsing against the six adopter trees gives no daily
+view. Jeston ruled for the fourth: scaffold at `core`, own the five collisions,
+mark `template/` foreign.
+
+The foreign seam is general because the hazard is. Any tree carrying vendored
+code or deliberately broken fixtures has the same double scan. `FOREIGN` in
+`scripts/paths.py` is read by the walking checks; the linters cannot read python,
+so the lint probe requires each one's config to agree. Publication checks still
+read a foreign tree, since it is published all the same.
+
+The first run found defects no grid could. `bin/` is python without a suffix,
+so the dead-callable check read live functions as removed and the history scan
+could not explain `verify.yml`'s full clone. Skeletor's own prose named template
+paths as though they were this tree's, and quoted this machine's home directory
+in identity fixtures. A commit subject of mine broke the tree's commit rule.

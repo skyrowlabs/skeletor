@@ -93,10 +93,27 @@ bin/skeletor-upgrade ../target --ref v0.24.0   # pin the head render to a releas
 bin/skeletor-upgrade ../target --rehearse      # dry run, then the tree's own gates and hooks before/after, in a worktree
 ```
 
-There is no test suite for skeletor itself. **The scaffold IS the test**: a
-template change is verified by generating a tree and running that tree's own
-gates. A scaffold whose first check is red teaches the user that red is normal,
-so "a fresh tree passes its own gates" is the definition of done here.
+**The scaffold IS the test**: a template change is verified by generating a
+tree and running that tree's own gates. A scaffold whose first check is red
+teaches the user that red is normal, so "a fresh tree passes its own gates" is
+the definition of done here.
+
+**This repository is also a scaffold of itself, at `core`.** `cli/`, `scripts/`,
+`tests/`, `./skel` and the root workflows are a render of `template/`, recorded
+in `.skeletor.json`, so `./skel check pre-push` holds skeletor to the rules it
+ships, and an upgrade here is the first adopter's upgrade. Three things keep the
+two roles apart:
+
+- `template/` is declared in `scripts/paths.py`'s `FOREIGN`, and each linter's
+  config excludes it, so no gate reads unrendered source as this tree's.
+- `CLAUDE.md`, `AGENTS.md`, `README.md`, `.gitignore`, `docs/README.md` and
+  `.github/dependabot.yml` are owned (`--own`): skeletor's, never merged.
+- Upgrade from a released tag only, `bin/skeletor-upgrade . --ref <tag>`, so a
+  broken HEAD cannot upgrade itself into the breakage. Edit `template/`, never
+  the render; the render follows at the next tag.
+
+`bin/skeletor-verify` remains the test of the template. The self-tree's suite
+tests this checkout, which is one configuration, already adopted.
 
 `bin/skeletor-verify` is that procedure, executable. It generates every tier
 against every language — a placeholder that only appears in the `node` overlay
@@ -136,7 +153,7 @@ module only `agentic` ships, two were history about the repository this was
 extracted from. There is no allowlist and no mechanism to add one. What it
 cannot see is written down instead of guarded — another repo's path that
 *collides* with one of ours reads as a local dangling reference, which is how
-jam.sense's `cli/worktree.py` surfaced.
+jam.sense's own `worktree.py`, in its `cli/`, surfaced.
 
 Two gates ask questions about **languages the grid does not execute**, which is
 the standing hole `gated_language = "python"` leaves: every language is
@@ -552,7 +569,7 @@ with nothing between them. Planting exactly that turns all five gated
 configurations red.
 
 Its scaffolding plan is **derived**, not chosen. `_generator_inputs()` locates
-`scripts/lanes.py` and `scripts/reporting/jobs.py` in the overlay tree and the
+`scripts/lanes.py` and `template/agentic/scripts/reporting/jobs.py` in the overlay tree and the
 gate fails, naming the overlay, if either moves somewhere the tier axis no
 longer covers — which is the alternative to a comment saying "only the tier
 matters", true today and exactly the sentence that stays put while the thing it
@@ -609,7 +626,7 @@ every `governed` and `agentic` scaffold while this file stayed green. `f1f75ab`
 fixed that, and it is history rather than a standing red — a `governed` tree is
 clean under `pyright==1.1.411`. Reintroducing it now turns `governed` and
 `agentic` red and leaves `core` green, which is the tier signature you would
-expect, since `core` ships no `cli/commit.py`.
+expect, since `core` ships no `template/governed/cli/commit.py`.
 
 Three things that gate is careful about, all of them the failure this file
 exists to prevent. It asserts `filesAnalyzed`, because pyright prints `0 errors`
@@ -692,11 +709,8 @@ wrong widths — and a line near the limit then formats one way here and the oth
 way in a real tree. Fix black findings by scaffolding a tree, running it there,
 and porting the change back. `bin/skeletor-verify` is what tells you the truth.
 
-isort used to have the same problem for a different reason and no longer does:
-`.isort.cfg` at this repo's root names `cli` and `scripts` as first-party, which
-they are not *here* — they exist only under `template/<overlay>/` — so without it
-isort read them as third-party and stripped the blank line before `click` in
-twenty files. Keep that file in step with `template/core/pyproject.toml`.
+isort is configured by the self-tree's `pyproject.toml`, which skips `template/`.
+Run it on a scaffold, like black.
 
 Always run all tiers when a change touches `template/core/`, since `governed`
 and `agentic` compose on top of it. That is the default; `--tier` is for
@@ -856,7 +870,7 @@ edit that was never made. That is why the fallback is allowed to write at all.
 Two post-copy steps make "what skeletor produces" harder than it looks, and the
 first consumer found the difference. `register_shipped_docs` and `regen.py` both
 *read* the tree they write into, so in a `--force` scaffold they read the user's
-files too: proto.pilot had a `docs/hosted.md`, that step correctly gave it a row
+files too: proto.pilot had a doc of its own under `docs/`, that step correctly gave it a row
 in `.github/DOCS_INDEX.md`, and the manifest then recorded a hash of a file no
 render of those arguments can produce. Every later upgrade refused — this time on
 a wrong hash rather than a surplus entry, which is the worse of the two, because
@@ -1289,7 +1303,7 @@ been asked. **A component manifest describes a downstream relationship; pointing
 one at the repository you were extracted from inverts the arrow, and every
 reading after that is wrong in the reassuring direction** — a row saying somebody
 owes work, in a tree where nobody does. Deleted 2026-09-07, both there and the
-hold in `skyrow-workspace/scripts/skeletor-currency.py`, whose `HELD` map gained
+hold in skyrow-workspace's `skeletor-currency.py`, whose `HELD` map gained
 the staleness check it had been arguing for and lacked.
 
 **That record is now two files, and the day this repository went public is what
@@ -1452,7 +1466,7 @@ Consequences to keep in mind when editing:
   the file — two copies of a table is precisely the drift this shell exists to
   prevent.
 - `template/agentic/.env.example` exists **because** it must replace core's, to
-  add the heartbeat variables that `tests/test_reporting_jobs.py` requires.
+  add the heartbeat variables that `template/agentic/tests/test_reporting_jobs.py` requires.
 
 ### Placeholder substitution
 
@@ -1515,10 +1529,10 @@ interlock, and which you cannot understand from one file:
   registered by existing. This is why the `governed` and `agentic` overlays can
   drop `commit.py`, `worktree.py` and `report.py` into `cli/` without patching
   any import list.
-- **The job registry** (`agentic`). `scripts/reporting/jobs.py` is the single
+- **The job registry** (`agentic`). `template/agentic/scripts/reporting/jobs.py` is the single
   source for the crontab, the `report` subcommands and the status viewer;
-  `cli/report.py` *generates* its subcommands from it, and
-  `tests/test_reporting_jobs.py` asserts both directions plus the prompt files,
+  `template/agentic/cli/report.py` *generates* its subcommands from it, and
+  `template/agentic/tests/test_reporting_jobs.py` asserts both directions plus the prompt files,
   heartbeat variables and cron-collision rules.
 - **`check pre-push` and the partition that keeps its docstring true.** The
   command opened with *"Everything CI blocks on"* and omitted three gates, two of

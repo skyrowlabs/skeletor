@@ -75,7 +75,7 @@ CI minutes start costing money.
 | `.claude/rules/shared-tree.md`        | The rule that stops one agent deleting another's work      |
 | `<cli> commit`                        | Commits without pre-commit's repo-wide stash               |
 | `<cli> worktree`                      | A checkout per branch; refuses to drop unpushed commits    |
-| `scripts/tree_lock.py`                | Advisory holds, so jobs have a fact to refuse on           |
+| `template/governed/scripts/tree_lock.py` | Advisory holds, so jobs have a fact to refuse on           |
 | `check_workflow_drift.py` + allowlist | Two jobs that boot the stack cannot silently diverge       |
 | `coverage-nightly.yml`                | The expensive suites, off the pre-merge path               |
 | Skip + coverage ratchets              | Slippage becomes a number somebody has to change on purpose |
@@ -99,7 +99,7 @@ for on a Tuesday** — dependency drift, doc rot, an ageing backlog, test gaps.
 | `.claude/agents/*.md`              | Focused subagents: implementer, tester, documenter          |
 | `/implement` skill                 | A plan driven end-to-end and **filed**, not just written    |
 | `/release` skill                   | A release as a phased state machine that stops for a human  |
-| `scripts/reporting/jobs.py`        | One registry generating crontab + CLI + status viewer       |
+| `template/agentic/scripts/reporting/jobs.py` | One registry generating crontab + CLI + status viewer       |
 | One argv template for triage       | The agent is config, not a hardcode — with the contract an adapter must meet |
 | `agent_runner` + `run_ledger`      | Collection/triage split, blast-radius policy, outcome rails |
 | Release-anchored reports           | Every finding scoped to "is this in production right now?"  |

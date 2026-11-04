@@ -1,0 +1,16 @@
+# Findings `tests/test_publication.py` may leave in a tracked file, and why.
+#
+# Format, three keys:
+#   <path> <match>: <why>   one finding in one file
+#   <path>: <why>           every finding in that tracked file, e.g. a frozen design render
+#   <match>: <why>          that exact match in any file, e.g. a placeholder path
+#
+# An entry that exempts nothing is stale and fails the test, so an exemption
+# cannot outlive what it was written for.
+
+.claude/skills/new-project/SKILL.md: the SKELETOR= line bin/skeletor-install-skill rewrites to the real checkout; checkout_path_literal_gate holds it
+/home/runner: GitHub's hosted-runner home, named where a gate explains why a CI checkout path is nobody's home
+bin/skeletor-verify ~/skyrow.labs: the state-root gate's docstring, quoting the leak it was written for
+bin/skeletor-verify Path.home() / "skyrow.labs": the same docstring, quoting the default as it shipped
+docs/DESIGN_RATIONALE.md ~/skyrow.labs: the state-root incident, quoting the leaked default
+docs/DESIGN_RATIONALE.md Path.home() / "skyrow.labs": the same incident, the code as it shipped

@@ -1,0 +1,751 @@
+name: CI
+
+# The cost model this workflow encodes
+# ────────────────────────────────────
+# Two facts drive every gating decision below:
+#
+#   1. Requiring a status context costs nothing. Only RUNNING a job costs
+#      minutes. A required context that reports `skipped` satisfies branch
+#      protection, so size the required list for what must gate — never trim it
+#      to save money. The savings come from job-level gating, below.
+#
+#      **Except a matrix job**, which skipped reports under its UNEXPANDED name,
+#      so its per-leg contexts never report at all. Require `pytest`, never
+#      `pytest <version>` — the reason is at `unit-tests-result`.
+#
+#      **That fact has a sharp edge, and `gate` is where it cuts.** Every job
+#      below carries `needs: gate`, so if `gate` fails they do not run — they
+#      report `skipped`, which protection ACCEPTS. Requiring only the jobs and
+#      not `CI Gate` therefore leaves a hole exactly the size of the gate: the
+#      one job whose failure silences every other required context. So the
+#      required list must name `CI Gate` itself, or a job that transitively
+#      depends on all of them. Requiring only the leaves is requiring nothing.
+#
+#      **No check in this tree can catch that**, because which contexts are
+#      required is a list in the account rather than a line in any file. It is
+#      the same class as the Actions pull-request switch.
+#
+#   2. A `synchronize` event on a READY pull request re-runs everything that PR
+#      earns. Iterating in draft and flipping to ready once, at the end, is the
+#      single largest saving available — in the project this was extracted from,
+#      42% of all Actions minutes ended in a failed or cancelled run because
+#      every PR was opened ready and pushed to four to six times.
+#
+# So: a draft carrying code runs the cheap jobs, a docs-only change runs the
+# gate and the unit suite whether draft or ready, a ready PR runs what its base branch earns,
+# and the heavy suite runs only where its verdict changes a decision. The
+# decision order is `.github/scripts/docs-only.cjs` and nowhere else — this
+# sentence said "draft PRs run the gate job alone" for five releases while the
+# script returned `docsOnly: false` for a draft, which runs two more.
+#
+# **Correcting it here corrected one of five homes.** The same claim was in
+# `AGENTS.md`, `.github/CONTRIBUTING.md`, the comment the draft-discipline
+# workflow posts onto contributors' pull requests — and, worst, in a summary
+# table inside `docs-only.cjs` itself, 119 lines from the code it summarised, in
+# the file this paragraph names as the single source. proto.pilot found all four
+# survivors from an adopted tree and deliberately did NOT fix them there — a
+# prose divergence in a file the template is actively revising is a permanent
+# conflict — so they reported them and the sweep was made upstream, here.
+#
+# That sentence read "proto.pilot swept all five from an adopted tree" for one
+# release. They swept none; their report says so in as many words. It is a
+# fabricated credit, in template prose, about the tree that found the bug, and
+# it shipped to every adopter — which is worse than the drift this paragraph is
+# about, because a copy at least started out true. Do not attribute an act to a
+# reporter without the sentence in their report that says they performed it.
+#
+# A statement is not fixed when the authority is fixed: the copies do not know
+# they are copies, and the one in the authority's own comment is the one a
+# reader trusts most.
+
+on:
+  pull_request:
+    # `ready_for_review` is LOAD-BEARING, and it is load-bearing exactly where
+    # the verdict CHANGES on that transition. Remove it and the gated jobs never
+    # re-evaluate when a PR flips out of draft — they stay `skipped`, which
+    # branch protection ACCEPTS.
+    #
+    # Where the verdict changes is a pull request into main, and
+    # therefore every pull request in a tree whose base and release branch are
+    # the same. This comment used to say the PR would otherwise merge "having
+    # run nothing", full stop, and that is false for the ordinary case in a
+    # two-branch tree: `.github/scripts/docs-only.cjs` returns the same verdict
+    # for a draft carrying code and for a ready code change into
+    # main, so nothing escalates and the statuses already standing
+    # are correct. mind.head found it; the repository's own verdict table had
+    # the two rows side by side and identical.
+    # tests/test_ci_draft_gate.py fails if it disappears.
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+  push:
+    # Every long-lived branch, which here is [main] — and if that reads
+    # as one branch, this tree was scaffolded with `--base-branch` and
+    # `--release-branch` the same and there is only ever one to cover. The rule
+    # is *the branch work lands on*, not *both*, and the two coincide only in a
+    # two-branch tree. A repo that commits directly to
+    # main — every project does, while it is one person — otherwise
+    # runs nothing at all on those commits, and "no workflow ran" is
+    # indistinguishable from "the workflow passed" anywhere you would look for
+    # the answer. That is the expensive half; the cost is the cheap half: a PR
+    # flow tests the merge commit a second time, which is one bounded extra run
+    # per merge and is not even pure duplication, since a squash merge is a
+    # different commit than the PR head ever tested.
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # ── The gate ────────────────────────────────────────────────────────────
+  # Always runs, on every event, and is cheap (~1 min). It answers two
+  # questions the expensive jobs are gated on, so the answer is computed once.
+  gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    outputs:
+      full_suite: ${{ steps.decide.outputs.full_suite }}
+      docs_only: ${{ steps.decide.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Decide what this PR earns
+        id: decide
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const decide = require('./.github/scripts/docs-only.cjs');
+            const result = await decide({ github, context, core });
+            core.setOutput('docs_only', String(result.docsOnly));
+            core.setOutput('full_suite', String(result.fullSuite));
+            core.summary
+              .addHeading('CI Gate')
+              .addTable([
+                [{data: 'Question', header: true}, {data: 'Answer', header: true}],
+                ['Docs-only change', String(result.docsOnly)],
+                ['Full suite', String(result.fullSuite)],
+                ['Reason', result.reason],
+              ])
+              .write();
+
+      - name: Fast structural checks
+        run: |
+          python scripts/check_doc_tables.py
+          python scripts/check_source_doc_refs.py
+          python scripts/check_output_discipline.py
+
+      # The commit-message rule is enforced locally by the `commit-msg` hook,
+      # which binds only contributors who ran `pre-commit install` — not a
+      # web-UI commit, not a merge made in the GitHub interface, not a machine.
+      # And Release Please reads those same subjects to build the changelog and
+      # pick the version bump, so a subject it cannot parse is not rejected,
+      # it is IGNORED: no entry, and no release if it was the only fix.
+      #
+      # Scoped to this change's own commits, never to all history: a repository
+      # adopting this template has history written under some other rule, and a
+      # gate red on arrival is one people learn to ignore.
+      #
+      # `git log` needs the merge base, so this is in the gate job — the one
+      # with `fetch-depth: 0`. The all-zeros SHA is a branch's first push, which
+      # has no `before` to diff against; HEAD alone is the honest range there.
+      #
+      # `forced` is the third case and it was missing. On a force-push `before`
+      # is a real sha string naming a commit that is now reachable from **no
+      # ref**, so the empty and all-zeros tests both pass it through and git
+      # then cannot resolve the range. The failure was correct and its
+      # diagnosis was not: the message sent the reader to `fetch-depth: 0`,
+      # which deepens a fetch of refs and cannot reach an orphan — there is
+      # nothing to deepen to. A remedy that does not exist is the expensive
+      # kind of wrong answer. Reported by stash.flow.
+      # The range both steps below check, decided once.
+      - name: Which commits this change adds
+        id: range
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          FORCED: ${{ github.event.forced }}
+        run: |
+          REASON=""
+          if [ "$FORCED" = "true" ]; then
+            REASON="force-push: \`before\` names a commit no ref reaches"
+          elif [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            REASON="no base commit for this event"
+          fi
+          if [ -n "$REASON" ]; then
+            echo "$REASON — checking HEAD alone"
+            # `-1` and not an empty range. The scripts' default is `@{u}..HEAD`
+            # — the set a local push would send — and a checkout here has no
+            # upstream, so no range would land on HEAD alone by coincidence
+            # rather than by instruction. The branch that MEANS HEAD alone
+            # says HEAD alone.
+            echo "range=-1" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=$BASE..${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # This step used to exit 0 when no Release Please config was present, so
+      # a `--versioning tag` tree had no CI commit gate at all: the commit-msg
+      # hook binds only contributors who installed it, and a web-UI commit, a
+      # merge button or a bot reached the release branch with any subject. The
+      # script decides the contract itself now — the config's section list
+      # where there is one, the hook's own rules where there is not.
+      - name: Commit subjects the contract in force can read
+        run: python scripts/check_commit_subjects.py --range "${{ steps.range.outputs.range }}"
+
+      # Secrets in the same commits, here rather than in `lint` because this job
+      # never skips: a token pasted into a docs-only change is still a leak.
+      # The binary is the hook's own pin, checksum-verified; `gitleaks-action`
+      # needs a licence key for organisation repositories.
+      - name: No secret in the commits this change adds
+        run: |
+          VERSION="$(python scripts/leak_scan.py --pinned)"
+          ASSET="gitleaks_${VERSION}_linux_x64.tar.gz"
+          URL="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$URL/$ASSET" -O "$URL/gitleaks_${VERSION}_checksums.txt"
+          grep " $ASSET\$" "gitleaks_${VERSION}_checksums.txt" | sha256sum -c -
+          tar xzf "$ASSET" gitleaks
+          cd "$GITHUB_WORKSPACE"
+          PATH="$RUNNER_TEMP:$PATH" python scripts/leak_scan.py --range "${{ steps.range.outputs.range }}"
+
+  # ── Lint ────────────────────────────────────────────────────────────────
+  # FULL-SUITE-BECAUSE: every gate in this job also runs in the pre-commit
+  # hooks and in `skel check pre-push`, so a pull request that skips it is
+  # not one nobody has linted — and a lint finding is not a broken build. The
+  # node job is gated on `docs_only` instead, because for it a skip is a
+  # question nobody asked; the unit suite is not gated at all (see its header).
+  lint:
+    name: Lint & Types
+    needs: gate
+    if: needs.gate.outputs.full_suite == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # Pinned to the SAME versions as .pre-commit-config.yaml; neither file is
+      # canonical. tests/test_lint_tool_parity.py fails if they diverge.
+      - name: Install lint toolchain
+        run: pip install -r scripts/requirements.txt
+
+      - name: flake8 (blocking set)
+        run: flake8 . --select=E9,F63,F7,F82,F401 --show-source --statistics
+
+      # `|| true` rather than `continue-on-error:`, and the difference is the
+      # whole point. `continue-on-error` lets the JOB pass while the STEP still
+      # reports failure — so GitHub attaches an untitled red annotation,
+      # `Process completed with exit code 1`, to every green run of a repository
+      # with one complexity finding. dream-doll and proto.pilot found it
+      # independently within minutes of each other, both while auditing
+      # annotations rather than conclusions.
+      #
+      # proto.pilot's framing is the one worth keeping: **a channel whose
+      # severity does not mean what it says.** This step is informational by
+      # construction, so its annotation should be too — and a reader who learns
+      # to ignore the red learns to ignore the `::notice` lines beside it, which
+      # are the honest half of the same surface. Accumulation is not the
+      # mechanism; calibration is.
+      #
+      # `continue-on-error` is gone rather than kept alongside: with the exit
+      # code swallowed it can never fire, and a guard that cannot fire is one
+      # the next reader has to prove is dead before touching it.
+      - name: flake8 (informational)
+        run: flake8 . --max-complexity=15 --max-line-length=120 --statistics || true
+
+      - name: isort
+        run: isort --check-only --diff .
+
+      - name: black
+        run: black --check --line-length=120 .
+
+      # Pyright resolves its interpreter from PATH, so the dependency set it
+      # sees decides which errors exist. .github/pyright-deps.txt must stay a
+      # SUPERSET of the unit-test job's installs — a leaner environment is not a
+      # more permissive check, just a different one.
+      - name: Install type-check dependencies
+        run: pip install -r .github/pyright-deps.txt
+
+      - name: pyright (whole project)
+        run: |
+          pip install pyright==1.1.414
+          pyright --project pyrightconfig.json
+
+  # ── Node ────────────────────────────────────────────────────────────────
+  # Its OWN job, and the `if:` is the reason rather than the tidiness. These
+  # steps used to sit at the end of `lint`, which is gated on
+  # `full_suite == 'true'` — and `.github/scripts/docs-only.cjs` returns
+  # `fullSuite: false` for the ordinary case, *a ready pull request carrying
+  # code*. So eslint and prettier ran on the eventual push to
+  # `main` and on no pull request at all: after review, after
+  # merge, where the answer is too late to be a gate. Found by dream-doll.
+  #
+  # **How many trees that reached was a conjunction, and counting one half of
+  # it is how the first version of this comment got it wrong.** At the time the
+  # condition needed `--base-branch` different from `--release-branch`, because
+  # the classifier short-circuited on the release branch; the consequence needs
+  # a `package.json`. Six adopters, three with different branches, one of those
+  # with a manifest — so the live blast radius was a single repository, and not
+  # dream-doll, who reported the class and whose own tree could not reach the
+  # condition at all. Surveying either axis alone comes back reassuring, which
+  # is why it read as four.
+  #
+  # **That first clause is history now and is kept as history.** The
+  # short-circuit is qualified — it fires only where the two branches differ —
+  # so the classifier is live in a one-branch tree too, and this job's
+  # condition no longer depends on the branch pair at all. A count measured
+  # under a condition that has since changed is not wrong, but it stops being
+  # about today the moment nobody says which world it was measured in.
+  #
+  # `docs_only != 'true'` is the right condition here because **the node job
+  # is the product's own suite**, which a docs change cannot reach. The python
+  # unit suite has no condition at all: its tests do read `docs/`.
+  # `lint` and `integration` can afford `full_suite` because a lint finding is
+  # not a broken build; a product that does not typecheck is.
+  #
+  # It is in `release-please`'s `needs:`, so deleting this job is a
+  # `startup_failure` — zero jobs, no logs, nothing on the commit naming the
+  # line. `tests/test_workflow_job_graph.py` catches that in THIS tree, before
+  # the push, which is what makes a separate job safe to hand over.
+  node:
+    name: Node
+    needs: gate
+    if: needs.gate.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # SCAFFOLD-OPTIONAL package.json
+      # Absent under `--language python` and `--language none`. The guard stays
+      # at STEP level and the job runs unconditionally, which is deliberate: a
+      # skipped job skips its dependents, and this one is in `release-please`'s
+      # `needs:`. Same posture the release job takes for a `--versioning tag`
+      # tree — it runs, it reports, it has nothing to do.
+      #
+      # These steps exist because nothing shipped them. `.flake8`,
+      # `eslint.config.js` and `package.json` all configure gates that
+      # `skel check pre-push` runs, and only the python half was ever run by
+      # CI — so a `--language node` tree lint-checked its product on the
+      # author's laptop and nowhere else.
+      - name: Is there a node toolchain
+        id: node
+        run: |
+          if [ -f package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Node::no package.json here — this repository ships no node toolchain"
+          fi
+
+      # `lts/*` rather than a pin, and deliberately: this template ships no
+      # lockfile and no `engines` field, so there is no node version here to be
+      # faithful TO, and a number invented in a generator is one every adopter
+      # inherits and nobody maintains. Pin it in your own tree once you have a
+      # lockfile — `node-version-file: .nvmrc` is the seam, and it needs a file
+      # you declare before it needs anything from the template.
+      #
+      # `cache: npm` is deliberately absent and it is NOT because a lockfile
+      # might be missing — `cache: ${{ hashFiles('...') != '' && 'npm' || '' }}`
+      # would express that. Nobody has run that expression on a runner, and
+      # this repository has a standing rule against shipping a workflow
+      # expression it has only reasoned about. It is one line for an adopter
+      # who wants it and a broken CI for every node tree if an empty `cache:`
+      # turns out to be rejected.
+      - uses: actions/setup-node@v7
+        if: steps.node.outputs.present == 'true'
+        with:
+          node-version: 'lts/*'
+
+      # `npm ci` when a lockfile exists, `npm install` when it does not, and
+      # the branch is the fix rather than the fallback. `npm install` against a
+      # tree that HAS a lockfile resolves a fresh dependency set and ignores
+      # it — so the template was weakening the gate in exactly the adopters who
+      # had done the more careful thing. The template itself ships no lockfile,
+      # which is why the second branch stays and why its flags match
+      # `bin/skeletor-verify`'s, so the generator's grid and a scaffold's own CI
+      # install identically. Found by dream-doll.
+      - name: Install node toolchain
+        if: steps.node.outputs.present == 'true'
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      # `--if-present`, because the guard above and the scripts below live in
+      # DIFFERENT TIERS. `core` asks whether a `package.json` exists; what it
+      # needs to know is whether *node's* `package.json` is the one that exists,
+      # and no file in a scaffolded tree distinguishes those. Any tree holding a
+      # manifest without `lint:check` / `format:check` reads `present=true` and
+      # then exits 1 on a missing script, having done nothing wrong.
+      #
+      # The path is UPGRADE, not scaffold, and the difference was measured
+      # rather than reasoned: `skeletor-new --force` OVERWRITES a colliding
+      # `package.json` (verified — the adopter's is replaced by the overlay's,
+      # scripts and all), while `skeletor-upgrade` leaves a collision alone by
+      # design. So it is the adopter who upgrades, keeps their own manifest and
+      # receives this workflow who meets it. The first account of this bug had
+      # the scaffold losing the collision; it does not, and the fix is right for
+      # a reason the story got wrong.
+      #
+      # dream-doll found it at v0.16.0 and it is dream-doll's sentence: **the
+      # guard cannot test for the thing it depends on.** `bin/skeletor-verify`
+      # structurally cannot produce it either — a fresh scaffold always receives
+      # the overlay's `package.json` and therefore always has both scripts, so
+      # the harness only ever observes the state it always creates.
+      #
+      # Measured on npm 12.0.2 rather than assumed, because a flag that
+      # swallowed a real failure would be worse than the bug: absent -> exit 0,
+      # present and passing -> exit 0, present and FAILING -> exit 3, which
+      # propagates. Same posture as `|| true` on the informational step — make
+      # the step's severity mean what it says — and unlike a pin it costs an
+      # adopter nothing.
+      - name: eslint
+        if: steps.node.outputs.present == 'true'
+        run: npm run --if-present lint:check
+
+      - name: prettier
+        if: steps.node.outputs.present == 'true'
+        run: npm run --if-present format:check
+
+  # ── Unit tests ──────────────────────────────────────────────────────────
+  # Ungated, by `docs_only` too: the host-side suite is minutes, and tests here
+  # read `docs/` (plans, tables, references), so a docs-only change is exactly
+  # what they judge. Gated, a red tree merged green (skeletor#4, from mind.head).
+  unit-tests:
+    # The interpreter is in the NAME so a run says which leg failed: the matrix
+    # makes one job report as several, and legs sharing a name are
+    # indistinguishable on the checks list. **Do not require these names.** They
+    # report only when the matrix runs — skipped (a failed gate), it reports
+    # once under the unexpanded expression — and change whenever the matrix
+    # does. Protection requires `pytest`, the job below.
+    name: pytest ${{ matrix.python }}
+    needs: gate
+    runs-on: ubuntu-latest
+    # `--python` is a FLOOR — it renders into pyrightconfig's `pythonVersion`
+    # and black's `target-version`, both of which mean "at least this". CI used
+    # to test the floor alone, which is the one version whose failures you are
+    # least likely to hit in development and the one you are most likely to be
+    # running.
+    #
+    # The two failure modes a version matrix catches both live at the ENDS. A
+    # deprecation lands at the ceiling: something that works on the floor stops
+    # working on the newest interpreter your users have, and a single-version
+    # job finds out when somebody upgrades. A syntax feature lands below the
+    # floor: you write a `match` or a `|` union, it runs on your machine, and
+    # the floor you promised in your own config cannot parse it. Neither is
+    # visible from a job that runs one version, and which one it runs decides
+    # which half you are blind to.
+    #
+    # **`.skeletor.json`'s `--python-ceiling` is what this list is rendered
+    # from.** So change the versions by changing the recorded argument, never by
+    # editing the list:
+    #
+    #     skeletor-upgrade . --set-arg python-ceiling=<version> --dry-run
+    #
+    # Editing the list directly leaves the record saying the old value, which is
+    # what the base still renders — so this hunk conflicts on every upgrade, for
+    # ever, and the tree is green and current the whole time. Two adopters were
+    # in that state and neither was found by an instrument: one by resolving the
+    # same conflict a third time, one because the tree said so in prose.
+    #
+    # The instruction is the durable half and the reason is why to obey it. The
+    # sentence here before them said only *"opting in is a scaffold argument
+    # rather than a workflow edit"* — true, and describing a door that had
+    # already closed, because **a tree scaffolds once** and every argument it
+    # records was fixed before this flag existed. `--set-arg` is what reopened
+    # it, in v0.20.0, after node-zero measured the closed door and sky.boss
+    # arrived from a tree that had been running two legs since before the flag
+    # was written.
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12']
+    env:
+      # Under this flag an env-gate skip becomes a FAILURE. CI guarantees the
+      # environment, so a skip here means the harness broke — and a harness that
+      # skips its whole suite reports green.
+      SKEL_CI: '1'
+    steps:
+      # Full history, not the default shallow clone.
+      # `tests/test_docs_name_live_code.py` asks git whether a symbol was ever
+      # defined here, and `git log --all` answers "no" for everything in a
+      # shallow clone — so the suite would go green having looked at nothing.
+      # That test asserts the clone is not shallow rather than trusting it, so
+      # without this the job fails loudly instead; the depth is what makes it
+      # pass honestly. The gate job above already pays this cost.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # The interpreter, scripts/requirements.txt and the project itself: one
+      # action, shared by every workflow that runs this suite so they install the same thing.
+      - uses: ./.github/actions/unit-setup
+        with:
+          python-version: ${{ matrix.python }}
+
+      # `--junitxml` is not optional decoration: the step below reads that file
+      # and has nothing to say without it. It ran without one for as long as
+      # this template existed, and the ratchet reported a warning and exited 0.
+      - name: Unit suite
+        run: |
+          mkdir -p tmp
+          python -m pytest tests/ -m unit -q --durations=25 --junitxml=tmp/junit.xml
+
+      - name: Skip budget
+        run: python scripts/check_skip_budget.py --suite unit
+
+  # ── The unit suite's one name ─────────────────────────────────────────
+  # The matrix above reports once per leg, as `pytest <version>`, and a skipped
+  # matrix reports ONE check with the expression unexpanded — so a protection
+  # naming `pytest 3.12` can wait forever (stash.flow's PRs were blocked so).
+  # Protection requires THIS: one static name whatever the matrix holds.
+  # `docs/DEVELOPMENT.md` says the same to a reader deciding what to require.
+  # It passes only when the matrix passed. The suite has no condition of its
+  # own, so a skip means the gate failed, and a skip is never a pass.
+  unit-tests-result:
+    name: pytest
+    needs: [gate, unit-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: The matrix passed
+        env:
+          GATE: ${{ needs.gate.result }}
+          UNIT: ${{ needs.unit-tests.result }}
+        run: |
+          if [ "$GATE" != "success" ]; then
+            echo "::error::the gate did not pass ($GATE), so the unit suite did not run"
+            exit 1
+          fi
+          if [ "$UNIT" != "success" ]; then
+            echo "::error::unit suite: $UNIT"
+            exit 1
+          fi
+          echo "unit suite: $UNIT"
+
+  # ── Integration ─────────────────────────────────────────────────────────
+  # Gated on full_suite. When it is skipped it still REPORTS `skipped`, which
+  # branch protection accepts — that is why it is skipped at the job level and
+  # never via a trigger `paths-ignore`. A never-reported required check blocks
+  # a PR forever.
+  # FULL-SUITE-BECAUSE: it needs the stack up and seeded, which is the
+  # expensive half of this file, and its findings are about the composed
+  # system rather than about the change's own code. `check pre-push`
+  # declares it unreachable on a host for the same reason.
+  integration:
+    name: Integration Tests
+    needs: gate
+    if: needs.gate.outputs.full_suite == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SKEL_CI: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r scripts/requirements.txt
+
+      # Same step as the unit job, and the reason is stated there. It matters
+      # more here: a collection failure is exit 2, and the tolerance below is
+      # written for exit 5.
+      - name: Install the project, if it is one
+        run: python scripts/install_project.py
+
+      # SCAFFOLD: stand up the stack here. If two workflows both do this, put
+      # the steps in a composite action under .github/actions/ and have both
+      # use it — never hand-copy. See AGENTS.md Critical Rule 11.
+      # Exit 5 is pytest for "the marker selected nothing", and a scaffold ships
+      # no integration test — so a bare call is red on arrival, which is how a
+      # team learns that red is normal. An empty selection is REPORTED, never
+      # passed off as a run; every other non-zero status still fails the job.
+      # The unit job above gets no such tolerance: tests ship for it.
+      - name: Integration suite
+        run: |
+          python -m pytest tests/ -m integration -q --durations=25 || status=$?
+          if [ "${status:-0}" -eq 5 ]; then
+            echo "::notice title=Integration suite::no integration tests are marked yet — the suite is empty, not passing"
+          elif [ "${status:-0}" -ne 0 ]; then
+            exit "$status"
+          fi
+
+  # ── UI ──────────────────────────────────────────────────────────────────
+  # The job that makes the `ui` marker safe to use. Without it, marking a test
+  # `ui` DELETES it from CI: the unit job selects `-m unit` and deselects it, no
+  # other job selects it, and every check stays green over a smaller set. That
+  # shipped, and proto.pilot found it holding 36 tests that match the marker's
+  # own description word for word.
+  #
+  # `cli/test_cmds.py` is where the obligation is written down and
+  # `tests/test_ci_runs_every_suite.py` enforces it: every suite the CLI offers
+  # with `scheduled=True` must be selected by some workflow here.
+  #
+  # SCAFFOLD: a Textual or headless pilot needs nothing added below. A browser
+  # needs its driver installed; an Electron window needs a virtual display
+  # (`xvfb-run`). Add that here — this job failing for want of a display is the
+  # intended way to find out, and is the whole point of it not being silent.
+  #
+  # Or DELETE this job, if nothing here is marked `ui`: set `scheduled=False`
+  # with `unscheduled="empty"` on the row in cli/test_cmds.py and no other file
+  # references this one. `tests/test_workflow_job_graph.py` is what makes that
+  # claim checkable rather than remembered.
+  # FULL-SUITE-BECAUSE: it drives a user interface, so it needs the stack the
+  # integration job needs plus a display, and it is deliberately outside
+  # `release-please`'s `needs:` — a job that does not block a release has
+  # nothing to gain from running on every draft.
+  ui:
+    name: UI Tests
+    needs: gate
+    if: needs.gate.outputs.full_suite == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SKEL_CI: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r scripts/requirements.txt
+
+      # Same step as the unit job, and the reason is stated there.
+      - name: Install the project, if it is one
+        run: python scripts/install_project.py
+
+      # Exit 5 is pytest for "the marker selected nothing", and a scaffold ships
+      # no ui test — so an empty selection is REPORTED, never passed off as a
+      # run, exactly as in the integration job. Every other non-zero status
+      # still fails the job.
+      - name: UI suite
+        run: |
+          python -m pytest tests/ -m ui -q --durations=25 || status=$?
+          if [ "${status:-0}" -eq 5 ]; then
+            echo "::notice title=UI suite::no ui tests are marked yet — the suite is empty, not passing"
+          elif [ "${status:-0}" -ne 0 ]; then
+            exit "$status"
+          fi
+
+  # ── Release automation ──────────────────────────────────────────────────
+  # `ui` is deliberately NOT in `needs` below, and this is the reason: that job
+  # is the one job here documented as removable — a repo with nothing marked
+  # `ui` sets `scheduled=False` on the row and deletes it. A `needs:` entry
+  # naming a job that is gone is not a red job, it is a `startup_failure`: zero
+  # jobs, no logs, and nothing on the commit naming the line. proto.pilot pushed
+  # exactly that and got an empty run to stare at. `manual` is absent for the
+  # same reason, one step further along — it never had a job at all.
+  #
+  # **`node` IS in `needs` below, and that makes it non-deletable.** Read this
+  # before deleting it, because the sentence above invites exactly that: it
+  # names `ui` as *the one job here documented as removable*, and a `node` job
+  # in a repository with no `package.json` looks far more removable than `ui`
+  # does — it emits a `::notice` saying there is no node toolchain here and
+  # passes, every run, forever. That is four of six adopters at the time of
+  # writing, and deleting it without deleting the entry below is proto.pilot's
+  # empty run one job over.
+  #
+  # It is in `needs` on purpose: eslint and prettier are a product's gate where
+  # a product has one, and a release should not go out over them. If this tree
+  # will never have a `package.json`, deleting the job is reasonable — delete
+  # the `node` entry from `needs` in the same commit.
+  # `tests/test_workflow_job_graph.py` fails before the push either way, which
+  # is the backstop and not the instruction. Named by node-zero, who read this
+  # comment's authority against the change rather than only the change.
+  release-please:
+    name: Release Please
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, node, unit-tests, integration]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    # A step `if:` cannot read `secrets`, so whether an App is configured crosses
+    # into the step as a job-level env value. See the token comment below.
+    env:
+      HAS_RELEASE_APP: ${{ secrets.APP_ID != '' }}
+    steps:
+      # SCAFFOLD-OPTIONAL .github/release-please-config.json
+      # SCAFFOLD-OPTIONAL .github/.release-please-manifest.json
+      # The config is absent under `--versioning tag`, where the annotated git
+      # tag IS the version and no bot owns it. The job still runs and still
+      # REPORTS, which is deliberate: a required status context that never
+      # reports blocks a pull request forever, and this file says so at the top.
+      # It just has nothing to do.
+      - uses: actions/checkout@v7
+      - name: Is there a release config
+        id: config
+        run: |
+          if [ -f .github/release-please-config.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Release Please::not configured here — this repository versions by git tag"
+          fi
+      # An installation token for the organisation's GitHub App, minted per run.
+      # An App token expires in an hour, so no stored secret can carry one; this
+      # step is the only way the App reaches release-please. Skipped where no
+      # `APP_ID` secret exists, and the token below then falls through.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        if: steps.config.outputs.present == 'true' && env.HAS_RELEASE_APP == 'true'
+        with:
+          client-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      - uses: googleapis/release-please-action@v5
+        if: steps.config.outputs.present == 'true'
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .github/.release-please-manifest.json
+          # **Pinned, because the default is the repository's DEFAULT branch**,
+          # not the branch this job runs on. In a two-branch tree the default is
+          # usually the base branch, so unpinned, a push to the release branch
+          # opened its release pull request against the base branch instead —
+          # proto.pilot's and stash.flow's first runs did exactly that, and
+          # jam.sense's v0.104.0 stalled on it the same way.
+          target-branch: main
+          # Three doors, first one open wins.
+          #
+          # `GITHUB_TOKEN` is refused by `can_approve_pull_request_reviews`, a
+          # repo/org switch no `permissions:` block can lift and an enterprise
+          # policy can close for good: the branch and commit are created and the
+          # pull request is not, with "GitHub Actions is not permitted to create
+          # or approve pull requests." An App and a PAT are not the Actions
+          # identity, so neither is what is being refused.
+          #
+          # 1. **A GitHub App**, via `APP_ID` and `APP_PRIVATE_KEY` — the step
+          #    above. Org-level secrets reach every repository without a per-repo
+          #    edit. The App must be installed on this repository with contents
+          #    and pull-requests write; a missing installation fails the mint
+          #    step loudly rather than falling through.
+          # 2. **A PAT** in `RELEASE_TOKEN`.
+          # 3. **`github.token`**, which works wherever the switch is on.
+          #
+          # A skipped step's output is the empty string, which is what lets the
+          # first door fall through. Measured on a real runner, because
+          # `actionlint` holds this expression's syntax and knows nothing about
+          # which secrets exist in an account — the same blind spot as the switch:
+          #     secrets.RELEASE_TOKEN == ''                        -> true
+          #     (secrets.RELEASE_TOKEN || github.token) == github.token -> true
+          # and the App door, guarded exactly as above, in one run with the
+          # org's App secrets present and one name that was not:
+          #     env.HAS_RELEASE_APP (secrets.APP_ID != '')          -> 'true'
+          #     the mint step                                       -> success
+          #     this expression                                     -> the App token
+          #     an absent secret's bridge                           -> 'false', step skipped
+          #     the same expression after that skip                 -> github.token
+          #
+          # `APP_ID` is a generic name, chosen because it is what the
+          # organisation this was built for already holds at org level — so every
+          # repository there is served with no setup. In an organisation where
+          # `APP_ID` belongs to some other App, rename the pair here.
+          token: ${{ steps.app-token.outputs.token || secrets.RELEASE_TOKEN || github.token }}

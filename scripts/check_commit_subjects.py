@@ -1,0 +1,394 @@
+#!/usr/bin/env python3
+"""Every subject in this range is one Release Please can read.
+
+Not a style lint. The conventional-commit rule is enforced locally by the
+`commit-msg` hook in `.pre-commit-config.yaml`, which binds only contributors
+who ran `pre-commit install` — not a web-UI commit, not a merge made in the
+GitHub interface, not a machine. And the rule is not decorative here, because
+this tree wires those subjects to something:
+
+> **Release Please builds the changelog and decides the version bump by parsing
+> commit subjects.** A subject it cannot parse is not rejected — it is
+> *ignored*. The change ships with no changelog entry, and if it was the only
+> `fix` in the range, with no release at all.
+
+So this asks one question, and it is a contract between two components of this
+tree rather than a matter of taste: **will the release automation see this
+commit?** A subject that reads badly and parses is none of its business.
+
+## The vocabulary is read, never listed
+
+`changelog-sections` in `.github/release-please-config.json` IS the set of types
+this repository has configured, so it is the set this reads. A type that parses
+as conventional but has no section configured is one whose commits are invisible
+in the changelog — the same defect the unparseable ones have, and a list here
+would disagree with the config the day somebody edits one of them.
+
+## Scope, and why it is not "all history"
+
+The range only. A repository adopting this template has history written under
+whatever rule it had before, and a gate that is red on arrival is one people
+learn to ignore — so this can only ever see commits the current change adds.
+That makes it a ratchet at 0 for a fresh scaffold by construction, rather than
+by a baseline somebody has to maintain.
+
+Merge commits are excluded **structurally**, by parent count, not by matching
+"Merge pull request" — a subject-shaped exemption is one somebody's branch name
+can defeat, and it would silently exempt real commits.
+
+## Without Release Please
+
+A tree versioned by tag has no config to read, and there the contract is the
+commit-msg hook itself: every non-merge commit in the range is put through it,
+whole message and all, as it would have run at commit time. Machines are held
+to everything but its 72-column cap (`BOTS_EXEMPT_FROM_LENGTH`).
+
+Usage:  python scripts/check_commit_subjects.py [--range A..B] [--json]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+# Bootstrap only: put the package on sys.path so `scripts.paths` — which
+# owns every path below — can be imported. See scripts/paths.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.output import detail, emit, fail, item, ok, warn  # noqa: E402
+from scripts.paths import GITHUB_DIR, PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
+
+#: SCAFFOLD-OPTIONAL .github/release-please-config.json
+#: Absent under `--versioning tag`, where the git tag is the version and nothing
+#: parses these subjects. This file NAMES that path in order to handle its
+#: absence, which is a different act from sending a reader to it.
+RELEASE_CONFIG = GITHUB_DIR / "release-please-config.json"
+
+#: `type(scope)!: description` — the conventional-commit subject, as Release
+#: Please's parser reads it. The scope is optional, the `!` breaking marker is
+#: optional, the space after the colon is not.
+SUBJECT = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?(?P<breaking>!)?: (?P<description>.+)$")
+
+
+#: The commit-msg hook, and the one line in it that holds the types it falls
+#: back to when no Release Please config exists. Read from the hook rather than
+#: copied, so the two cannot disagree about what a subject may start with.
+HOOK = SCRIPTS_DIR / "hooks" / "conventional-commit-check.sh"
+_FALLBACK = re.compile(r'^FALLBACK_TYPES="([^"]+)"', re.MULTILINE)
+
+
+def hook_types() -> set:
+    """The types the commit-msg hook accepts without a Release Please config."""
+    if not HOOK.exists():
+        return set()
+    match = _FALLBACK.search(HOOK.read_text(encoding="utf-8"))
+    return set(match.group(1).split("|")) if match else set()
+
+
+def configured_types() -> set:
+    """The types this repository enforces: Release Please's sections, or the hook's.
+
+    **Under `--versioning tag` this returned nothing and the check printed a
+    tick.** The hook binds only contributors who ran `pre-commit install`, so a
+    web-UI commit, a merge button or a bot reached the release branch with any
+    subject at all, and four of six adopter trees are on that arm. sky.boss
+    wrote its own range check to close it. Without the config the contract is
+    the hook's own fallback list, which is still a contract.
+    """
+    if not RELEASE_CONFIG.exists():
+        return hook_types()
+    config = json.loads(RELEASE_CONFIG.read_text(encoding="utf-8"))
+    sections = []
+    for package in (config.get("packages") or {}).values():
+        sections += package.get("changelog-sections") or []
+    return {section["type"] for section in sections if "type" in section}
+
+
+def subjects(commit_range: str):
+    """`(sha, subject)` for every non-merge commit in the range, or None.
+
+    `--no-merges` is the structural exclusion: a merge commit's subject is
+    generated by whoever pressed the button and describes no change of its own.
+    Matching "Merge pull request" instead would be an exemption any branch name
+    could claim, and it would silently excuse real commits.
+
+    **None means git could not resolve the range**, which is not an empty range
+    and must not be reported as one. The first draft returned `[]` for both and
+    printed `0 subject(s) ... are readable` against a range that did not exist —
+    a green tick over a set nothing had looked at, which is the exact failure
+    this file is here to prevent, committed by the file itself.
+    """
+    result = subprocess.run(
+        ["git", "log", "--no-merges", "--format=%h\x1f%s", *commit_range.split()],
+        cwd=str(PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return [tuple(line.split("\x1f", 1)) for line in result.stdout.splitlines() if "\x1f" in line]
+
+
+#: Whether a machine's commit skips the hook's 72-column cap, and only that. A
+#: bump's subject grows with the package name, so binding bots to it reddens
+#: every such pull request on a length nobody chose. Set it False to hold
+#: machines to the cap as well (sky.boss does, by ruling).
+BOTS_EXEMPT_FROM_LENGTH = True
+
+
+def message(sha: str) -> str:
+    """The whole commit message, which is what the hook reads at commit time."""
+    return subprocess.run(
+        ["git", "log", "-1", "--format=%B", sha], cwd=str(PROJECT_ROOT), capture_output=True, text=True
+    ).stdout
+
+
+def hook_verdict(text: str, exempt_length: bool = False) -> str | None:
+    """What the commit-msg hook says about a message: `None` when it passes, else its first line.
+
+    Under tag versioning the hook IS the contract, so the gate runs it rather
+    than re-deriving its rules — the type list, one subject line, the 72-column
+    cap, the capital, the period. It is handed the full message: given only the
+    subject, its one-subject-line rule could never fire (sky.boss).
+    """
+    handle = tempfile.NamedTemporaryFile("w", suffix=".msg", delete=False, encoding="utf-8")
+    env = {**os.environ, "COMMIT_CHECK_EXEMPT_LENGTH": "1"} if exempt_length else None
+    try:
+        handle.write(text if text.endswith("\n") else text + "\n")
+        handle.close()
+        result = subprocess.run(
+            ["bash", str(HOOK), handle.name], cwd=str(PROJECT_ROOT), capture_output=True, text=True, env=env
+        )
+    finally:
+        os.unlink(handle.name)
+    if result.returncode == 0:
+        return None
+    said = (result.stderr or result.stdout).strip().splitlines()
+    return said[0].lstrip("❌ ").strip() if said else "the commit-msg hook refused it"
+
+
+def bot_authored(sha: str) -> bool:
+    """A machine's commit, which `BOTS_EXEMPT_FROM_LENGTH` may excuse from the cap."""
+    author = subprocess.run(
+        ["git", "log", "-1", "--format=%an %ae", sha], cwd=str(PROJECT_ROOT), capture_output=True, text=True
+    ).stdout.strip()
+    return "[bot]" in author or author.endswith("noreply.github.com") and "bot" in author.lower()
+
+
+def unreadable(inspected: list, types: set) -> list:
+    """`(sha, subject, why)` for each subject the contract in force will not accept.
+
+    With a Release Please config the contract is its section list: a subject it
+    cannot parse is skipped, not rejected. Without one the contract is the hook,
+    run as it would have run at commit time. A bot is exempt from the length
+    cap alone: skipping the whole hook for it let a second subject line and a
+    trailing period through, which the hook's own comment never asked for.
+    """
+    findings = []
+    hook_applies = not RELEASE_CONFIG.exists() and HOOK.exists()
+    for sha, subject in inspected:
+        match = SUBJECT.match(subject)
+        if not match:
+            findings.append((sha, subject, "does not parse as `type(scope): description`"))
+            continue
+        if match.group("type") not in types:
+            findings.append((sha, subject, f"type `{match.group('type')}` has no section in the config"))
+            continue
+        if hook_applies:
+            why = hook_verdict(message(sha) or subject, BOTS_EXEMPT_FROM_LENGTH and bot_authored(sha))
+            if why:
+                findings.append((sha, subject, why))
+    return findings
+
+
+def default_range() -> str:
+    """What is about to be pushed, or `HEAD` alone when git cannot say.
+
+    The default used to be `-1` — HEAD alone — described as *what a local run
+    wants*. It is not what the run that matters wants. `check pre-push` passes
+    no `--range`, so a push of three commits validated one of them here and CI
+    validated all three: **same gate, same name, two sets, and the larger one
+    runs after the push.** A gate whose local and remote answers differ is worse
+    than one that only runs remotely, because the green tick is doing work to
+    stop somebody looking.
+
+    `@{u}..HEAD` is the set the push will send. With no upstream — a branch
+    whose first push this is — **there is still something to diff against**, and
+    this said there was not: HEAD alone checked one of two unpushed commits and
+    printed ✅. proto.pilot measured it, and it reached every round branch here,
+    since each is a first push. What a first push sends is everything no remote
+    already has, which git spells `HEAD --not --remotes` — three arguments, so it
+    is expressed below as one range.
+
+    HEAD alone is left for the cases it is honest about: no remote, or a remote
+    that shares no history with HEAD — an empty one, or one this branch was never
+    cut from. In both, "everything no remote has" is the whole history, and in a
+    tree scaffolded over an existing app that is years of commits made before this
+    gate existed; failing a push on them would be a gate red for a reason nobody
+    can act on. proto.pilot named the empty-remote case, which v0.34.0 answered
+    with a bare `HEAD` — all of history, printed as though it were one commit.
+    The chosen range is printed either way, because the defect this function was
+    first fixed for was two ranges that looked identical in the output.
+
+    **One git argument, always — that is the released contract.** v0.33.0 returned
+    `"HEAD --not --remotes"`, three arguments in a string that only this module's
+    caller split, and sky.boss's own `check_commit_style.py`, which imported this
+    function then, broke at run time: a shared helper's return shape is released API exactly
+    as its name is (`tests/repo_files.py` records the `tracked` → `present` rename
+    that taught that). So the first-push set is expressed as one range: the
+    boundary git reports between what no remote has and what one does, as
+    `<boundary>..HEAD`. When the boundaries do not reduce to one commit that the
+    others descend from — a merge of two remote lines — the newest one is used,
+    which can include a commit a remote already has, and the range says so by
+    being printed.
+    """
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", *args], cwd=str(PROJECT_ROOT), capture_output=True, text=True)
+
+    if git("rev-parse", "--abbrev-ref", "@{u}").returncode == 0:
+        return "@{u}..HEAD"
+    if not git("remote").stdout.strip():
+        return "-1"
+    listed = git("rev-list", "--boundary", "HEAD", "--not", "--remotes").stdout.split()
+    boundaries = [line[1:] for line in listed if line.startswith("-")]
+    if not listed:
+        # Everything on HEAD is already on a remote: the push sends nothing.
+        return "HEAD..HEAD"
+    if not boundaries:
+        # Nothing on HEAD is on any remote — the remote is empty, or unrelated —
+        # so "what the push sends" is all of history: the no-remote case above.
+        return "-1"
+    # The boundary every other one is an ancestor of, when there is one — then the
+    # range is exact. Otherwise the most recent, in the order rev-list gave them.
+    for candidate in boundaries:
+        if all(git("merge-base", "--is-ancestor", other, candidate).returncode == 0 for other in boundaries):
+            return f"{candidate}..HEAD"
+    return f"{boundaries[0]}..HEAD"
+
+
+def described(commit_range: str, chosen: bool) -> str:
+    """The range as a sentence, because `-1` is a git spelling and not English.
+
+    `chosen` means *this script picked it*, and it gates the parenthetical
+    rather than the range: `-1` from `default_range()` means there was no
+    upstream, and `-1` from a caller means they asked for HEAD alone with an
+    upstream possibly sitting right there. Same string, two different facts,
+    and the explanation is only true for one of them.
+    """
+    if not chosen:
+        return commit_range
+    if commit_range == "HEAD..HEAD":
+        return "HEAD..HEAD (everything on HEAD is already on a remote)"
+    if commit_range.endswith("..HEAD") and not commit_range.startswith("@{u}"):
+        return f"{commit_range} (no upstream yet: everything no remote has)"
+    return {
+        "-1": "HEAD alone (no remote history to compare against)",
+        "@{u}..HEAD": "@{u}..HEAD (everything this push would send)",
+    }.get(commit_range, commit_range)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--range",
+        dest="commit_range",
+        default="",
+        help="git range to inspect. Empty means everything not yet on the upstream, "
+        "which is what a push will send; with no upstream, everything no remote has; "
+        "HEAD alone when no remote shares any history with HEAD — none configured, "
+        "an empty one, or an unrelated one.",
+    )
+    parser.add_argument("--json", action="store_true", help="machine-readable payload on stdout")
+    args = parser.parse_args()
+
+    chosen = not args.commit_range
+    commit_range = args.commit_range or default_range()
+    types = configured_types()
+    inspected = subjects(commit_range)
+
+    if inspected is None:
+        if args.json:
+            emit({"range": commit_range, "error": "git could not resolve this range"})
+        fail(f"git could not resolve `{commit_range}`")
+        detail("Two causes, and they take different remedies:")
+        detail("  · a shallow clone cannot see the base commit — deepen it, which is why")
+        detail("    CI checks out with `fetch-depth: 0`;")
+        detail("  · the base is an ORPHAN, which a force-push leaves behind. It is")
+        detail("    reachable from no ref, so there is nothing for a deeper fetch to")
+        detail("    reach — check HEAD alone, or name a range that exists.")
+        detail("An unresolvable range is an error and never a pass: reporting it as zero")
+        detail("subjects is a green tick over nothing.")
+        return 1
+
+    findings = unreadable(inspected, types) if types else []
+
+    if args.json:
+        emit(
+            {
+                "range": commit_range,
+                "inspected": len(inspected),
+                "release_please_configured": RELEASE_CONFIG.exists(),
+                "configured_types": sorted(types),
+                "unreadable": [{"sha": s, "subject": t, "why": w} for s, t, w in findings],
+            }
+        )
+
+    if not types:
+        # Two states with two answers. No config and no readable hook list is
+        # a broken tree, since the hook IS the contract there. A config giving
+        # no type a section is a finding about the config, said without failing.
+        # *"I could not read this" and "this key is empty" are different
+        # answers* — the split `frontmatter.py` and `check_skip_budget.py` make.
+        if not RELEASE_CONFIG.exists():
+            fail(f"no {RELEASE_CONFIG.name}, and the commit hook's FALLBACK_TYPES could not be read")
+            detail(f"The contract under tag versioning is {HOOK.relative_to(PROJECT_ROOT)}'s own type list.")
+            return 1
+        warn(f"no changelog-sections in {RELEASE_CONFIG.relative_to(PROJECT_ROOT)} — nothing to check against")
+        detail("Release Please is configured here and gives no commit type a changelog")
+        detail("section, so every subject is silently ignored by the release automation.")
+        detail("That is a finding about the config.")
+        return 0
+
+    if findings:
+        if RELEASE_CONFIG.exists():
+            fail(f"{len(findings)} subject(s) Release Please will silently ignore:")
+        else:
+            fail(f"{len(findings)} subject(s) the commit hook would have refused (versioned by tag; hook types apply):")
+        for sha, subject, why in findings:
+            item(f"{sha}  {subject}")
+            detail(f"       {why}")
+        detail()
+        if RELEASE_CONFIG.exists():
+            detail("An unreadable subject is not rejected by the release automation — it is")
+            detail("skipped. No changelog entry, and no version bump if this was the only")
+            detail(f"releasing change. Configured types: {', '.join(sorted(types))}.")
+        else:
+            detail("These reached the branch without the commit-msg hook — a web-UI commit, a")
+            detail("merge button, or `--no-verify`. The hook is the whole contract under tag")
+            detail(f"versioning; its types: {', '.join(sorted(types))}.")
+        detail("Reword with `git commit --amend` or an interactive rebase.")
+        return 1
+
+    # The count is reported because the alternative is a green tick over an
+    # empty range, and a range CAN legitimately be empty — a push of nothing but
+    # merge commits contains no subject this asks about. That is a different
+    # fact from an unresolvable range above, and the two must not print alike.
+    if not inspected:
+        ok(f"no non-merge commits in {described(commit_range, chosen)} — nothing to check")
+        return 0
+    if RELEASE_CONFIG.exists():
+        ok(f"{len(inspected)} subject(s) in {described(commit_range, chosen)} are readable by Release Please")
+    else:
+        ok(f"{len(inspected)} commit(s) in {described(commit_range, chosen)} pass the commit-msg hook")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
