@@ -89,7 +89,7 @@ import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, NoReturn, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -134,9 +134,7 @@ def sidecars(patches: Path) -> List[Path]:
     """Every sidecar a previous run left behind, by our own suffixes."""
     if not patches.is_dir():
         return []
-    return sorted(
-        p for p in patches.rglob("*") if p.is_file() and p.suffix in SIDECAR_SUFFIXES
-    )
+    return sorted(p for p in patches.rglob("*") if p.is_file() and p.suffix in SIDECAR_SUFFIXES)
 
 
 def report_stale(stale: List[Path], target: Path, because: List[str]) -> None:
@@ -189,7 +187,7 @@ def clear_sidecars(patches: Path) -> int:
     return removed
 
 
-def die(message: str) -> "NoReturn":  # type: ignore[valid-type]
+def die(message: str) -> NoReturn:
     say("❌", message)
     raise SystemExit(1)
 
@@ -216,9 +214,7 @@ def head_commit(target: Path) -> Optional[str]:
     opposite: writing makes the tree dirty, so that one must be read first or it
     answers about this run's own output.
     """
-    result = subprocess.run(
-        ["git", "-C", str(target), "rev-parse", "HEAD"], capture_output=True, text=True
-    )
+    result = subprocess.run(["git", "-C", str(target), "rev-parse", "HEAD"], capture_output=True, text=True)
     return result.stdout.strip() or None if result.returncode == 0 else None
 
 
@@ -286,14 +282,19 @@ def ref_on_remote(checkout: Path, ref: str, commit: str) -> Optional[str]:
     annotated tag's own row names the tag object, never the commit.
     """
     name = f"refs/tags/{ref}"
-    known = subprocess.run(["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet", name],
-                           capture_output=True, text=True)
+    known = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet", name], capture_output=True, text=True
+    )
     if known.returncode != 0 or not commit:
         return None
     try:
         # The peeled row comes back only when asked for by name.
-        result = subprocess.run(["git", "-C", str(checkout), "ls-remote", "origin", name, name + "^{}"],
-                                capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            ["git", "-C", str(checkout), "ls-remote", "origin", name, name + "^{}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
     except subprocess.TimeoutExpired:
         return None
     if result.returncode != 0:
@@ -311,9 +312,11 @@ def stamp_the_typed_tag(manifest: Path, checkout: Path, ref: str) -> None:
     so `--ref v9.9.9` could record `v0.46.0` while every line above it said v9.9.9
     (mind.head). The tagged scaffolder cannot be taught otherwise, so it is set here.
     """
+
     def commit(name: str) -> str:
-        return subprocess.run(["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet", name],
-                              capture_output=True, text=True).stdout.strip()
+        return subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet", name], capture_output=True, text=True
+        ).stdout.strip()
 
     if not commit(f"refs/tags/{ref}^{{commit}}") or commit(f"refs/tags/{ref}^{{commit}}") != commit("HEAD"):
         return
@@ -550,9 +553,7 @@ def render_with(checkout: Path, args: List[str], into: Path) -> None:
     # adopter recording a value below it — from an upgrade carrying a fix for a
     # gap they were already carrying unguarded, on the strength of a premise
     # ("red on arrival") that cannot apply to a tree three releases old.
-    help_text = subprocess.run(
-        [sys.executable, str(scaffolder), "--help"], capture_output=True, text=True
-    ).stdout
+    help_text = subprocess.run([sys.executable, str(scaffolder), "--help"], capture_output=True, text=True).stdout
     for flag in ("--allow-dirty", "--reproducing"):
         if flag in help_text:
             flags.append(flag)
@@ -1062,10 +1063,9 @@ def python_files(target: Path) -> List[str]:
     directory names to maintain. A tree with no git falls back to a walk, since
     reporting nothing would be the same silence this exists to break.
     """
+
     def ls(*flags: str) -> Optional[List[str]]:
-        result = subprocess.run(
-            ["git", "-C", str(target), "ls-files", *flags, "*.py"], capture_output=True, text=True
-        )
+        result = subprocess.run(["git", "-C", str(target), "ls-files", *flags, "*.py"], capture_output=True, text=True)
         return result.stdout.split() if result.returncode == 0 else None
 
     rels = ls()
@@ -1078,9 +1078,7 @@ def python_files(target: Path) -> List[str]:
         return sorted(dict.fromkeys(rels))
     skip = {".git", ".venv", "node_modules", "__pycache__", "tmp"}
     return sorted(
-        str(path.relative_to(target))
-        for path in target.rglob("*.py")
-        if not skip & set(path.relative_to(target).parts)
+        str(path.relative_to(target)) for path in target.rglob("*.py") if not skip & set(path.relative_to(target).parts)
     )
 
 
@@ -1273,8 +1271,11 @@ def repair_manifest(target: Path, manifest: dict, base_files: Dict[str, Path], a
         return 0
 
     say("→", f"{MANIFEST_NAME}: {len(recorded)} recorded → {len(rebuilt)} from the base render")
-    for label, entries in (("not produced by the render", surplus), ("wrong hash", wrong),
-                           ("produced but unrecorded", missing)):
+    for label, entries in (
+        ("not produced by the render", surplus),
+        ("wrong hash", wrong),
+        ("produced but unrecorded", missing),
+    ):
         if entries:
             detail(f"{len(entries)} {label}:")
             for rel in entries[:10]:
@@ -1283,8 +1284,12 @@ def repair_manifest(target: Path, manifest: dict, base_files: Dict[str, Path], a
                 detail(f"… and {len(entries) - 10} more")
 
     if args.json:
-        print(json.dumps({"ok": True, "repaired": not args.dry_run, "surplus": surplus,
-                          "wrong": wrong, "missing": missing}, indent=2))
+        print(
+            json.dumps(
+                {"ok": True, "repaired": not args.dry_run, "surplus": surplus, "wrong": wrong, "missing": missing},
+                indent=2,
+            )
+        )
     if args.dry_run:
         say("⏸️ ", "dry run — the manifest was not written")
         return 0
@@ -1364,9 +1369,7 @@ def report_reach(
 
     declined = [rel for rel in reached if rel in hashes and not (target / rel).exists()]
     edited = [
-        rel
-        for rel in reached
-        if rel in hashes and (target / rel).exists() and sha256(target / rel) != hashes[rel]
+        rel for rel in reached if rel in hashes and (target / rel).exists() and sha256(target / rel) != hashes[rel]
     ]
 
     say("→", f"{len(reached)} file(s) render differently under the new value(s)")
@@ -1378,7 +1381,9 @@ def report_reach(
 
     for rel in reached[:3]:
         before = (was[rel].read_text(encoding="utf-8", errors="replace").splitlines()) if rel in was else []
-        after = (head_files[rel].read_text(encoding="utf-8", errors="replace").splitlines()) if rel in head_files else []
+        after = (
+            (head_files[rel].read_text(encoding="utf-8", errors="replace").splitlines()) if rel in head_files else []
+        )
         changed = [(old, new) for old, new in zip(before, after) if old != new]
         # Line-for-line, so this only speaks when the render substituted in
         # place. A value that changes the SHAPE of a file shifts every line
@@ -1703,9 +1708,7 @@ class Normaliser:
             pinned = pins.get(hook)
             running = self._version(exe)
             if pinned and not self._matches(pinned, running):
-                self.unsupported.append(
-                    f"{hook} (tree pins {pinned}, {exe} reports {self._shown(running)})"
-                )
+                self.unsupported.append(f"{hook} (tree pins {pinned}, {exe} reports {self._shown(running)})")
                 continue
             self.steps.append((hook, exe, settings))
             self.bound.append(f"{hook} {self._shown(running)}")
@@ -1866,8 +1869,16 @@ def _theirs(hook: str, args: List[str]) -> List[str]:
 LINTERS = {
     "flake8": lambda exe, args, rel: [exe, *_theirs("flake8", args), "--stdin-display-name", rel, "-"],
     "ruff": lambda exe, args, rel: [
-        exe, "check", *_theirs("ruff", args), "--no-fix", "--force-exclude", "--output-format", "concise",
-        "--stdin-filename", rel, "-",
+        exe,
+        "check",
+        *_theirs("ruff", args),
+        "--no-fix",
+        "--force-exclude",
+        "--output-format",
+        "concise",
+        "--stdin-filename",
+        rel,
+        "-",
     ],
 }
 LINTERS["ruff-check"] = LINTERS["ruff"]
@@ -1949,7 +1960,7 @@ class Linter:
             if block is not None:
                 item = re.match(r"^(\s*)-\s*(.+?)\s*$", line)
                 if item and len(item.group(1)) > block and hook:
-                    found.setdefault(hook, []).append(item.group(2).strip("\'\""))
+                    found.setdefault(hook, []).append(item.group(2).strip("'\""))
                     continue
                 if line.strip():
                     block = None
@@ -1977,6 +1988,7 @@ class Linter:
 
     def consulted(self) -> List[str]:
         """What was asked, as a reader should see it: hook, and the binary that answered."""
+
         def shown(exe: str) -> str:
             path = Path(exe)
             return str(path.relative_to(self.target)) if path.is_relative_to(self.target) else exe
@@ -2342,8 +2354,9 @@ def gate_table(tree: Path, quick: bool) -> Tuple[Optional[Dict[str, bool]], str]
     command = [str(wrapper), "check", "pre-push", *(["--quick"] if quick else [])]
     try:
         # One stream, so a gate's own output stays beside the command that produced it.
-        done = subprocess.run(command, cwd=tree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                              timeout=3600)
+        done = subprocess.run(
+            command, cwd=tree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=3600
+        )
     except subprocess.TimeoutExpired:
         return None, "check pre-push ran past an hour"
     output = done.stdout
@@ -2375,8 +2388,15 @@ def hook_table(tree: Path) -> Tuple[Optional[Dict[str, bool]], Dict[str, List[st
         return None, {}, f"no {binary.relative_to(tree)} to run the hooks with"
     env = {**os.environ, "PATH": f"{binary.parent}{os.pathsep}{os.environ.get('PATH', '')}"}
     try:
-        done = subprocess.run([str(binary), "run", "--all-files", "--color", "never"], cwd=tree, env=env,
-                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=3600)
+        done = subprocess.run(
+            [str(binary), "run", "--all-files", "--color", "never"],
+            cwd=tree,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=3600,
+        )
     except subprocess.TimeoutExpired:
         return None, {}, "pre-commit ran past an hour"
     table: Dict[str, bool] = {}
@@ -2398,8 +2418,11 @@ def report_hooks(
 ) -> int:
     """Say which pre-commit hooks this upgrade turns red over existing files; 1 when any does or either run failed."""
     if before is None or after is None:
-        say("⚠️ ", f"rehearsal: the pre-commit hooks did not run {'before' if before is None else 'after'} "
-                   "the upgrade, so nothing is known about them")
+        say(
+            "⚠️ ",
+            f"rehearsal: the pre-commit hooks did not run {'before' if before is None else 'after'} "
+            "the upgrade, so nothing is known about them",
+        )
         detail(f"Their output is in {logs}.")
         return 1
     turned = [hook for hook, ok in after.items() if not ok and before.get(hook, True)]
@@ -2476,8 +2499,11 @@ def rehearse(args: argparse.Namespace) -> int:
                 (stage_tree / borrowed).symlink_to(target / borrowed)
         mode = " ".join(passthrough) or "no flags"
         where = "beside the tree" if stage.parent == target.parent else f"under {stage.parent}"
-        say("🎭", f"rehearsal: `check pre-push{' --quick' if args.quick else ''}` and the pre-commit hooks "
-                  f"before and after, in a worktree {where}; the upgrade is applied with: {mode}")
+        say(
+            "🎭",
+            f"rehearsal: `check pre-push{' --quick' if args.quick else ''}` and the pre-commit hooks "
+            f"before and after, in a worktree {where}; the upgrade is applied with: {mode}",
+        )
         before, before_out = gate_table(stage_tree, args.quick)
         failing_before = failing_tests(stage_tree)
         hooks_before, _, hooks_before_out = hook_table(stage_tree)
@@ -2529,7 +2555,7 @@ def failing_tests(tree: Path) -> set:
 def held_back(envelope: str) -> None:
     """Say when the rehearsed apply left conflicts, so the base never advanced (mind.head)."""
     try:
-        payload = json.JSONDecoder().raw_decode(envelope[envelope.index("{"):])[0]
+        payload = json.JSONDecoder().raw_decode(envelope[envelope.index("{") :])[0]
     except ValueError:
         return
     pending = payload.get("conflicted", []) + payload.get("collided", [])
@@ -2549,8 +2575,11 @@ def report_rehearsal(
 ) -> int:
     """Say which gates this upgrade turns red; 1 when any does, or when either run could not be read."""
     if before is None or after is None:
-        say("⚠️ ", f"rehearsal: `check pre-push` printed no gate table {'before' if before is None else 'after'} "
-                   "the upgrade, so nothing is known about its gates")
+        say(
+            "⚠️ ",
+            f"rehearsal: `check pre-push` printed no gate table {'before' if before is None else 'after'} "
+            "the upgrade, so nothing is known about its gates",
+        )
         detail(f"Its output is in {logs}.")
         return 1
     turned = [gate for gate, ok in after.items() if not ok and before.get(gate, True)]
@@ -2829,9 +2858,7 @@ def main() -> int:
         # would be recorded if this run applied anything, so there is one source
         # for "what is skeletor now" and the report cannot disagree with the
         # manifest it writes.
-        head_ref = (
-            json.loads((head_tree / MANIFEST_NAME).read_text(encoding="utf-8")).get("skeletor_ref") or "?"
-        )
+        head_ref = json.loads((head_tree / MANIFEST_NAME).read_text(encoding="utf-8")).get("skeletor_ref") or "?"
         if args.show:
             asked = Path(args.show)
             if asked.is_absolute():
@@ -2851,8 +2878,15 @@ def main() -> int:
         head_args = json.loads((head_tree / MANIFEST_NAME).read_text(encoding="utf-8")).get("args") or []
         for index, flag in enumerate(head_args):
             if flag.startswith("--") and flag not in recorded and flag not in set_args_applied:
-                value = head_args[index + 1] if index + 1 < len(head_args) and not head_args[index + 1].startswith("--") else ""
-                say("📌", f"new flag {flag}{'=' + value if value else ''}: not in this tree's record, so its default applies")
+                value = (
+                    head_args[index + 1]
+                    if index + 1 < len(head_args) and not head_args[index + 1].startswith("--")
+                    else ""
+                )
+                say(
+                    "📌",
+                    f"new flag {flag}{'=' + value if value else ''}: not in this tree's record, so its default applies",
+                )
                 detail(f"If that is wrong for this tree, set it on this run: --set-arg {flag}=<value>")
 
         # Where the render's own source stands, said plainly, because until now
@@ -2902,6 +2936,7 @@ def main() -> int:
                 capture_output=True,
                 text=True,
             ).stdout.strip()
+
             # Commits, not names: two tags on one commit are one render, and the
             # names differ exactly when --ref picked the other tag (mind.head).
             def commit_of(checkout: Path) -> str:
@@ -3943,9 +3978,7 @@ def main() -> int:
             # An orphaned conflict is not a formatting doubt (stash.flow), and with
             # nothing doubted the diagnostics have no reader (sky.boss): one line.
             doubted = [
-                rel
-                for rel in conflicted
-                if normaliser.applies(rel) and rel not in comment_only and rel not in orphaned
+                rel for rel in conflicted if normaliser.applies(rel) and rel not in comment_only and rel not in orphaned
             ]
             cannot_normalise = not args.normalise and bool(normaliser.reason or normaliser.unsupported)
             if cannot_normalise and not doubted:
@@ -4198,9 +4231,7 @@ def main() -> int:
                 # answers would come to disagree about something other than the flag,
                 # which is the drift `standing_divergence` exists as one function to
                 # prevent.
-                settled = sorted(
-                    set(diverged) - set(standing_divergence(target, *divergence_inputs, normaliser))
-                )
+                settled = sorted(set(diverged) - set(standing_divergence(target, *divergence_inputs, normaliser)))
                 if settled:
                     detail()
                     detail(f"{len(settled)} of these differ only in formatting — `--normalise` puts both")
@@ -4443,7 +4474,10 @@ def main() -> int:
             if pending and not args.ported:
                 say("↪️ ", f"wrapper already at {renamed_to}; the record keeps the old name until --ported")
             else:
-                say("↪️ ", f"wrapper already at {renamed_to}; this run {'would record' if args.dry_run else 'records'} the name")
+                say(
+                    "↪️ ",
+                    f"wrapper already at {renamed_to}; this run {'would record' if args.dry_run else 'records'} the name",
+                )
         elif renamed_from:
             say("↪️ ", f"wrapper {'would move' if args.dry_run else 'moved'}: {renamed_from} → {renamed_to}")
         if renamed_from and not move_held:
@@ -4458,17 +4492,23 @@ def main() -> int:
             ).stdout.split()
             stale = [rel for rel in mentions if rel not in head_files and rel not in (renamed_from, renamed_to)]
             if stale:
-                detail(f"{len(stale)} tracked file(s) skeletor does not write still mention `{renamed_from}` — yours to")
+                detail(
+                    f"{len(stale)} tracked file(s) skeletor does not write still mention `{renamed_from}` — yours to"
+                )
                 detail("reword; the merge does not reach them:")
                 for rel in stale[:15]:
                     item(rel)
                 if len(stale) > 15:
                     detail(f"… and {len(stale) - 15} more")
             detail("Merged from your copy of the old name, so an edit to it travels with the move;")
-            detail(f"the old file {'would be' if args.dry_run else 'is'} removed, as `git mv` would. Nothing is staged.")
+            detail(
+                f"the old file {'would be' if args.dry_run else 'is'} removed, as `git mv` would. Nothing is staged."
+            )
             links = repointed if not args.dry_run else [l for l in symlinks_to(target, renamed_from) if l != renamed_to]
             for link in links:
-                item(f"{link} → {renamed_to}  ({'would be ' if args.dry_run else ''}repointed; it pointed at the old name)")
+                item(
+                    f"{link} → {renamed_to}  ({'would be ' if args.dry_run else ''}repointed; it pointed at the old name)"
+                )
         if carried:
             say("✓ ", f"{len(carried)} file(s) the template changed already carry the change — nothing to write")
             detail("A previous run applied them, or you ported them. Merging them again can insert")

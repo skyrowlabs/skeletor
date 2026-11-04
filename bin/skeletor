@@ -77,9 +77,7 @@ def tools() -> list:
     assertion over an empty set is not a pass, so an empty scan is a failure
     here rather than a quiet nothing.
     """
-    found = sorted(
-        p for p in BIN.glob(f"{PREFIX}*") if p.is_file() and os.access(p, os.X_OK)
-    )
+    found = sorted(p for p in BIN.glob(f"{PREFIX}*") if p.is_file() and os.access(p, os.X_OK))
     if not found:
         sys.exit(f"skeletor: no {PREFIX}* tools found in {BIN} — this checkout is incomplete.")
     return found
@@ -100,7 +98,7 @@ def markdown() -> str:
 
 def usage() -> None:
     found = tools()
-    width = max(len(p.name[len(PREFIX):]) for p in found)
+    width = max(len(p.name[len(PREFIX) :]) for p in found)
     print("skeletor — one entry point for this repository's own tools.\n")
     print("  bin/skeletor <command> [args...]     run a tool; every flag is passed through")
     print("  bin/skeletor --markdown             emit the README's tool table\n")
@@ -121,7 +119,7 @@ def main() -> int:
 
     target = BIN / f"{PREFIX}{argv[0]}"
     if not (target.is_file() and os.access(target, os.X_OK)):
-        names = ", ".join(p.name[len(PREFIX):] for p in tools())
+        names = ", ".join(p.name[len(PREFIX) :] for p in tools())
         sys.exit(f"skeletor: no such command '{argv[0]}'. Available: {names}")
     os.execv(str(target), [str(target), *argv[1:]])
 

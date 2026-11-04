@@ -18,7 +18,6 @@ import argparse
 import hashlib
 import json
 import keyword
-import os
 import re
 import shutil
 import subprocess
@@ -549,9 +548,7 @@ def drop_absent_prose(target: Path, rendered: Iterable[str]) -> None:
             if compares:
                 words = needed.split()
                 if len(words) != 2:
-                    raise SystemExit(
-                        f"❌ {path}: `{opener.strip()}` takes exactly two rendered values, got {needed!r}"
-                    )
+                    raise SystemExit(f"❌ {path}: `{opener.strip()}` takes exactly two rendered values, got {needed!r}")
                 keep = (words[0] == words[1]) is inverted
             else:
                 keep = (target / needed).exists() is not inverted
@@ -565,12 +562,7 @@ def drop_absent_prose(target: Path, rendered: Iterable[str]) -> None:
                 # them, or the removal leaves a double blank that `prettier`
                 # reformats on the first commit — a scaffold whose first hook
                 # run rewrites a file it just wrote.
-                while (
-                    close + 1 < len(lines)
-                    and not lines[close + 1].strip()
-                    and out
-                    and not out[-1].strip()
-                ):
+                while close + 1 < len(lines) and not lines[close + 1].strip() and out and not out[-1].strip():
                     close += 1
             index = close + 1
 
@@ -649,7 +641,9 @@ def skeletor_ref() -> str:
     """
     result = subprocess.run(
         ["git", "describe", "--tags", "--always", "--dirty"],
-        cwd=str(SKELETOR), capture_output=True, text=True,
+        cwd=str(SKELETOR),
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         return ""
@@ -932,7 +926,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="render into a temporary directory and report what a real run would write "
-             "and which of your files it would overwrite; writes nothing",
+        "and which of your files it would overwrite; writes nothing",
     )
     parser.add_argument("--base-branch", default="develop", help="the integration branch")
     parser.add_argument(
@@ -1147,9 +1141,12 @@ def lost_entries(before: str, after: str, limit: int = 12) -> List[str]:
 
 def has_history(target: Path) -> bool:
     """Whether the repository at `target` has a commit for HEAD to name."""
-    return subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", "HEAD"], cwd=str(target), capture_output=True
-    ).returncode == 0
+    return (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", "HEAD"], cwd=str(target), capture_output=True
+        ).returncode
+        == 0
+    )
 
 
 def is_empty_clone(target: Path) -> bool:
@@ -1161,9 +1158,7 @@ def is_empty_clone(target: Path) -> bool:
     """
     if not (target / ".git").is_dir() or [p.name for p in target.iterdir()] != [".git"]:
         return False
-    top = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"], cwd=str(target), capture_output=True, text=True
-    )
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=str(target), capture_output=True, text=True)
     if top.returncode != 0 or Path(top.stdout.strip()).resolve() != target:
         return False
     staged = subprocess.run(["git", "ls-files"], cwd=str(target), capture_output=True, text=True)
@@ -1243,9 +1238,7 @@ def copy_overlays(
     return written
 
 
-def report_a_dry_run(
-    target: Path, pre_existing: Set[str], overlays: List[str], values: Dict[str, str], args
-) -> int:
+def report_a_dry_run(target: Path, pre_existing: Set[str], overlays: List[str], values: Dict[str, str], args) -> int:
     """Say what a real run would write, and what of yours it would replace.
 
     Every adopter so far took `--force` into a repository they already worked
@@ -1284,8 +1277,7 @@ def report_a_dry_run(
     print(f"→ dry run — nothing is written, and {target} is not created or modified")
     print()
     print(f"   {len(produced)} file(s) would be written into {target}")
-    print(f"   {args.tier} tier, --language {args.language}, --agent {args.agent}, "
-          f"--versioning {args.versioning}")
+    print(f"   {args.tier} tier, --language {args.language}, --agent {args.agent}, " f"--versioning {args.versioning}")
     print()
 
     if collides:
@@ -1695,12 +1687,16 @@ def main() -> int:
         wrote = sorted(set(produced) | {MANIFEST_NAME})
         ignored = subprocess.run(
             ["git", "check-ignore", "--", *wrote],
-            cwd=str(target), capture_output=True, text=True,
+            cwd=str(target),
+            capture_output=True,
+            text=True,
         ).stdout.split()
         stageable = sorted(set(wrote) - set(ignored))
-        staged = subprocess.run(
-            ["git", "add", "--", *stageable], cwd=str(target), capture_output=True, text=True
-        ) if stageable else None
+        staged = (
+            subprocess.run(["git", "add", "--", *stageable], cwd=str(target), capture_output=True, text=True)
+            if stageable
+            else None
+        )
         if staged is not None and staged.returncode == 0:
             print()
             print(f"→  staged {len(stageable)} file(s) skeletor wrote. Nothing was committed.")
@@ -1742,9 +1738,17 @@ def main() -> int:
         # step in the printed instructions is what installs them.
         subprocess.run(["git", "add", "-A"], cwd=str(target), check=False)
         first = subprocess.run(
-            ["git", "commit", "-q", "--no-verify", "-m",
-             f"chore: scaffold {values['PROJECT_SLUG']} from skeletor ({args.tier} tier)"],
-            cwd=str(target), capture_output=True, text=True,
+            [
+                "git",
+                "commit",
+                "-q",
+                "--no-verify",
+                "-m",
+                f"chore: scaffold {values['PROJECT_SLUG']} from skeletor ({args.tier} tier)",
+            ],
+            cwd=str(target),
+            capture_output=True,
+            text=True,
         )
         committed = first.returncode == 0
         if not committed:

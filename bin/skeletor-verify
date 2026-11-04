@@ -160,9 +160,7 @@ def subprocess_env(env_extra: Optional[dict] = None) -> dict:
 
 
 def run(cmd: List[str], cwd: Path, env_extra: Optional[dict] = None) -> Tuple[int, str]:
-    proc = subprocess.run(
-        cmd, cwd=str(cwd), capture_output=True, text=True, env=subprocess_env(env_extra)
-    )
+    proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, env=subprocess_env(env_extra))
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
@@ -321,7 +319,11 @@ def check_groups_register(tree: Path) -> Result:
     expected = expected_command_names(tree)
     missing = [name for name in expected if not re.search(rf"^\s+{re.escape(name)}\b", output, re.MULTILINE)]
     ok = not missing
-    detail = output if ok else f"{output}\n\nmodules present in {shell_package(tree).name}/ but absent from --help: {missing}"
+    detail = (
+        output
+        if ok
+        else f"{output}\n\nmodules present in {shell_package(tree).name}/ but absent from --help: {missing}"
+    )
     return Result(f"cli --help registers {len(expected)} groups", ok, time.time() - started, detail)
 
 
@@ -640,9 +642,11 @@ def pyright_gate(tree: Path, venv_python: Path, available: bool) -> List[Result]
             "pyright pre-flight agrees",
             agrees,
             time.time() - started,
-            f"the tree's pre-flight resolved {reported!r}, the grid built {_venv_identity(venv_python)}"
-            if not agrees
-            else f"pre-flight → {reported}",
+            (
+                f"the tree's pre-flight resolved {reported!r}, the grid built {_venv_identity(venv_python)}"
+                if not agrees
+                else f"pre-flight → {reported}"
+            ),
         )
     )
     return results
@@ -701,18 +705,20 @@ def check_adopter_regions_stay_empty(tree: Path) -> List[Result]:
         started = time.time()
         lines = (tree / rel).read_text(encoding="utf-8").splitlines()
         rule = next((i for i, line in enumerate(lines) if line.startswith(opening)), None)
-        below = [line for line in lines[rule + 1:] if line.strip() and not line.startswith("#")] if rule else []
+        below = [line for line in lines[rule + 1 :] if line.strip() and not line.startswith("#")] if rule else []
         last = next((line for line in reversed(lines) if line.strip()), "")
         problems = [f"{rel} has no adopter rule"] if rule is None else []
         problems += ["rendered below the rule:\n  " + "\n  ".join(below)] if below else []
         if last != closing:
             problems.append(f"the block's last line changed to {last!r}; an adopter's first line sits against it")
-        results.append(Result(
-            f"{rel}: skeletor renders nothing below the adopter's rule, and its last line is unchanged",
-            not problems,
-            time.time() - started,
-            "\n".join(problems),
-        ))
+        results.append(
+            Result(
+                f"{rel}: skeletor renders nothing below the adopter's rule, and its last line is unchanged",
+                not problems,
+                time.time() - started,
+                "\n".join(problems),
+            )
+        )
     return results
 
 
@@ -852,8 +858,7 @@ def informational_step_gate(tree: Path, venv_bin: Path) -> List[Result]:
                 "informational step: swallows the exit code and still reports",
                 code == 0 and saw_the_bait,
                 time.time() - started,
-                f"exit {code}, bait named in output: {saw_the_bait}\n"
-                f"--- {command}\n{output[-2000:]}",
+                f"exit {code}, bait named in output: {saw_the_bait}\n" f"--- {command}\n{output[-2000:]}",
             )
         )
 
@@ -1117,60 +1122,173 @@ const cases = JSON.parse(process.argv[3]);
 #: page whose URL says "security", and a substring test held back every one.
 HOLD_CASES = (
     ("minor pip", {}, {"requirements.txt": "-requests==2.31.0\n+requests==2.32.0"}, True, "an update, patch or minor"),
-    ("dev major, gate toolchain", {}, {"scripts/requirements.txt": "-pytest==8.3.0\n+pytest==9.0.0"}, True,
-     "dev-tool majors only (pytest 8.x -> 9.x"),
-    ("dev major, requirements-dev", {}, {"requirements-dev.txt": "-pytest-cov==5.0\n+pytest-cov==7.0"}, True,
-     "dev-tool majors only"),
-    ("runtime major pip", {}, {"requirements.txt": "-requests==2.31.0\n+requests==3.0.0"}, False,
-     "runtime major: requests 2.x -> 3.x"),
-    ("runtime major pyproject", {}, {"pyproject.toml": '-    "requests>=2.31",\n+    "requests>=3.0",'}, False,
-     "runtime major: requests 2.x"),
+    (
+        "dev major, gate toolchain",
+        {},
+        {"scripts/requirements.txt": "-pytest==8.3.0\n+pytest==9.0.0"},
+        True,
+        "dev-tool majors only (pytest 8.x -> 9.x",
+    ),
+    (
+        "dev major, requirements-dev",
+        {},
+        {"requirements-dev.txt": "-pytest-cov==5.0\n+pytest-cov==7.0"},
+        True,
+        "dev-tool majors only",
+    ),
+    (
+        "runtime major pip",
+        {},
+        {"requirements.txt": "-requests==2.31.0\n+requests==3.0.0"},
+        False,
+        "runtime major: requests 2.x -> 3.x",
+    ),
+    (
+        "runtime major pyproject",
+        {},
+        {"pyproject.toml": '-    "requests>=2.31",\n+    "requests>=3.0",'},
+        False,
+        "runtime major: requests 2.x",
+    ),
     # mind-head's: a one-line pyproject list, which a line-start pattern read none of.
-    ("inline list, runtime major", {},
-     {"pyproject.toml": '-dependencies = ["click>=8.1", "requests>=2.31"]\n+dependencies = ["click>=8.1", "requests>=3.0"]'},
-     False, "runtime major: requests 2.x -> 3.x"),
-    ("inline list, minor", {}, {"pyproject.toml": '-dev = ["pytest>=8.0"]\n+dev = ["pytest>=8.4"]'}, True,
-     "an update, patch or minor"),
-    ("a changed line it cannot read", {}, {"pyproject.toml": '-requests = "^2.31"\n+requests = "^3.0"'}, False,
-     "a changed line this cannot read"),
-    ("dev major npm", {}, {"package.json": '   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^10.0.0",'},
-     True, "dev-tool majors only (eslint 9.x"),
-    ("runtime major npm", {}, {"package.json": '   "dependencies": {\n-    "react": "^18.0.0",\n+    "react": "^19.0.0",'},
-     False, "runtime major: react 18.x"),
-    ("npm major, section unseen", {}, {"package.json": '-    "eslint": "^8.57.0",\n+    "eslint": "^9.0.0",'}, False,
-     "section is not known: eslint 8.x"),
+    (
+        "inline list, runtime major",
+        {},
+        {
+            "pyproject.toml": '-dependencies = ["click>=8.1", "requests>=2.31"]\n+dependencies = ["click>=8.1", "requests>=3.0"]'
+        },
+        False,
+        "runtime major: requests 2.x -> 3.x",
+    ),
+    (
+        "inline list, minor",
+        {},
+        {"pyproject.toml": '-dev = ["pytest>=8.0"]\n+dev = ["pytest>=8.4"]'},
+        True,
+        "an update, patch or minor",
+    ),
+    (
+        "a changed line it cannot read",
+        {},
+        {"pyproject.toml": '-requests = "^2.31"\n+requests = "^3.0"'},
+        False,
+        "a changed line this cannot read",
+    ),
+    (
+        "dev major npm",
+        {},
+        {"package.json": '   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^10.0.0",'},
+        True,
+        "dev-tool majors only (eslint 9.x",
+    ),
+    (
+        "runtime major npm",
+        {},
+        {"package.json": '   "dependencies": {\n-    "react": "^18.0.0",\n+    "react": "^19.0.0",'},
+        False,
+        "runtime major: react 18.x",
+    ),
+    (
+        "npm major, section unseen",
+        {},
+        {"package.json": '-    "eslint": "^8.57.0",\n+    "eslint": "^9.0.0",'},
+        False,
+        "section is not known: eslint 8.x",
+    ),
     # dream-doll's: a devDependencies opener in hunk 1 classed hunk 2's runtime major as dev.
-    ("section does not cross hunks", {},
-     {"package.json": '@@ -10,4 +10,4 @@\n   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^9.1.0",'
-      '\n@@ -2,4 +2,4 @@\n-    "react": "^18.0.0",\n+    "react": "^19.0.0",'}, False, "section is not known: react"),
-    ("the base manifest names a runtime section",
-     {"_manifests": {"package.json": '{"dependencies": {"react": "^18.0.0"}, "devDependencies": {"eslint": "^9.0.0"}}'}},
-     {"package.json": '@@ -10,4 +10,4 @@\n   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^9.1.0",'
-      '\n@@ -2,4 +2,4 @@\n-    "react": "^18.0.0",\n+    "react": "^19.0.0",'}, False, "runtime major: react 18.x"),
+    (
+        "section does not cross hunks",
+        {},
+        {
+            "package.json": '@@ -10,4 +10,4 @@\n   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^9.1.0",'
+            '\n@@ -2,4 +2,4 @@\n-    "react": "^18.0.0",\n+    "react": "^19.0.0",'
+        },
+        False,
+        "section is not known: react",
+    ),
+    (
+        "the base manifest names a runtime section",
+        {
+            "_manifests": {
+                "package.json": '{"dependencies": {"react": "^18.0.0"}, "devDependencies": {"eslint": "^9.0.0"}}'
+            }
+        },
+        {
+            "package.json": '@@ -10,4 +10,4 @@\n   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^9.1.0",'
+            '\n@@ -2,4 +2,4 @@\n-    "react": "^18.0.0",\n+    "react": "^19.0.0",'
+        },
+        False,
+        "runtime major: react 18.x",
+    ),
     # dream-doll#22: eslint deep in devDependencies, its hunk too short to show the opener.
-    ("the base manifest names a dev section",
-     {"_manifests": {"package.json": '{"devDependencies": {"eslint": "^9.0.0"}}'}},
-     {"package.json": '-    "eslint": "^9.0.0",\n+    "eslint": "^10.0.0",'}, True, "dev-tool majors only (eslint 9.x"),
-    ("lockfile beside a dev manifest", {},
-     {"package.json": '   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^10.0.0",',
-      "package-lock.json": '-      "debug": "3.2.7",\n+      "debug": "4.4.0",'}, True, "dev-tool majors only"),
-    ("lockfile alone", {}, {"package-lock.json": '-      "debug": "3.2.7",\n+      "debug": "4.4.0",'}, False,
-     "runtime major: debug 3.x"),
-    ("major action", {}, {".github/workflows/ci.yml": "-      - uses: actions/checkout@v6\n+      - uses: actions/checkout@v7"},
-     False, "runtime major: actions/checkout 6.x"),
-    ("grouped, major hidden", {"title": "bump the pip group with 4 updates"},
-     {"requirements.txt": "-a==1.0\n+a==1.1\n-b==1.0\n+b==2.0"}, False, "runtime major: b 1.x -> 2.x"),
+    (
+        "the base manifest names a dev section",
+        {"_manifests": {"package.json": '{"devDependencies": {"eslint": "^9.0.0"}}'}},
+        {"package.json": '-    "eslint": "^9.0.0",\n+    "eslint": "^10.0.0",'},
+        True,
+        "dev-tool majors only (eslint 9.x",
+    ),
+    (
+        "lockfile beside a dev manifest",
+        {},
+        {
+            "package.json": '   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^10.0.0",',
+            "package-lock.json": '-      "debug": "3.2.7",\n+      "debug": "4.4.0",',
+        },
+        True,
+        "dev-tool majors only",
+    ),
+    (
+        "lockfile alone",
+        {},
+        {"package-lock.json": '-      "debug": "3.2.7",\n+      "debug": "4.4.0",'},
+        False,
+        "runtime major: debug 3.x",
+    ),
+    (
+        "major action",
+        {},
+        {".github/workflows/ci.yml": "-      - uses: actions/checkout@v6\n+      - uses: actions/checkout@v7"},
+        False,
+        "runtime major: actions/checkout 6.x",
+    ),
+    (
+        "grouped, major hidden",
+        {"title": "bump the pip group with 4 updates"},
+        {"requirements.txt": "-a==1.0\n+a==1.1\n-b==1.0\n+b==2.0"},
+        False,
+        "runtime major: b 1.x -> 2.x",
+    ),
     ("title says major", {"title": "bump x (major)"}, {}, False, "title"),
-    ("security footer, patch", {"body": "You can disable automated security fix PRs for this repo"}, {}, True,
-     "security update (alerts footer), patch or minor"),
+    (
+        "security footer, patch",
+        {"body": "You can disable automated security fix PRs for this repo"},
+        {},
+        True,
+        "security update (alerts footer), patch or minor",
+    ),
     ("security label, patch", {"labels": [{"name": "security"}]}, {}, True, "`security` label"),
-    ("security, runtime major", {"labels": [{"name": "security"}]},
-     {"requirements.txt": "-requests==2.31.0\n+requests==3.0.0"}, False,
-     "security update (`security` label) with a runtime major: requests"),
-    ("security, dev major", {"labels": [{"name": "security"}]},
-     {"scripts/requirements.txt": "-pytest==8.3.0\n+pytest==9.0.0"}, True, "security update (`security` label) with dev-tool"),
-    ("security in a badge URL", {"body": "[badge](https://docs.github.com/managing-security-vulnerabilities/x)"}, {},
-     True, "an update, patch or minor"),
+    (
+        "security, runtime major",
+        {"labels": [{"name": "security"}]},
+        {"requirements.txt": "-requests==2.31.0\n+requests==3.0.0"},
+        False,
+        "security update (`security` label) with a runtime major: requests",
+    ),
+    (
+        "security, dev major",
+        {"labels": [{"name": "security"}]},
+        {"scripts/requirements.txt": "-pytest==8.3.0\n+pytest==9.0.0"},
+        True,
+        "security update (`security` label) with dev-tool",
+    ),
+    (
+        "security in a badge URL",
+        {"body": "[badge](https://docs.github.com/managing-security-vulnerabilities/x)"},
+        {},
+        True,
+        "an update, patch or minor",
+    ),
     ("not dependabot", {"user": {"login": "someone"}}, {}, False, "not dependabot[bot]"),
 )
 
@@ -1210,8 +1328,12 @@ def dependabot_config_gate(tree: Path) -> Result:
         ignored = set(re.findall(r"dependency-name:\s*(\S+)", pip))
         if ignored != wanted:
             problems.append(f"pip ignores {sorted(ignored)}; the lint parity test pins {sorted(wanted)}")
-    return Result("dependabot.yml: a cooldown on every ecosystem, and the double-pinned lint tools ignored",
-                  not problems, time.time() - started, "\n".join(problems))
+    return Result(
+        "dependabot.yml: a cooldown on every ecosystem, and the double-pinned lint tools ignored",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
 
 
 def dependabot_hold_gate(tree: Path) -> Result:
@@ -1235,8 +1357,12 @@ def dependabot_hold_gate(tree: Path) -> Result:
         # Only a runtime-major hold is labelled for `dep-migrate`; every other verdict is not.
         or (got[label].get("tier") == "runtime-major") != ("runtime major" in fragment)
     ]
-    return Result(f"dependabot hold: all {len(HOLD_CASES)} cases decided as designed", not wrong,
-                  time.time() - started, "\n".join(wrong))
+    return Result(
+        f"dependabot hold: all {len(HOLD_CASES)} cases decided as designed",
+        not wrong,
+        time.time() - started,
+        "\n".join(wrong),
+    )
 
 
 def gating_gate(tier: str, workdir: Path) -> List[Result]:
@@ -1267,9 +1393,28 @@ def _gating_shape(tier: str, workdir: Path, shape: str, base: str, release: str)
     started = time.time()
     target = workdir / f"gating-{shape}"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Gating",
-         "--slug", f"gating-{shape}", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
-         "--language", "python", "--base-branch", base, "--release-branch", release],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Gating",
+            "--slug",
+            f"gating-{shape}",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--base-branch",
+            base,
+            "--release-branch",
+            release,
+        ],
         cwd=workdir,
     )
     results.append(Result(f"gating/{shape}: scaffold", code == 0, time.time() - started, output))
@@ -1279,6 +1424,7 @@ def _gating_shape(tier: str, workdir: Path, shape: str, base: str, release: str)
     script = target / ".github" / "scripts" / "docs-only.cjs"
     harness = target / "harness.cjs"
     harness.write_text(_HARNESS, encoding="utf-8")
+
     def payload(pr: Optional[dict]) -> Optional[dict]:
         """`DECISIONS` names a branch; the script reads `pr.base.ref`.
 
@@ -1777,12 +1923,26 @@ def set_arg_gate(workdir: Path) -> List[Result]:
     if tree.exists():
         shutil.rmtree(tree)
     code, output = run(
-        [sys.executable, str(clean / "bin" / "skeletor-new"), str(tree),
-         "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
-         "--tier", "governed", "--language", "python"],
+        [
+            sys.executable,
+            str(clean / "bin" / "skeletor-new"),
+            str(tree),
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tagline",
+            "t",
+            "--tier",
+            "governed",
+            "--language",
+            "python",
+        ],
         cwd=SKELETOR,
     )
-    results.append(Result("set-arg: scaffold governed/python from a clean clone", code == 0, time.time() - started, output))
+    results.append(
+        Result("set-arg: scaffold governed/python from a clean clone", code == 0, time.time() - started, output)
+    )
     if code != 0:
         return results
 
@@ -1962,8 +2122,7 @@ def set_arg_gate(workdir: Path) -> List[Result]:
 
     was = declined_ceiling()
     code, out = run(
-        [sys.executable, str(upgrade_bin), str(declined_tree),
-         "--set-arg", "python-ceiling=3.15", "--allow-untagged"],
+        [sys.executable, str(upgrade_bin), str(declined_tree), "--set-arg", "python-ceiling=3.15", "--allow-untagged"],
         cwd=declined_tree,
     )
     still_declined = not (declined_tree / ".github" / "workflows" / "ci.yml").exists()
@@ -2076,9 +2235,26 @@ def line_length_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result
 
     target = workdir / "line-length-floor"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Narrow", "--slug", "narrow",
-         "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--language", "python",
-         "--line-length", str(floor - 1)],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Narrow",
+            "--slug",
+            "narrow",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--line-length",
+            str(floor - 1),
+        ],
         cwd=workdir,
     )
     results.append(
@@ -2105,9 +2281,26 @@ def line_length_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result
     started = time.time()
     at_floor = workdir / "line-length-at-floor"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(at_floor), "--allow-dirty", "--name", "Exact", "--slug", "exact",
-         "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--language", "python",
-         "--line-length", str(floor)],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(at_floor),
+            "--allow-dirty",
+            "--name",
+            "Exact",
+            "--slug",
+            "exact",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--line-length",
+            str(floor),
+        ],
         cwd=workdir,
     )
     if code != 0:
@@ -2141,9 +2334,27 @@ def line_length_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result
     started = time.time()
     reproduced = workdir / "line-length-reproducing"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(reproduced), "--allow-dirty", "--reproducing",
-         "--name", "Older", "--slug", "older", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
-         "--language", "python", "--line-length", str(floor - 1)],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(reproduced),
+            "--allow-dirty",
+            "--reproducing",
+            "--name",
+            "Older",
+            "--slug",
+            "older",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--line-length",
+            str(floor - 1),
+        ],
         cwd=workdir,
     )
     rendered_at = ""
@@ -2182,9 +2393,26 @@ def line_length_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result
     started = time.time()
     above = workdir / "line-length-ceiling"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(above), "--allow-dirty", "--name", "Wide", "--slug", "wide",
-         "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--language", "python",
-         "--line-length", str(ceiling + 1)],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(above),
+            "--allow-dirty",
+            "--name",
+            "Wide",
+            "--slug",
+            "wide",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--line-length",
+            str(ceiling + 1),
+        ],
         cwd=workdir,
     )
     results.append(
@@ -2199,9 +2427,27 @@ def line_length_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result
     started = time.time()
     binds = workdir / "line-length-ceiling-binds"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(binds), "--allow-dirty", "--reproducing",
-         "--name", "Wider", "--slug", "wider", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
-         "--language", "python", "--line-length", str(ceiling + 1)],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(binds),
+            "--allow-dirty",
+            "--reproducing",
+            "--name",
+            "Wider",
+            "--slug",
+            "wider",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--line-length",
+            str(ceiling + 1),
+        ],
         cwd=workdir,
     )
     if code == 0:
@@ -2233,8 +2479,24 @@ def prose_check_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result
         started = time.time()
         target = workdir / f"prose-{cli}"
         code, output = run(
-            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Prose", "--slug", f"prose-{cli}",
-             "--tagline", "t", "--cli", cli, "--tier", tier, "--language", "both"],
+            [
+                sys.executable,
+                str(SCAFFOLDER),
+                str(target),
+                "--allow-dirty",
+                "--name",
+                "Prose",
+                "--slug",
+                f"prose-{cli}",
+                "--tagline",
+                "t",
+                "--cli",
+                cli,
+                "--tier",
+                tier,
+                "--language",
+                "both",
+            ],
             cwd=workdir,
         )
         if code != 0:
@@ -2244,16 +2506,23 @@ def prose_check_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result
         on_disk = {rel for rel in scaffolder_prose_check() if (target / rel).exists()}
         recorded = {rel for rel in scaffolder_prose_check() if rel in manifest}
         if ships:
-            code, tested = run([str(venv_python), "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                                "tests/test_naming.py"], cwd=target)
+            code, tested = run(
+                [str(venv_python), "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_naming.py"], cwd=target
+            )
             ok = on_disk == recorded == scaffolder_prose_check() and code == 0
             label = f"prose check: --cli {cli} ships it, and it passes"
             output = tested
         else:
             ok = not on_disk and not recorded and "ordinary word" in output
             label = f"prose check: --cli {cli} leaves it out, records neither file, and says so"
-        results.append(Result(label, ok, time.time() - started,
-                              f"on disk: {sorted(on_disk)}\nrecorded: {sorted(recorded)}\n{output[-1500:]}"))
+        results.append(
+            Result(
+                label,
+                ok,
+                time.time() - started,
+                f"on disk: {sorted(on_disk)}\nrecorded: {sorted(recorded)}\n{output[-1500:]}",
+            )
+        )
     return results
 
 
@@ -2266,8 +2535,7 @@ def workflow_files(tree: Path) -> List[str]:
     """Every workflow a scaffold ships, as paths relative to the tree."""
     workflows = tree / ".github" / "workflows"
     return sorted(
-        str(path.relative_to(tree))
-        for path in list(workflows.glob("*.yml")) + list(workflows.glob("*.yaml"))
+        str(path.relative_to(tree)) for path in list(workflows.glob("*.yml")) + list(workflows.glob("*.yaml"))
     )
 
 
@@ -2321,8 +2589,14 @@ def actionlint_gate(tree: Path, venv_bin: Path) -> List[Result]:
     if not workflows:
         # The `filesAnalyzed` lesson, in the tool that has no equivalent field:
         # bare `actionlint` walks for workflows and exits 0 having found none.
-        return [Result("actionlint", False, time.time() - started,
-                       "no workflows under .github/workflows — a green here would mean nothing")]
+        return [
+            Result(
+                "actionlint",
+                False,
+                time.time() - started,
+                "no workflows under .github/workflows — a green here would mean nothing",
+            )
+        ]
 
     binary = venv_bin / "actionlint"
     if not binary.exists():
@@ -2346,10 +2620,22 @@ def actionlint_gate(tree: Path, venv_bin: Path) -> List[Result]:
     unexcused = [f for f in findings if not any(re.search(pattern, f) for pattern in ignores)]
     stale = [pattern for pattern in ignores if not any(re.search(pattern, f) for f in findings)]
     if unexcused or stale:
-        return [Result("actionlint: .github/actionlint.yaml ignores exactly what actionlint reports",
-                       False, time.time() - started,
-                       "\n".join(["not ignored:", *unexcused, "stale (actionlint no longer reports it; "
-                                   "delete it from template/core/.github/actionlint.yaml):", *stale]))]
+        return [
+            Result(
+                "actionlint: .github/actionlint.yaml ignores exactly what actionlint reports",
+                False,
+                time.time() - started,
+                "\n".join(
+                    [
+                        "not ignored:",
+                        *unexcused,
+                        "stale (actionlint no longer reports it; "
+                        "delete it from template/core/.github/actionlint.yaml):",
+                        *stale,
+                    ]
+                ),
+            )
+        ]
     output = bare
     # actionlint lints `run:` blocks by shelling out to shellcheck, and when it
     # is absent it simply does not, without saying so. GitHub's ubuntu runners
@@ -2357,8 +2643,8 @@ def actionlint_gate(tree: Path, venv_bin: Path) -> List[Result]:
     # about the same file — the pyright lesson wearing a different tool. Which
     # check actually ran goes in the label rather than being left to be assumed.
     depth = "with shellcheck" if shutil.which("shellcheck") else "no shellcheck"
-    return [Result(f"actionlint ({len(workflows)} workflows, {depth})", code == 0,
-                   time.time() - started, output)]
+    return [Result(f"actionlint ({len(workflows)} workflows, {depth})", code == 0, time.time() - started, output)]
+
 
 def check_docs_gate_sees_the_tree(tree: Path) -> Result:
     """`check docs` passing is worth nothing if its source→doc checker looked at
@@ -2477,9 +2763,9 @@ def check_seam_prose_is_held(tree: Path, venv_python: Path) -> Result:
 
     def verdict() -> Tuple[int, str]:
         return run(
-            [str(venv_python), "-m", "pytest", "-q", "tests/test_narrative_covers_lifecycle_folders.py",
-             "-k", "prose"],
-            cwd=tree, env_extra={"PYTHONPATH": str(tree)},
+            [str(venv_python), "-m", "pytest", "-q", "tests/test_narrative_covers_lifecycle_folders.py", "-k", "prose"],
+            cwd=tree,
+            env_extra={"PYTHONPATH": str(tree)},
         )
 
     for rel in seams:
@@ -2522,7 +2808,9 @@ def check_seam_prose_is_held(tree: Path, venv_python: Path) -> Result:
                 if sidecar.exists():
                     sidecar.unlink()
     # Only what this gate created: a directory left empty by the unlinks above.
-    for leftover in sorted((tree / "tmp" / "upgrade").rglob("*"), reverse=True) if (tree / "tmp" / "upgrade").exists() else []:
+    for leftover in (
+        sorted((tree / "tmp" / "upgrade").rglob("*"), reverse=True) if (tree / "tmp" / "upgrade").exists() else []
+    ):
         if leftover.is_dir() and not any(leftover.iterdir()):
             leftover.rmdir()
     if not seams:
@@ -2665,7 +2953,14 @@ def check_upgrade_is_noop(tree: Path) -> Result:
     """
     started = time.time()
     code, output = run(
-        [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--dry-run", "--from-dir", str(SKELETOR)],
+        [
+            sys.executable,
+            str(SKELETOR / "bin" / "skeletor-upgrade"),
+            str(tree),
+            "--dry-run",
+            "--from-dir",
+            str(SKELETOR),
+        ],
         cwd=tree,
     )
     passed = code == 0 and "already current" in output
@@ -2981,9 +3276,13 @@ def check_setup_blocks_agree(tree: Path, tier: str, language: str) -> Result:
     label = f"setup blocks: rendered floor and toolchain ({language})"
     blocks = setup_blocks_in(tree)
     if len(blocks) < 2:
-        return Result(label, False, time.time() - started,
-                      f"enrolled {len(blocks)} setup block(s) — a drift check needs at least two, "
-                      "and a scan that finds nothing passes having looked at nothing")
+        return Result(
+            label,
+            False,
+            time.time() - started,
+            f"enrolled {len(blocks)} setup block(s) — a drift check needs at least two, "
+            "and a scan that finds nothing passes having looked at nothing",
+        )
 
     budget = tree / "tests" / "setup_block_budget.json"
     if not budget.exists():
@@ -3007,11 +3306,7 @@ def check_setup_blocks_agree(tree: Path, tier: str, language: str) -> Result:
         if not any("scripts/install_project.py" in line for line in lines):
             problems.append(f"{name} never runs scripts/install_project.py, which every CI toolchain job does")
     for name, lines in sorted(blocks.items()):
-        installed = {
-            match.group("target")
-            for line in lines
-            if (match := SETUP_REQUIREMENTS.search(line))
-        }
+        installed = {match.group("target") for line in lines if (match := SETUP_REQUIREMENTS.search(line))}
         if "scripts/requirements.txt" not in installed:
             problems.append(
                 f"{name} never installs scripts/requirements.txt — it installs "
@@ -3047,8 +3342,12 @@ def check_setup_block_is_self_contained(tree: Path) -> Result:
     readme = (tree / "README.md").read_text(encoding="utf-8")
     match = re.search(r"^## Setup\n+```bash\n(.*?)^```", readme, re.MULTILINE | re.DOTALL)
     if not match:
-        return Result("README Setup block runs tools by path", False, time.time() - started,
-                      "no '## Setup' bash block in the generated README")
+        return Result(
+            "README Setup block runs tools by path",
+            False,
+            time.time() - started,
+            "no '## Setup' bash block in the generated README",
+        )
 
     commands = [
         segment.strip()
@@ -3058,8 +3357,12 @@ def check_setup_block_is_self_contained(tree: Path) -> Result:
         if segment.strip()
     ]
     if not commands:
-        return Result("README Setup block runs tools by path", False, time.time() - started,
-                      "the Setup block is empty — nothing was checked")
+        return Result(
+            "README Setup block runs tools by path",
+            False,
+            time.time() - started,
+            "the Setup block is empty — nothing was checked",
+        )
 
     bare = []
     for command in commands:
@@ -3119,8 +3422,9 @@ def check_scaffold_is_its_own_repo(tree: Path) -> Result:
         elif count.strip() != "1":
             problems.append(f"expected exactly one scaffold commit, found {count.strip()}")
 
-    return Result("scaffold is its own repo, at its first commit", not problems, time.time() - started,
-                  "\n".join(problems))
+    return Result(
+        "scaffold is its own repo, at its first commit", not problems, time.time() - started, "\n".join(problems)
+    )
 
 
 def agentless_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
@@ -3141,8 +3445,27 @@ def agentless_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     target = workdir / "agentless"
     started = time.time()
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Agentless", "--slug", "agentless", "--tagline", "t",
-         "--cli", CLI_NAME, "--tier", tier, "--language", "python", "--agent", "none", "--no-git"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Agentless",
+            "--slug",
+            "agentless",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--agent",
+            "none",
+            "--no-git",
+        ],
         cwd=workdir,
     )
     if code != 0:
@@ -3158,10 +3481,7 @@ def agentless_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     # pointer rather than tooling, which is what made it easy to leave: the
     # question the flag asks is not "does this do anything" but "is this
     # somebody's brand", and a pointer answers the second one too.
-    stray = sorted(
-        p.relative_to(target).as_posix()
-        for p in [*target.rglob(".claude"), *target.rglob("CLAUDE.md")]
-    )
+    stray = sorted(p.relative_to(target).as_posix() for p in [*target.rglob(".claude"), *target.rglob("CLAUDE.md")])
     results.append(
         Result(
             "--agent none: no vendor directory or file",
@@ -3229,8 +3549,24 @@ def host_exemption_gate(tier: str, workdir: Path, venv_python: Path) -> List[Res
     started = time.time()
     target = workdir / "host-exemption"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Hosted", "--slug", "hosted", "--tagline", "t",
-         "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Hosted",
+            "--slug",
+            "hosted",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+        ],
         cwd=workdir,
     )
     if code != 0:
@@ -3270,10 +3606,10 @@ def host_exemption_gate(tier: str, workdir: Path, venv_python: Path) -> List[Res
         '"""It runs on the host now, and still says it cannot."""\n'
         'CANNOT_RUN_ON_HOST = "needs the container mount"\n'
         "import argparse, json, sys\n"
-        'parser = argparse.ArgumentParser()\n'
+        "parser = argparse.ArgumentParser()\n"
         'parser.add_argument("--json", action="store_true")\n'
         "if parser.parse_args().json:\n"
-        "    json.dump({\"ok\": True}, sys.stdout)\n",
+        '    json.dump({"ok": True}, sys.stdout)\n',
         encoding="utf-8",
     )
     code, output = run([str(venv_python), *suite], cwd=target, env_extra={"PYTHONPATH": str(target)})
@@ -3344,10 +3680,30 @@ def one_branch_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]
         started = time.time()
         target = workdir / f"one-branch-{versioning}"
         code, output = run(
-            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Solo",
-             "--slug", f"solo-{versioning}", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
-             "--language", "python", "--versioning", versioning,
-             "--base-branch", "main", "--release-branch", "main"],
+            [
+                sys.executable,
+                str(SCAFFOLDER),
+                str(target),
+                "--allow-dirty",
+                "--name",
+                "Solo",
+                "--slug",
+                f"solo-{versioning}",
+                "--tagline",
+                "t",
+                "--cli",
+                CLI_NAME,
+                "--tier",
+                tier,
+                "--language",
+                "python",
+                "--versioning",
+                versioning,
+                "--base-branch",
+                "main",
+                "--release-branch",
+                "main",
+            ],
             cwd=workdir,
         )
         results.append(Result(f"{label}: scaffold", code == 0, time.time() - started, output))
@@ -3482,8 +3838,26 @@ def versioning_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: boo
     started = time.time()
     target = workdir / "versioning-tag"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Tagged", "--slug", "tagged", "--tagline", "t",
-         "--cli", CLI_NAME, "--tier", tier, "--language", "python", "--versioning", "tag"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Tagged",
+            "--slug",
+            "tagged",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--versioning",
+            "tag",
+        ],
         cwd=workdir,
     )
     if code != 0:
@@ -3493,8 +3867,24 @@ def versioning_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: boo
     started = time.time()
     default = workdir / "versioning-default"
     run(
-        [sys.executable, str(SCAFFOLDER), str(default), "--allow-dirty", "--name", "Default", "--slug", "defaulted", "--tagline", "t",
-         "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(default),
+            "--allow-dirty",
+            "--name",
+            "Default",
+            "--slug",
+            "defaulted",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+        ],
         cwd=workdir,
     )
     # `VERSIONING["tag"]` names paths from several tiers — the release skill is
@@ -3518,11 +3908,7 @@ def versioning_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: boo
     # the fullest tier — a path is shipped if some overlay contains it, which is
     # the question itself instead of a proxy for it.
     template = SKELETOR / "template"
-    stale = [
-        rel
-        for rel in elsewhere
-        if not any(next(template.glob(depth + rel), None) for depth in ("*/", "*/*/"))
-    ]
+    stale = [rel for rel in elsewhere if not any(next(template.glob(depth + rel), None) for depth in ("*/", "*/*/"))]
     present = [rel for rel in applicable if (target / rel).exists()]
     results.append(
         Result(
@@ -3628,9 +4014,31 @@ def badge_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     target = workdir / "badged"
     started = time.time()
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Badged", "--slug", "badged", "--tagline", "t",
-         "--cli", CLI_NAME, "--tier", tier, "--language", "both", "--org", "acme", "--visibility", "public",
-         "--release-branch", "trunk", "--no-git"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Badged",
+            "--slug",
+            "badged",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "both",
+            "--org",
+            "acme",
+            "--visibility",
+            "public",
+            "--release-branch",
+            "trunk",
+            "--no-git",
+        ],
         cwd=workdir,
     )
     if code != 0:
@@ -3662,8 +4070,25 @@ def badge_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     hidden = workdir / "badged-private"
     started = time.time()
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(hidden), "--allow-dirty", "--name", "Badged", "--slug", "badged",
-         "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--org", "acme", "--no-git"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(hidden),
+            "--allow-dirty",
+            "--name",
+            "Badged",
+            "--slug",
+            "badged",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--org",
+            "acme",
+            "--no-git",
+        ],
         cwd=workdir,
     )
     head = (hidden / "README.md").read_text()[:400] if code == 0 else output
@@ -3722,8 +4147,23 @@ def name_length_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result
         if target.exists():
             shutil.rmtree(target)
         code, output = run(
-            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "N" * length,
-             "--slug", "s" * length, "--cli", "c" * length, "--tagline", "t", "--tier", tier, "--no-git"],
+            [
+                sys.executable,
+                str(SCAFFOLDER),
+                str(target),
+                "--allow-dirty",
+                "--name",
+                "N" * length,
+                "--slug",
+                "s" * length,
+                "--cli",
+                "c" * length,
+                "--tagline",
+                "t",
+                "--tier",
+                tier,
+                "--no-git",
+            ],
             cwd=workdir,
         )
         if code != 0:
@@ -4008,8 +4448,25 @@ def dry_run_gate(tier: str, workdir: Path) -> List[Result]:
 
     def invoke(*extra: str) -> Tuple[int, str]:
         return run(
-            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Dry", "--slug", "dryrun", "--tagline", "t",
-             "--cli", CLI_NAME, "--tier", tier, "--language", "python", *extra],
+            [
+                sys.executable,
+                str(SCAFFOLDER),
+                str(target),
+                "--allow-dirty",
+                "--name",
+                "Dry",
+                "--slug",
+                "dryrun",
+                "--tagline",
+                "t",
+                "--cli",
+                CLI_NAME,
+                "--tier",
+                tier,
+                "--language",
+                "python",
+                *extra,
+            ],
             cwd=workdir,
         )
 
@@ -4034,8 +4491,25 @@ def dry_run_gate(tier: str, workdir: Path) -> List[Result]:
     started = time.time()
     absent = workdir / "dryrun-absent"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(absent), "--allow-dirty", "--name", "Dry", "--slug", "dryabsent", "--tagline", "t",
-         "--cli", CLI_NAME, "--tier", tier, "--language", "python", "--dry-run"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(absent),
+            "--allow-dirty",
+            "--name",
+            "Dry",
+            "--slug",
+            "dryabsent",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--dry-run",
+        ],
         cwd=workdir,
     )
     results.append(
@@ -4090,9 +4564,28 @@ def branch_gate(tier: str, workdir: Path) -> List[Result]:
     def build(name: str, base: str, release: str) -> Optional[Path]:
         target = workdir / name
         code, output = run(
-            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Branchy", "--slug", name, "--tagline", "t",
-             "--cli", CLI_NAME, "--tier", tier, "--language", "python",
-             "--base-branch", base, "--release-branch", release],
+            [
+                sys.executable,
+                str(SCAFFOLDER),
+                str(target),
+                "--allow-dirty",
+                "--name",
+                "Branchy",
+                "--slug",
+                name,
+                "--tagline",
+                "t",
+                "--cli",
+                CLI_NAME,
+                "--tier",
+                tier,
+                "--language",
+                "python",
+                "--base-branch",
+                base,
+                "--release-branch",
+                release,
+            ],
             cwd=workdir,
         )
         results.append(Result(f"branches: scaffold {base}/{release}", code == 0, time.time() - started, output))
@@ -4163,8 +4656,22 @@ def empty_clone_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: bo
     target = base / "clone"
     run(["git", "clone", "--quiet", str(base / "remote.git"), str(target)], cwd=workdir)
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Clone", "--tagline", "t",
-         "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Clone",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+        ],
         cwd=workdir,
     )
     results.append(Result("empty clone: scaffolds without --force", code == 0, time.time() - started, output))
@@ -4179,8 +4686,14 @@ def empty_clone_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: bo
         problems.append("left uncommitted:\n" + status)
     if "git switch -c develop" not in output:
         problems.append("the report does not say to cut the base branch from the clone's branch")
-    results.append(Result("empty clone: committed on the clone's branch, nothing left over",
-                          not problems, time.time() - started, "\n".join(problems)))
+    results.append(
+        Result(
+            "empty clone: committed on the clone's branch, nothing left over",
+            not problems,
+            time.time() - started,
+            "\n".join(problems),
+        )
+    )
     (target / ".venv").symlink_to(venv_python.parents[1])
     for gate in gates(target, venv_python, pyright_ok):
         gate.label = f"empty clone: {gate.label}"
@@ -4191,12 +4704,32 @@ def empty_clone_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: bo
     run(["git", "init", "--quiet", "-b", "main", str(held)], cwd=workdir)
     git_in(held, "commit", "--quiet", "--allow-empty", "-m", "chore: theirs")
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(held), "--allow-dirty", "--name", "Held", "--tagline", "t",
-         "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(held),
+            "--allow-dirty",
+            "--name",
+            "Held",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+        ],
         cwd=workdir,
     )
-    results.append(Result("empty clone: a clone with history still needs --force",
-                          code != 0 and "--force" in output, time.time() - started, output))
+    results.append(
+        Result(
+            "empty clone: a clone with history still needs --force",
+            code != 0 and "--force" in output,
+            time.time() - started,
+            output,
+        )
+    )
     return results
 
 
@@ -4224,7 +4757,10 @@ def secrets_contract_gate(workdir: Path, venv_python: Path) -> List[Result]:
         started = time.time()
         proc = subprocess.run(
             [str(venv_python), "scripts/env_shape.py", "--json"],
-            cwd=str(tree), capture_output=True, text=True, env=subprocess_env(None),
+            cwd=str(tree),
+            capture_output=True,
+            text=True,
+            env=subprocess_env(None),
         )
         try:
             payload = json.loads(proc.stdout)
@@ -4249,19 +4785,29 @@ def secrets_contract_gate(workdir: Path, venv_python: Path) -> List[Result]:
     hook = [str(venv_python), "-m", "pre_commit", "run", "detect-private-key", "--all-files"]
     code, output = run(hook, cwd=tree)
     if code != 0 and "detect private key" not in output.lower():
-        results.append(Result("⚠️  detect-private-key: SKIPPED, the hook could not be fetched", True,
-                              time.time() - started, output))
+        results.append(
+            Result(
+                "⚠️  detect-private-key: SKIPPED, the hook could not be fetched", True, time.time() - started, output
+            )
+        )
         return results
-    results.append(Result("agentic: detect-private-key is clean on a fresh tree", code == 0,
-                          time.time() - started, output))
+    results.append(
+        Result("agentic: detect-private-key is clean on a fresh tree", code == 0, time.time() - started, output)
+    )
     planted = tree / "planted_key.txt"
     planted.write_text("-----BEGIN " + "OPENSSH PRIVATE KEY-----\nAAAA\n", encoding="utf-8")
     git_in(tree, "add", "planted_key.txt")
     code, output = run(hook, cwd=tree)
     git_in(tree, "rm", "--cached", "--quiet", "planted_key.txt")
     planted.unlink()
-    results.append(Result("agentic: detect-private-key catches a planted key header",
-                          code != 0 and "planted_key.txt" in output, time.time() - started, output))
+    results.append(
+        Result(
+            "agentic: detect-private-key catches a planted key header",
+            code != 0 and "planted_key.txt" in output,
+            time.time() - started,
+            output,
+        )
+    )
     results.extend(leak_scan_gate(workdir, venv_python))
     return results
 
@@ -4306,15 +4852,22 @@ def leak_scan_gate(workdir: Path, venv_python: Path) -> List[Result]:
         return [Result("leak scan: --pinned names the hook's version", False, time.time() - started, version)]
     binary, why = fetch_gitleaks(workdir, version.strip())
     if binary is None:
-        return [Result(f"⚠️  leak scan: SKIPPED, gitleaks {version.strip()} could not be fetched", True,
-                       time.time() - started, why)]
+        return [
+            Result(
+                f"⚠️  leak scan: SKIPPED, gitleaks {version.strip()} could not be fetched",
+                True,
+                time.time() - started,
+                why,
+            )
+        ]
     path = {"PATH": f"{binary.parent}{os.pathsep}{os.environ.get('PATH', '')}"}
     results: List[Result] = []
     for tree in trees:
         started = time.time()
         code, output = run([str(venv_python), "scripts/leak_scan.py", "--range", "-1"], cwd=tree, env_extra=path)
-        results.append(Result(f"{tree.name}: leak scan of the scaffold commit is clean", code == 0,
-                              time.time() - started, output))
+        results.append(
+            Result(f"{tree.name}: leak scan of the scaffold commit is clean", code == 0, time.time() - started, output)
+        )
     tree = trees[-1]
     started = time.time()
     leak = tree / "planted_leak.py"
@@ -4326,8 +4879,14 @@ def leak_scan_gate(workdir: Path, venv_python: Path) -> List[Result]:
     git_in(tree, "commit", "--quiet", "--no-verify", "-m", "chore: plant")
     code, output = run([str(venv_python), "scripts/leak_scan.py", "--range", "-1"], cwd=tree, env_extra=path)
     git_in(tree, "reset", "--quiet", "--hard", "HEAD~1")
-    results.append(Result(f"{tree.name}: leak scan catches a planted token", code == 1 and "planted_leak.py" in output,
-                          time.time() - started, output))
+    results.append(
+        Result(
+            f"{tree.name}: leak scan catches a planted token",
+            code == 1 and "planted_leak.py" in output,
+            time.time() - started,
+            output,
+        )
+    )
     return results
 
 
@@ -4447,8 +5006,13 @@ def owned_gate(workdir: Path) -> List[Result]:
         (tree / rel).write_text("the adopter's own\n", encoding="utf-8")
     git_in(tree, "add", "-A")
     git_in(tree, "commit", "-m", "plant: an owned file and a collision")
-    upgrade = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree),
-               "--no-base", "--allow-untagged"]
+    upgrade = [
+        sys.executable,
+        str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"),
+        str(tree),
+        "--no-base",
+        "--allow-untagged",
+    ]
     # stdout alone: the envelope goes there and the report to stderr, which `run` merges.
     ran = subprocess.run([*upgrade, "--own", mine, "--ported", "--json"], cwd=tree, capture_output=True, text=True)
     code, output = ran.returncode, ran.stderr
@@ -4473,8 +5037,14 @@ def owned_gate(workdir: Path) -> List[Result]:
     code, again = run([*upgrade, "--dry-run"], cwd=tree)
     if "🏠" not in again or "conflict" in again.split("🏠")[0].lower() and mine in again.split("🏠")[0]:
         problems.append(f"a second run does not carry ownership forward:\n{again[-800:]}")
-    return [Result("owned: never merged into, and a ported collision becomes owned", not problems,
-                   time.time() - started, "\n".join(problems))]
+    return [
+        Result(
+            "owned: never merged into, and a ported collision becomes owned",
+            not problems,
+            time.time() - started,
+            "\n".join(problems),
+        )
+    ]
 
 
 def cron_notice_gate(workdir: Path) -> List[Result]:
@@ -4490,8 +5060,14 @@ def cron_notice_gate(workdir: Path) -> List[Result]:
     result, tree = scaffold("agentic", "python", workdir, name="cron-notice")
     if not result.ok:
         return [Result(f"cron notice: {result.label}", False, result.seconds, result.output)]
-    upgrade = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree),
-               "--no-base", "--allow-untagged", "--dry-run"]
+    upgrade = [
+        sys.executable,
+        str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"),
+        str(tree),
+        "--no-base",
+        "--allow-untagged",
+        "--dry-run",
+    ]
     _, quiet = run(upgrade, cwd=tree)
     manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
     registry = "scripts/reporting/jobs.py"
@@ -4502,8 +5078,14 @@ def cron_notice_gate(workdir: Path) -> List[Result]:
     git_in(tree, "commit", "-am", "plant: the template moved the registry")
     _, loud = run(upgrade, cwd=tree)
     ok = "report cron --check" not in quiet and f"would change {registry}" in loud and "report cron --check" in loud
-    return [Result("cron notice: a changed job registry names `report cron --check`, an unchanged one does not",
-                   ok, time.time() - started, f"--- current ---\n{quiet[-600:]}\n--- moved ---\n{loud[-900:]}")]
+    return [
+        Result(
+            "cron notice: a changed job registry names `report cron --check`, an unchanged one does not",
+            ok,
+            time.time() - started,
+            f"--- current ---\n{quiet[-600:]}\n--- moved ---\n{loud[-900:]}",
+        )
+    ]
 
 
 def scheduled_rehearsal_gate(workdir: Path, venv_python: Path) -> List[Result]:
@@ -4520,8 +5102,14 @@ def scheduled_rehearsal_gate(workdir: Path, venv_python: Path) -> List[Result]:
     (tree / ".venv").symlink_to(venv_python.parents[1])
     rehearse = [f"./{CLI_NAME}", "check", "scheduled"]
     code, green = run(rehearse, cwd=tree)
-    results = [Result("scheduled rehearsal: a fresh governed tree's nightly passes in a clean venv",
-                      code == 0 and "rehearsed green" in green, time.time() - started, green[-1500:])]
+    results = [
+        Result(
+            "scheduled rehearsal: a fresh governed tree's nightly passes in a clean venv",
+            code == 0 and "rehearsed green" in green,
+            time.time() - started,
+            green[-1500:],
+        )
+    ]
     requirements = tree / "scripts" / "requirements.txt"
     text = requirements.read_text(encoding="utf-8")
     planted = "\n".join(line for line in text.splitlines() if not line.startswith("pytest-cov")) + "\n"
@@ -4531,14 +5119,22 @@ def scheduled_rehearsal_gate(workdir: Path, venv_python: Path) -> List[Result]:
     git_in(tree, "commit", "-qam", "plant: the nightly's coverage plugin is not installed")
     started = time.time()
     code, red = run(rehearse, cwd=tree)
-    suite, unit = run([str(venv_python), "-m", "pytest", "tests/", "-m", "unit", "-q"], cwd=tree,
-                      env_extra={"PYTHONPATH": str(tree)})
+    suite, unit = run(
+        [str(venv_python), "-m", "pytest", "tests/", "-m", "unit", "-q"], cwd=tree, env_extra={"PYTHONPATH": str(tree)}
+    )
     caught = code == 1 and "unrecognized arguments: --cov" in red and suite == 0
     worktrees = git_in(tree, "worktree", "list")[1].strip().splitlines()
-    results.append(Result("scheduled rehearsal: a dependency only the nightly needs is red here and nowhere else",
-                          caught, time.time() - started, f"{red[-1500:]}\n--- unit ---\n{unit[-400:]}"))
-    results.append(Result("scheduled rehearsal: leaves no worktree registered", len(worktrees) == 1, 0.0,
-                          "\n".join(worktrees)))
+    results.append(
+        Result(
+            "scheduled rehearsal: a dependency only the nightly needs is red here and nowhere else",
+            caught,
+            time.time() - started,
+            f"{red[-1500:]}\n--- unit ---\n{unit[-400:]}",
+        )
+    )
+    results.append(
+        Result("scheduled rehearsal: leaves no worktree registered", len(worktrees) == 1, 0.0, "\n".join(worktrees))
+    )
     return results
 
 
@@ -4571,8 +5167,9 @@ def _declare_foreign(tree: Path, configs: bool) -> None:
         (tree / name).write_text(text.replace(old, new, 1), encoding="utf-8")
     pyproject = tree / "pyproject.toml"
     text = pyproject.read_text(encoding="utf-8")
-    pyproject.write_text(re.sub(r'(^skip = \[.*?)"tmp"\]', r'\1"tmp", "vendor"]', text, count=1, flags=re.M),
-                         encoding="utf-8")
+    pyproject.write_text(
+        re.sub(r'(^skip = \[.*?)"tmp"\]', r'\1"tmp", "vendor"]', text, count=1, flags=re.M), encoding="utf-8"
+    )
 
 
 def foreign_subtree_gate(workdir: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
@@ -4593,16 +5190,29 @@ def foreign_subtree_gate(workdir: Path, venv_python: Path, pyright_ok: bool) -> 
     git_in(tree, "add", "-A")
     git_in(tree, "commit", "-qm", "plant: a vendored tree")
     red = sorted(r.label for r in gates(tree, venv_python, pyright_ok) if not r.ok)
-    results = [Result("foreign subtree: undeclared, a vendored tree fails the unit suite, docs and lint",
-                      {"pytest -m unit", f"{CLI_NAME} check docs"} <= set(red) and any("flake8" in r for r in red),
-                      time.time() - started, "\n".join(red))]
+    results = [
+        Result(
+            "foreign subtree: undeclared, a vendored tree fails the unit suite, docs and lint",
+            {"pytest -m unit", f"{CLI_NAME} check docs"} <= set(red) and any("flake8" in r for r in red),
+            time.time() - started,
+            "\n".join(red),
+        )
+    ]
     _declare_foreign(tree, configs=False)
     git_in(tree, "commit", "-qam", "declare vendor foreign")
-    code, probe = run([str(venv_python), "-m", "pytest", "tests/test_scratch_is_not_linted.py", "-q"], cwd=tree,
-                      env_extra={"PYTHONPATH": str(tree)})
-    results.append(Result("foreign subtree: declared but not excluded, the lint probe names the linters reading it",
-                          code != 0 and "FOREIGN names `vendor`, and these linters still read it" in probe
-                          and "flake8" in probe, 0.0, probe[-1500:]))
+    code, probe = run(
+        [str(venv_python), "-m", "pytest", "tests/test_scratch_is_not_linted.py", "-q"],
+        cwd=tree,
+        env_extra={"PYTHONPATH": str(tree)},
+    )
+    results.append(
+        Result(
+            "foreign subtree: declared but not excluded, the lint probe names the linters reading it",
+            code != 0 and "FOREIGN names `vendor`, and these linters still read it" in probe and "flake8" in probe,
+            0.0,
+            probe[-1500:],
+        )
+    )
     _declare_foreign(tree, configs=True)
     # One commit, as a fresh scaffold has, and no reports from the first pass.
     git_in(tree, "add", "-A")
@@ -4611,17 +5221,33 @@ def foreign_subtree_gate(workdir: Path, venv_python: Path, pyright_ok: bool) -> 
     shutil.rmtree(tree / "tmp", ignore_errors=True)
     started = time.time()
     still = [r for r in gates(tree, venv_python, pyright_ok) if not r.ok]
-    results.append(Result("foreign subtree: declared and excluded, every gate is green", not still,
-                          time.time() - started, "\n\n".join(f"{r.label}\n{r.output[-800:]}" for r in still)))
+    results.append(
+        Result(
+            "foreign subtree: declared and excluded, every gate is green",
+            not still,
+            time.time() - started,
+            "\n\n".join(f"{r.label}\n{r.output[-800:]}" for r in still),
+        )
+    )
     return results
 
 
 #: (label, base, tree, template, merges?) for a requirements file, as `adopt_floors` sees it.
 FLOOR_CASES = (
-    ("a bot-moved floor beside a template insert merges",
-     "click>=8.1\npytest>=8.0\n", "click>=8.5.0\npytest>=8.0\n", "click>=8.1\npyyaml>=6.0\npytest>=8.0\n", True),
-    ("a floor both sides moved still conflicts",
-     "click>=8.1\npytest>=8.0\n", "click>=8.5.0\npytest>=8.0\n", "click>=9.0\npytest>=8.0\n", False),
+    (
+        "a bot-moved floor beside a template insert merges",
+        "click>=8.1\npytest>=8.0\n",
+        "click>=8.5.0\npytest>=8.0\n",
+        "click>=8.1\npyyaml>=6.0\npytest>=8.0\n",
+        True,
+    ),
+    (
+        "a floor both sides moved still conflicts",
+        "click>=8.1\npytest>=8.0\n",
+        "click>=8.5.0\npytest>=8.0\n",
+        "click>=9.0\npytest>=8.0\n",
+        False,
+    ),
 )
 
 
@@ -4643,8 +5269,12 @@ def requirements_floor_gate(workdir: Path) -> Result:
     # The same texts under another name merge as plain text, which is what makes the first case discriminate.
     if upgrade.merge_file("notes.txt", *FLOOR_CASES[0][1:4], scratch) is not None:
         wrong.append("outside a requirements file the first case merged too, so it shows nothing")
-    return Result("requirements: a floor only the tree moved merges; one both moved conflicts", not wrong,
-                  time.time() - started, "\n".join(wrong))
+    return Result(
+        "requirements: a floor only the tree moved merges; one both moved conflicts",
+        not wrong,
+        time.time() - started,
+        "\n".join(wrong),
+    )
 
 
 def pending_added_gate(workdir: Path) -> List[Result]:
@@ -4674,8 +5304,13 @@ def pending_added_gate(workdir: Path) -> List[Result]:
         (tree / added).unlink()
         git_in(tree, "add", "-A")
         git_in(tree, "commit", "-m", "plant: a conflict and an addition the base lacks")
-        upgrade = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree),
-                   "--no-base", "--allow-untagged"]
+        upgrade = [
+            sys.executable,
+            str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"),
+            str(tree),
+            "--no-base",
+            "--allow-untagged",
+        ]
         code, first = run(upgrade, cwd=tree)
         held = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
         problems = []
@@ -4686,8 +5321,10 @@ def pending_added_gate(workdir: Path) -> List[Result]:
             code, second = run([*upgrade, "--ported"], cwd=tree)
             after = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
             if added in (after.get("owned") or []) or added not in after["files"] or "pending_added" in after:
-                problems.append(f"after --ported: owned={after.get('owned')}, recorded={added in after['files']}, "
-                                f"pending={after.get('pending_added')}\n{second[-800:]}")
+                problems.append(
+                    f"after --ported: owned={after.get('owned')}, recorded={added in after['files']}, "
+                    f"pending={after.get('pending_added')}\n{second[-800:]}"
+                )
         else:
             (tree / added).unlink()
             # Committed, or the second run refuses a dirty tree and proves nothing.
@@ -4696,8 +5333,14 @@ def pending_added_gate(workdir: Path) -> List[Result]:
             code, second = run(upgrade, cwd=tree)
             if (tree / added).exists():
                 problems.append(f"{added} was deleted after the run added it, and the next run wrote it back")
-        results.append(Result(f"pending added ({case}): a file the held-back run added stays skeletor's",
-                              not problems, time.time() - started, "\n".join(problems)))
+        results.append(
+            Result(
+                f"pending added ({case}): a file the held-back run added stays skeletor's",
+                not problems,
+                time.time() - started,
+                "\n".join(problems),
+            )
+        )
     return results
 
 
@@ -4788,8 +5431,13 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
     # release commit, where the checkout itself is exactly on the tag. The flag is
     # the grid's standing consent, and `unpinned_head_gate` is where the refusal
     # itself is asserted, so it is the one place that must NOT carry it.
-    upgrade = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree),
-               "--no-base", "--allow-untagged"]
+    upgrade = [
+        sys.executable,
+        str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"),
+        str(tree),
+        "--no-base",
+        "--allow-untagged",
+    ]
 
     before = snapshot()
     code, output = run([*upgrade, "--dry-run"], cwd=tree)
@@ -4857,7 +5505,14 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
     # working tree would otherwise make the two disagree and the branch under
     # test would never be reached. That is `check_upgrade_is_noop`'s reasoning.
     code, output = run(
-        [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(clean), "--dry-run", "--from-dir", str(SKELETOR)],
+        [
+            sys.executable,
+            str(SKELETOR / "bin" / "skeletor-upgrade"),
+            str(clean),
+            "--dry-run",
+            "--from-dir",
+            str(SKELETOR),
+        ],
         cwd=clean,
     )
     named = re.search(r"already current with skeletor @ (\S+)", output)
@@ -4869,10 +5524,7 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
     results.append(
         Result(
             f"sidecars: 'already current' names its version and its {len(left_behind)} stale sidecar(s)",
-            code == 0
-            and named is not None
-            and named.group(1) == recorded
-            and listed == left_behind,
+            code == 0 and named is not None and named.group(1) == recorded and listed == left_behind,
             time.time() - started,
             f"named: {named.group(1) if named else None} (manifest records {recorded})\n"
             f"listed {listed} of {left_behind}\n{output}",
@@ -4930,16 +5582,27 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
     # A shipped script with a function in it — searched for, not named, so a
     # rename of any one file does not quietly empty the fixture.
     subject = next(
-        (rel for rel in sorted(manifest["files"]) if rel.startswith("scripts/") and rel.endswith(".py")
-         and re.search(r"^def \w+\(", (tree / rel).read_text(encoding="utf-8"), re.MULTILINE)),
+        (
+            rel
+            for rel in sorted(manifest["files"])
+            if rel.startswith("scripts/")
+            and rel.endswith(".py")
+            and re.search(r"^def \w+\(", (tree / rel).read_text(encoding="utf-8"), re.MULTILINE)
+        ),
         None,
     )
     config = tree / ".pre-commit-config.yaml"
     shipped = config.read_text(encoding="utf-8") if config.exists() else ""
     hook_args = re.search(r"(- id: flake8\n(?:[ \t]+#.*\n|[ \t]*\n)*[ \t]+args: )\[[^\]]*\]", shipped)
     if subject is None or not hook_args:
-        results.append(Result("lint forecast: the fixture has a scripts/ module and a flake8 hook with args", False,
-                              time.time() - started, f"subject={subject}, hook args found={bool(hook_args)}"))
+        results.append(
+            Result(
+                "lint forecast: the fixture has a scripts/ module and a flake8 hook with args",
+                False,
+                time.time() - started,
+                f"subject={subject}, hook args found={bool(hook_args)}",
+            )
+        )
         return results
     widened = shipped.replace(hook_args.group(0), hook_args.group(1) + "['--select=C901', '--max-complexity=1']")
     rendered = (tree / subject).read_text(encoding="utf-8")
@@ -4951,8 +5614,13 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
     # longer black-clean there: stash.flow's case, where the forecast was flake8's.
     narrowed = re.sub(r"(?m)^line-length = \d+$", "line-length = 20", shipped_pyproject, count=1)
 
-    def forecast(disk: str, hooks: Optional[str], project: str = shipped_pyproject,
-                 dry_run: bool = True, upgrade: Path = SKELETOR / "bin" / "skeletor-upgrade") -> Tuple[dict, str]:
+    def forecast(
+        disk: str,
+        hooks: Optional[str],
+        project: str = shipped_pyproject,
+        dry_run: bool = True,
+        upgrade: Path = SKELETOR / "bin" / "skeletor-upgrade",
+    ) -> Tuple[dict, str]:
         """`hooks` is the `.pre-commit-config.yaml` text, or `None` for no file at all."""
         (tree / subject).write_text(disk, encoding="utf-8")
         pyproject.write_text(project, encoding="utf-8")
@@ -4969,12 +5637,21 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
             config.write_text(hooks, encoding="utf-8")
         try:
             done = subprocess.run(
-                [sys.executable, str(upgrade), str(tree), "--no-base",
-                 *(["--dry-run"] if dry_run else ["--allow-dirty", "--allow-untagged"]), "--json"],
-                cwd=tree, capture_output=True, text=True, timeout=600,
+                [
+                    sys.executable,
+                    str(upgrade),
+                    str(tree),
+                    "--no-base",
+                    *(["--dry-run"] if dry_run else ["--allow-dirty", "--allow-untagged"]),
+                    "--json",
+                ],
+                cwd=tree,
+                capture_output=True,
+                text=True,
+                timeout=600,
             )
             try:
-                payload = json.JSONDecoder().raw_decode(done.stdout[done.stdout.index("{"):])[0]
+                payload = json.JSONDecoder().raw_decode(done.stdout[done.stdout.index("{") :])[0]
             except ValueError:
                 payload = {}
             return payload, done.stdout + done.stderr
@@ -4988,20 +5665,46 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
         return bool(payload.get("lint_consulted")) and (payload.get("lint_files") or 0) >= 1
 
     if narrowed == shipped_pyproject:
-        results.append(Result("lint forecast: the fixture's pyproject.toml sets black's line-length", False,
-                              time.time() - started, "no `line-length = N` line to narrow"))
+        results.append(
+            Result(
+                "lint forecast: the fixture's pyproject.toml sets black's line-length",
+                False,
+                time.time() - started,
+                "no `line-length = N` line to narrow",
+            )
+        )
         return results
     cases = [
-        ("hook args that widen past .flake8 are forecast, naming the file", "x = 1\n", widened,
-         lambda new, payload: asked(payload) and any(f.startswith("C901") for f in new.get(subject, []))),
-        ("a formatter the tree configures differently is forecast too", "x = 1\n", (shipped, narrowed),
-         lambda new, payload: any("black" in f and "rewrite" in f for f in new.get(subject, []))),
-        ("the shipped hook forecasts nothing, and says what it asked", "x = 1\n", shipped,
-         lambda new, payload: new == {} and asked(payload)),
-        ("debt the file already carried is not reported as new", rendered + "\n# yours\n", widened,
-         lambda new, payload: asked(payload) and subject not in new),
-        ("no hook config is a stated reason, not a clean forecast", "x = 1\n", None,
-         lambda new, payload: new == {} and not payload.get("lint_consulted") and bool(payload.get("lint_reason"))),
+        (
+            "hook args that widen past .flake8 are forecast, naming the file",
+            "x = 1\n",
+            widened,
+            lambda new, payload: asked(payload) and any(f.startswith("C901") for f in new.get(subject, [])),
+        ),
+        (
+            "a formatter the tree configures differently is forecast too",
+            "x = 1\n",
+            (shipped, narrowed),
+            lambda new, payload: any("black" in f and "rewrite" in f for f in new.get(subject, [])),
+        ),
+        (
+            "the shipped hook forecasts nothing, and says what it asked",
+            "x = 1\n",
+            shipped,
+            lambda new, payload: new == {} and asked(payload),
+        ),
+        (
+            "debt the file already carried is not reported as new",
+            rendered + "\n# yours\n",
+            widened,
+            lambda new, payload: asked(payload) and subject not in new,
+        ),
+        (
+            "no hook config is a stated reason, not a clean forecast",
+            "x = 1\n",
+            None,
+            lambda new, payload: new == {} and not payload.get("lint_consulted") and bool(payload.get("lint_reason")),
+        ),
     ]
     # **One instant for both tool classes** (dream-doll, proto.pilot): the tree's
     # config pins flake8 off the installed version and the template's render
@@ -5019,14 +5722,25 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
     dry, _ = forecast("x = 1\n", behind, upgrade=clean_upgrade)
     applied, output = forecast("x = 1\n", behind, dry_run=False, upgrade=clean_upgrade)
     stale = [hook for hook in dry.get("lint_unsupported", []) if "tree pins 0.0.1" in hook]
-    ok = (bool(stale) and applied.get("lint_unsupported") == dry.get("lint_unsupported")
-          and config.name in applied.get("updated", []) and "pip install -r scripts/requirements.txt" in output)
-    results.append(Result(
-        "lint forecast: a pin the release moves is read at one instant, dry run and apply alike", ok,
-        time.time() - started,
-        "" if ok else f"dry {dry.get('lint_unsupported')}, applied {applied.get('lint_unsupported')}, "
-                      f"updated {applied.get('updated')}\n{output[-1500:]}",
-    ))
+    ok = (
+        bool(stale)
+        and applied.get("lint_unsupported") == dry.get("lint_unsupported")
+        and config.name in applied.get("updated", [])
+        and "pip install -r scripts/requirements.txt" in output
+    )
+    results.append(
+        Result(
+            "lint forecast: a pin the release moves is read at one instant, dry run and apply alike",
+            ok,
+            time.time() - started,
+            (
+                ""
+                if ok
+                else f"dry {dry.get('lint_unsupported')}, applied {applied.get('lint_unsupported')}, "
+                f"updated {applied.get('updated')}\n{output[-1500:]}"
+            ),
+        )
+    )
 
     for label, disk, hooks, holds in cases:
         started = time.time()
@@ -5036,12 +5750,20 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
         planned = subject in payload.get("updated", [])
         new = payload.get("lint_new")
         ok = planned and isinstance(new, dict) and holds(new, payload) and not payload.get("lint_unanswered")
-        results.append(Result(
-            f"lint forecast: {label}", ok, time.time() - started,
-            "" if ok else f"subject {subject}, planned={planned}, "
-                          + str({k: v for k, v in payload.items() if k.startswith("lint_")})
-                          + f"\n{output[-1500:]}",
-        ))
+        results.append(
+            Result(
+                f"lint forecast: {label}",
+                ok,
+                time.time() - started,
+                (
+                    ""
+                    if ok
+                    else f"subject {subject}, planned={planned}, "
+                    + str({k: v for k, v in payload.items() if k.startswith("lint_")})
+                    + f"\n{output[-1500:]}"
+                ),
+            )
+        )
     return results
 
 
@@ -5269,9 +5991,7 @@ def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     git_in(other, "add", "-A")
     git_in(other, "commit", "-m", "tamper")
 
-    code, output = run(
-        [sys.executable, str(upgrade_bin), str(other), "--no-base", "--allow-untagged"], cwd=other
-    )
+    code, output = run([sys.executable, str(upgrade_bin), str(other), "--no-base", "--allow-untagged"], cwd=other)
     results.append(
         Result(
             "collect-diff: a run that touched no test file stays quiet",
@@ -5338,9 +6058,7 @@ def superset_of(scaffolder, a: Tuple[str, str, str, str], b: Tuple[str, str, str
     a_tier, a_lang, a_agent, a_version = a
     b_tier, b_lang, b_agent, b_version = b
     tiers = set(scaffolder.TIERS[a_tier]) <= set(scaffolder.TIERS[b_tier])
-    langs = set(scaffolder.LANGUAGE_OVERLAYS[a_lang].split(",")) <= set(
-        scaffolder.LANGUAGE_OVERLAYS[b_lang].split(",")
-    )
+    langs = set(scaffolder.LANGUAGE_OVERLAYS[a_lang].split(",")) <= set(scaffolder.LANGUAGE_OVERLAYS[b_lang].split(","))
     agents = scaffolder.AGENTS[a_agent] is None or scaffolder.AGENTS[a_agent] == scaffolder.AGENTS[b_agent]
     versions = scaffolder.VERSIONING[b_version] <= scaffolder.VERSIONING[a_version]
     return tiers and langs and agents and versions
@@ -5424,9 +6142,7 @@ def tier_composition_gate(workdir: Path) -> List[Result]:
 
     def shipped(root: Path) -> set:
         return {
-            str(f.relative_to(root))
-            for f in root.rglob("*")
-            if f.is_file() and ".git" not in f.relative_to(root).parts
+            str(f.relative_to(root)) for f in root.rglob("*") if f.is_file() and ".git" not in f.relative_to(root).parts
         }
 
     files = {config: shipped(root) for config, root in trees.items()}
@@ -5436,9 +6152,7 @@ def tier_composition_gate(workdir: Path) -> List[Result]:
     scanned_refs = 0
     for config, root in trees.items():
         mine = files[config]
-        elsewhere = set().union(
-            *(files[other] for other in configs if superset_of(scaffolder, config, other))
-        ) or set()
+        elsewhere = set().union(*(files[other] for other in configs if superset_of(scaffolder, config, other))) or set()
         for rel in sorted(mine):
             path = root / rel
             try:
@@ -5555,9 +6269,22 @@ def lane_views_gate(workdir: Path) -> List[Result]:
         target = workdir / f"lanes-{label}"
         code, output = run(
             [
-                sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty",
-                "--name", "Lanes", "--cli", CLI_NAME, "--tagline", "views",
-                "--tier", tier, "--language", language, "--agent", agent,
+                sys.executable,
+                str(SCAFFOLDER),
+                str(target),
+                "--allow-dirty",
+                "--name",
+                "Lanes",
+                "--cli",
+                CLI_NAME,
+                "--tagline",
+                "views",
+                "--tier",
+                tier,
+                "--language",
+                language,
+                "--agent",
+                agent,
             ],
             cwd=workdir,
         )
@@ -5568,8 +6295,7 @@ def lane_views_gate(workdir: Path) -> List[Result]:
         settings = target / ".vscode" / "settings.json"
         if not settings.exists():
             results.append(
-                Result(f"lane views: {label}", False, time.time() - started,
-                       ".vscode/settings.json was not shipped")
+                Result(f"lane views: {label}", False, time.time() - started, ".vscode/settings.json was not shipped")
             )
             continue
 
@@ -5633,7 +6359,8 @@ def _lane_view_problems(tree: Path, text: str) -> List[str]:
     issue_views = parsed.get("githubIssues.queries", [])
     for label in lanes:
         selecting = [
-            view for view in issue_views
+            view
+            for view in issue_views
             if re.search(rf"(?<!-)\blabel:{re.escape(label)}\b", str(view.get("query", "")))
         ]
         if len(selecting) != 1:
@@ -5758,8 +6485,20 @@ def shadow_gate(workdir: Path, venv_python: Path) -> Result:
     for name, cli in (("shadow-a", "shadowa"), ("shadow-b", "shadowb")):
         target = workdir / name
         code, output = run(
-            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", name.title(),
-             "--cli", cli, "--tagline", "t", "--tier", "core"],
+            [
+                sys.executable,
+                str(SCAFFOLDER),
+                str(target),
+                "--allow-dirty",
+                "--name",
+                name.title(),
+                "--cli",
+                cli,
+                "--tagline",
+                "t",
+                "--tier",
+                "core",
+            ],
             cwd=SKELETOR,
         )
         if code != 0:
@@ -5814,8 +6553,20 @@ def coverage_gate(workdir: Path, venv_python: Path) -> Result:
     started = time.time()
     target = workdir / "coverage-probe"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Probe",
-         "--cli", CLI_NAME, "--tagline", "t", "--tier", "core"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tagline",
+            "t",
+            "--tier",
+            "core",
+        ],
         cwd=SKELETOR,
     )
     if code != 0:
@@ -5825,13 +6576,17 @@ def coverage_gate(workdir: Path, venv_python: Path) -> Result:
     code, output = run([str(target / CLI_NAME), "test", "coverage"], cwd=target)
     if code != 0:
         return Result(
-            "coverage: `test coverage` passes on a fresh tree", False, time.time() - started,
+            "coverage: `test coverage` passes on a fresh tree",
+            False,
+            time.time() - started,
             f"exited {code}\n{output[-1500:]}",
         )
     report = target / "tmp" / "coverage.xml"
     if not report.exists():
         return Result(
-            "coverage: the run wrote the report the ratchet reads", False, time.time() - started,
+            "coverage: the run wrote the report the ratchet reads",
+            False,
+            time.time() - started,
             f"{report} was not written, so the ratchet measured nothing and the command still passed",
         )
 
@@ -5873,8 +6628,20 @@ def dirty_scope_gate(workdir: Path) -> Result:
     target = workdir / "dirty-scope" / "probe"
     if not target.exists():
         code, output = run(
-            [sys.executable, str(clean / "bin" / "skeletor-new"), str(target),
-             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", "core", "--force"],
+            [
+                sys.executable,
+                str(clean / "bin" / "skeletor-new"),
+                str(target),
+                "--name",
+                "Probe",
+                "--cli",
+                CLI_NAME,
+                "--tagline",
+                "t",
+                "--tier",
+                "core",
+                "--force",
+            ],
             cwd=SKELETOR,
         )
         if code != 0:
@@ -5887,8 +6654,14 @@ def dirty_scope_gate(workdir: Path) -> Result:
         plant.write_text("planted\n", encoding="utf-8")
         try:
             code, output = run(
-                [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--dry-run",
-                 "--from-dir", str(clean)],
+                [
+                    sys.executable,
+                    str(clean / "bin" / "skeletor-upgrade"),
+                    str(target),
+                    "--dry-run",
+                    "--from-dir",
+                    str(clean),
+                ],
                 cwd=target,
             )
         finally:
@@ -5897,8 +6670,11 @@ def dirty_scope_gate(workdir: Path) -> Result:
         if refused != reaches:
             problems.append(
                 f"an untracked {rel} {'was not' if reaches else 'was'} treated as reaching a render"
-                + (" — the guard has stopped catching the case it exists for" if reaches else
-                   " — dirt a render cannot read is refusing adopters")
+                + (
+                    " — the guard has stopped catching the case it exists for"
+                    if reaches
+                    else " — dirt a render cannot read is refusing adopters"
+                )
             )
         if reaches and code == 0:
             problems.append(f"a dirty {rel} exited 0; the base is unreproducible and must refuse")
@@ -5990,7 +6766,9 @@ def manifest_args_gate() -> Result:
             f"the two readings of the flag set disagree: introspection {sorted(declared.values())}, "
             f"usage line {sorted(printed)} — one of them is blind, so nothing below means anything"
         )
-    missing = sorted(opt for dest, opt in declared.items() if opt not in recorded and dest not in scaffolder.NOT_RENDERED)
+    missing = sorted(
+        opt for dest, opt in declared.items() if opt not in recorded and dest not in scaffolder.NOT_RENDERED
+    )
     if missing:
         problems.append(
             f"{missing} are declared but never recorded, and are not in NOT_RENDERED. A tree "
@@ -6004,7 +6782,9 @@ def manifest_args_gate() -> Result:
             "flag. Delete the entry: the name can come back for something else and would arrive "
             "pre-exempted."
         )
-    recorded_but_exempt = sorted(declared[dest] for dest in scaffolder.NOT_RENDERED if dest in declared and declared[dest] in recorded)
+    recorded_but_exempt = sorted(
+        declared[dest] for dest in scaffolder.NOT_RENDERED if dest in declared and declared[dest] in recorded
+    )
     if recorded_but_exempt:
         problems.append(f"{recorded_but_exempt} are exempt from recording and recorded anyway")
 
@@ -6200,16 +6980,29 @@ def unpinned_head_gate(workdir: Path) -> List[Result]:
     clean = clean_skeletor(workdir)
     tags = run(["git", "-C", str(clean), "tag", "--sort=-creatordate"], cwd=clean)[1].split()
     if not tags:
-        return [Result("unpinned head: no tags are visible at all — a shallow clone?", False,
-                       time.time() - started, "")]
+        return [
+            Result("unpinned head: no tags are visible at all — a shallow clone?", False, time.time() - started, "")
+        ]
     tag = tags[0]
 
     target = workdir / "unpinned-head" / "probe"
     if target.exists():
         shutil.rmtree(target.parent)
     code, output = run(
-        [sys.executable, str(clean / "bin" / "skeletor-new"), str(target),
-         "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--force"],
+        [
+            sys.executable,
+            str(clean / "bin" / "skeletor-new"),
+            str(target),
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tagline",
+            "t",
+            "--tier",
+            tier,
+            "--force",
+        ],
         cwd=SKELETOR,
     )
     if code != 0:
@@ -6222,8 +7015,19 @@ def unpinned_head_gate(workdir: Path) -> List[Result]:
     # An empty commit is enough: `git describe` appends `-1-g<sha>` to the newest
     # tag, which is exactly the string three adopters recorded.
     run(["git", "-C", str(clean), "checkout", "--quiet", "-B", "unpinned-probe"], cwd=clean)
-    run(["git", "-C", str(clean), "commit", "--quiet", "--allow-empty", "-m",
-         "scratch: one commit past the newest tag"], cwd=clean)
+    run(
+        [
+            "git",
+            "-C",
+            str(clean),
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "scratch: one commit past the newest tag",
+        ],
+        cwd=clean,
+    )
     described = run(["git", "-C", str(clean), "describe", "--tags", "--always"], cwd=clean)[1].strip()
     problems = []
     if described == tag or not described.startswith(tag):
@@ -6322,8 +7126,20 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
     target = workdir / "pinned-ref" / "probe"
     if not target.exists():
         must_scaffold(
-            [sys.executable, str(clean / "bin" / "skeletor-new"), str(target),
-             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--force"],
+            [
+                sys.executable,
+                str(clean / "bin" / "skeletor-new"),
+                str(target),
+                "--name",
+                "Probe",
+                "--cli",
+                CLI_NAME,
+                "--tagline",
+                "t",
+                "--tier",
+                tier,
+                "--force",
+            ],
             cwd=SKELETOR,
         )
     # **A REAL run, not a dry one, and that is the whole reason these assertions
@@ -6466,8 +7282,18 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
     started = time.time()
     probe = "v9.9.9-probe"
     git_in(asker, "tag", probe, f"{tag}^{{commit}}")
-    _, typed = run([sys.executable, str(asker / "bin" / "skeletor-upgrade"), str(target),
-                    "--ref", probe, "--dry-run", "--allow-dirty"], cwd=target)
+    _, typed = run(
+        [
+            sys.executable,
+            str(asker / "bin" / "skeletor-upgrade"),
+            str(target),
+            "--ref",
+            probe,
+            "--dry-run",
+            "--allow-dirty",
+        ],
+        cwd=target,
+    )
     stamped = re.search(r"head: skeletor @ (\S+)", typed)
     results.append(
         Result(
@@ -6483,8 +7309,18 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
     started = time.time()
     git_in(asker, "tag", "-a", "v9.9.8-probe", "-m", "probe", "HEAD")
     git_in(asker, "tag", "v9.9.9-probe-head", "HEAD")
-    _, same = run([sys.executable, str(asker / "bin" / "skeletor-upgrade"), str(target),
-                   "--ref", "v9.9.9-probe-head", "--dry-run", "--allow-dirty"], cwd=target)
+    _, same = run(
+        [
+            sys.executable,
+            str(asker / "bin" / "skeletor-upgrade"),
+            str(target),
+            "--ref",
+            "v9.9.9-probe-head",
+            "--dry-run",
+            "--allow-dirty",
+        ],
+        cwd=target,
+    )
     named = git_in(asker, "describe", "--tags", "HEAD")[1].strip()
     results.append(
         Result(
@@ -6557,8 +7393,20 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
     if stamped.exists():
         shutil.rmtree(stamped.parent)
     must_scaffold(
-        [sys.executable, str(stamped_scratch / "bin" / "skeletor-new"), str(stamped),
-         "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--force"],
+        [
+            sys.executable,
+            str(stamped_scratch / "bin" / "skeletor-new"),
+            str(stamped),
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tagline",
+            "t",
+            "--tier",
+            tier,
+            "--force",
+        ],
         cwd=SKELETOR,
     )
 
@@ -6584,7 +7432,9 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
             "record is a describe suffix while its template matches the tag exactly."
         )
     if "already current" not in dry:
-        stamped_problems.append(f"the fixture is not already current with {tag}, so the gap is not reached:\n{dry[-600:]}")
+        stamped_problems.append(
+            f"the fixture is not already current with {tag}, so the gap is not reached:\n{dry[-600:]}"
+        )
     if after_dry != born:
         stamped_problems.append(f"the DRY run rewrote the record {born} → {after_dry}; a dry run writes nothing")
     if after_real != tag:
@@ -6719,7 +7569,9 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
         if run(["git", "-C", str(SKELETOR), "diff", "--quiet", tag, "HEAD", "--", "template/"], cwd=SKELETOR)[0] != 0
     ]
     if not candidates:
-        why = "no tags are visible at all — a shallow clone?" if not tags else "no tag differs from HEAD under template/"
+        why = (
+            "no tags are visible at all — a shallow clone?" if not tags else "no tag differs from HEAD under template/"
+        )
         return [Result(f"pending ref: {why}", False, time.time() - started, f"{len(tags)} tag(s) visible")]
 
     clean = clean_skeletor(workdir)
@@ -6734,9 +7586,22 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
     head_tree = workdir / "pending-head" / "probe"
     if not head_tree.exists():
         code, output = run(
-            [sys.executable, str(clean / "bin" / "skeletor-new"), str(head_tree),
-             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
-             "--tier", tier, "--language", language, "--force"],
+            [
+                sys.executable,
+                str(clean / "bin" / "skeletor-new"),
+                str(head_tree),
+                "--name",
+                "Probe",
+                "--cli",
+                CLI_NAME,
+                "--tagline",
+                "t",
+                "--tier",
+                tier,
+                "--language",
+                language,
+                "--force",
+            ],
             cwd=SKELETOR,
         )
         if code != 0:
@@ -6770,9 +7635,22 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
             # not this line. Those two look identical in a traceback, which is
             # the second reason to name the tag.
             code, output = run(
-                [sys.executable, str(old_checkout / "bin" / "skeletor-new"), str(target),
-                 "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
-                 "--tier", tier, "--language", language, "--force"],
+                [
+                    sys.executable,
+                    str(old_checkout / "bin" / "skeletor-new"),
+                    str(target),
+                    "--name",
+                    "Probe",
+                    "--cli",
+                    CLI_NAME,
+                    "--tagline",
+                    "t",
+                    "--tier",
+                    tier,
+                    "--language",
+                    language,
+                    "--force",
+                ],
                 cwd=SKELETOR,
             )
             if code != 0:
@@ -6788,7 +7666,8 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
                 old_lines = old_file.read_text(encoding="utf-8").splitlines(keepends=True)
                 new_lines = new_file.read_text(encoding="utf-8").splitlines(keepends=True)
                 differing = [
-                    i for i in range(min(len(old_lines), len(new_lines)))
+                    i
+                    for i in range(min(len(old_lines), len(new_lines)))
                     if old_lines[i] != new_lines[i] and old_lines[i].strip()
                 ]
                 if not differing:
@@ -6828,8 +7707,7 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
             # re-run cannot advance anything, since a hand-ported file
             # conflicts exactly like an unapplied one.
             _, ported = run(
-                [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target),
-                 "--ported", "--allow-untagged"],
+                [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--ported", "--allow-untagged"],
                 cwd=target,
             )
             ported_ref = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
@@ -6999,7 +7877,9 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
         # tags nor history by default, which is how this failed on CI for three
         # releases while passing here. "Looked and saw nothing" and "could not
         # see" are the same red until the message separates them.
-        why = "no tags are visible at all — a shallow clone?" if not tags else "no tag differs from HEAD under template/"
+        why = (
+            "no tags are visible at all — a shallow clone?" if not tags else "no tag differs from HEAD under template/"
+        )
         return [Result(f"dirty ref: {why}", False, time.time() - started, f"{len(tags)} tag(s) visible")]
 
     clean = clean_skeletor(workdir)
@@ -7021,9 +7901,22 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
             # A tag that refuses these arguments is not a candidate — try the next,
             # and say so, as `pending_ref_gate`'s search does.
             refused_code, refused_output = run(
-                [sys.executable, str(old_checkout / "bin" / "skeletor-new"), str(target),
-                 "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
-                 "--tier", tier, "--language", language, "--force"],
+                [
+                    sys.executable,
+                    str(old_checkout / "bin" / "skeletor-new"),
+                    str(target),
+                    "--name",
+                    "Probe",
+                    "--cli",
+                    CLI_NAME,
+                    "--tagline",
+                    "t",
+                    "--tier",
+                    tier,
+                    "--language",
+                    language,
+                    "--force",
+                ],
                 cwd=SKELETOR,
             )
             if refused_code != 0:
@@ -7088,8 +7981,18 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
 
     second = workdir / "dirty-scaffold-refusal"
     scaffolded, scaffold_output = run(
-        [sys.executable, str(clean / "bin" / "skeletor-new"), str(second),
-         "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--force"],
+        [
+            sys.executable,
+            str(clean / "bin" / "skeletor-new"),
+            str(second),
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tagline",
+            "t",
+            "--force",
+        ],
         cwd=SKELETOR,
     )
     # **Read, like every other fixture scaffold now.** An unchecked exit here took
@@ -7097,8 +8000,14 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
     # is how a template line one column past the floor, refused correctly by the
     # scaffolder, first surfaced: as a crash naming a temp path.
     if scaffolded != 0 or not second.exists():
-        return results + [Result("dirty ref: could not scaffold the refusal fixture", False,
-                                 time.time() - started, scaffold_output[-1500:])]
+        return results + [
+            Result(
+                "dirty ref: could not scaffold the refusal fixture",
+                False,
+                time.time() - started,
+                scaffold_output[-1500:],
+            )
+        ]
     code, refused = run([sys.executable, str(dirty_clone / "bin" / "skeletor-upgrade"), str(second)], cwd=second)
     dry_code, _ = run(
         [sys.executable, str(dirty_clone / "bin" / "skeletor-upgrade"), str(second), "--dry-run"], cwd=second
@@ -7123,8 +8032,28 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
 #: `/home/runner/work/<repo>/<repo>`, and without them this gate would derive
 #: two tokens on CI that appear all over any tree that mentions Actions.
 GENERIC_PATH_WORDS = {
-    "code", "data", "dev", "git", "home", "local", "media", "mnt", "opt", "projects", "repos", "root",
-    "run", "runner", "src", "srv", "tmp", "usr", "users", "var", "work", "workspace",
+    "code",
+    "data",
+    "dev",
+    "git",
+    "home",
+    "local",
+    "media",
+    "mnt",
+    "opt",
+    "projects",
+    "repos",
+    "root",
+    "run",
+    "runner",
+    "src",
+    "srv",
+    "tmp",
+    "usr",
+    "users",
+    "var",
+    "work",
+    "workspace",
 }
 
 
@@ -7287,7 +8216,7 @@ def author_leak_gate(tier: str, workdir: Path) -> Result:
     # that found nothing is indistinguishable from one that cannot find
     # anything. Both halves are checked, because a normaliser that stripped too
     # much would match everything and this would still pass on the first.
-    if not leaks(f"root = Path.home() / \"{tokens[0][:3]}.{tokens[0][3:]}\" / \"logs\""):
+    if not leaks(f'root = Path.home() / "{tokens[0][:3]}.{tokens[0][3:]}" / "logs"'):
         return Result("author leak: the detector does not find a planted token", False, time.time() - started, "")
     if leaks("a tree that names nobody"):
         return Result("author leak: the detector fires on text naming nobody", False, time.time() - started, "")
@@ -7381,8 +8310,23 @@ def adopted_repo_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     (target / "mine.txt").write_text("work in progress\n", encoding="utf-8")
 
     code, output = run(
-        [sys.executable, str(SKELETOR / "bin" / "skeletor-new"), str(target), "--allow-dirty",
-         "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--language", "python", "--force"],
+        [
+            sys.executable,
+            str(SKELETOR / "bin" / "skeletor-new"),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tagline",
+            "t",
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--force",
+        ],
         cwd=SKELETOR,
     )
     if code != 0:
@@ -7413,16 +8357,27 @@ def adopted_repo_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
             # One assertion, two facts, no allowlist: anything else left behind
             # is skeletor's and was not staged, and a missing `mine.txt` means it
             # was swept into the staged set with everything the tool wrote.
-            "expected exactly ['mine.txt'] — the planted work in progress, untouched — and got:\n"
-            + "\n".join(loose[:20]) if loose != ["mine.txt"] else "",
+            (
+                "expected exactly ['mine.txt'] — the planted work in progress, untouched — and got:\n"
+                + "\n".join(loose[:20])
+                if loose != ["mine.txt"]
+                else ""
+            ),
         ),
     ]
 
     # The suite the enumeration feeds, run for real. `-p no:cacheprovider` so a
     # `.pytest_cache` does not appear in the tree between the two runs below and
     # make the plant's difference ambiguous.
-    suite = ["-m", "pytest", "-q", "-p", "no:cacheprovider",
-             "tests/test_docs_name_real_paths.py", "tests/test_setup_blocks_agree.py"]
+    suite = [
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_docs_name_real_paths.py",
+        "tests/test_setup_blocks_agree.py",
+    ]
     green, green_out = run([str(venv_python), *suite], cwd=target)
     results.append(
         Result("adopted repo: the suites that enumerate through git pass", green == 0, 0.0, green_out[-1500:])
@@ -7436,9 +8391,13 @@ def adopted_repo_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
             f"adopted repo: unstaged, those same {len(loose_now)} file(s) are still enumerated",
             unstaged == 0,
             0.0,
-            "They went red with the render unstaged, so these scanners are still asking the index "
-            "rather than the tree — which is the state in which every file an upgrade delivers is "
-            f"invisible to them until somebody stages it:\n{unstaged_out[-1000:]}" if unstaged != 0 else "",
+            (
+                "They went red with the render unstaged, so these scanners are still asking the index "
+                "rather than the tree — which is the state in which every file an upgrade delivers is "
+                f"invisible to them until somebody stages it:\n{unstaged_out[-1000:]}"
+                if unstaged != 0
+                else ""
+            ),
         )
     )
     return results
@@ -7484,9 +8443,22 @@ def scaffold_dirt_gate(workdir: Path) -> List[Result]:
         if tree.exists():
             shutil.rmtree(tree.parent)
         code, output = run(
-            [sys.executable, str(scratch / "bin" / "skeletor-new"), str(tree),
-             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
-             "--tier", tier, "--language", "python", *extra],
+            [
+                sys.executable,
+                str(scratch / "bin" / "skeletor-new"),
+                str(tree),
+                "--name",
+                "Probe",
+                "--cli",
+                CLI_NAME,
+                "--tagline",
+                "t",
+                "--tier",
+                tier,
+                "--language",
+                "python",
+                *extra,
+            ],
             cwd=SKELETOR,
         )
         return code, output, tree
@@ -7596,9 +8568,22 @@ def dirty_signals_gate(workdir: Path) -> List[Result]:
         if tree.exists():
             shutil.rmtree(tree.parent)
         must_scaffold(
-            [sys.executable, str(checkout / "bin" / "skeletor-new"), str(tree),
-             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
-             "--tier", tier, "--language", "python", "--force"],
+            [
+                sys.executable,
+                str(checkout / "bin" / "skeletor-new"),
+                str(tree),
+                "--name",
+                "Probe",
+                "--cli",
+                CLI_NAME,
+                "--tagline",
+                "t",
+                "--tier",
+                tier,
+                "--language",
+                "python",
+                "--force",
+            ],
             cwd=SKELETOR,
         )
         return tree
@@ -7788,8 +8773,14 @@ def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
     tier = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
     isort = shutil.which("isort")
     if not isort:
-        return [Result("normalise: isort is not installed, so the tree's formatter cannot be run", True,
-                       time.time() - started, "skipped loudly rather than silently")]
+        return [
+            Result(
+                "normalise: isort is not installed, so the tree's formatter cannot be run",
+                True,
+                time.time() - started,
+                "skipped loudly rather than silently",
+            )
+        ]
 
     clean = clean_skeletor(workdir)
     scratch = workdir / "normalise-skeletor"
@@ -7800,8 +8791,22 @@ def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
     if tree.exists():
         shutil.rmtree(tree.parent)
     must_scaffold(
-        [sys.executable, str(scratch / "bin" / "skeletor-new"), str(tree),
-         "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--language", "python", "--force"],
+        [
+            sys.executable,
+            str(scratch / "bin" / "skeletor-new"),
+            str(tree),
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tagline",
+            "t",
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--force",
+        ],
         cwd=SKELETOR,
     )
 
@@ -7828,8 +8833,9 @@ def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
     settings = config.read_text(encoding="utf-8")
     match = re.search(r"known_first_party = \[([^\]]*)\]", settings)
     if not match:
-        return [Result("normalise: the tree declares no known_first_party to diverge on", False,
-                       time.time() - started, "")]
+        return [
+            Result("normalise: the tree declares no known_first_party to diverge on", False, time.time() - started, "")
+        ]
     names = [name.strip().strip('"') for name in match.group(1).split(",") if name.strip()]
 
     # Every candidate is TRIED, not the first one taken. Dropping a name from
@@ -7850,8 +8856,10 @@ def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
                 attempts.append(f"{name} in {path.name}: not shipped from template/core")
                 continue
             config.write_text(
-                settings.replace(match.group(0), "known_first_party = [%s]" % ", ".join(
-                    f'"{other}"' for other in names if other != name)),
+                settings.replace(
+                    match.group(0),
+                    "known_first_party = [%s]" % ", ".join(f'"{other}"' for other in names if other != name),
+                ),
                 encoding="utf-8",
             )
             run([isort, "--settings-path", str(config), str(path)], cwd=tree)
@@ -7865,8 +8873,14 @@ def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
     if subject is None:
         # The plant asserts it landed. A formatter that changed nothing leaves
         # every assertion below testing the unmodified template against itself.
-        return [Result("normalise: no known_first_party name has a test isort would re-section", False,
-                       time.time() - started, "\n".join(attempts) or f"names: {names}")]
+        return [
+            Result(
+                "normalise: no known_first_party name has a test isort would re-section",
+                False,
+                time.time() - started,
+                "\n".join(attempts) or f"names: {names}",
+            )
+        ]
     dropped, path = subject
     rel = path.relative_to(tree).as_posix()
     run(["git", "-C", str(tree), "commit", "--quiet", "-am", "adopter: formatter config and its result"], cwd=tree)
@@ -8068,17 +9082,29 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     paths_rel = "scripts/paths.py"
     source = scratch / "template" / "core" / paths_rel
     if not source.exists():
-        return [Result(f"append seam: {paths_rel} does not ship from template/core", False,
-                       time.time() - started, "")]
+        return [Result(f"append seam: {paths_rel} does not ship from template/core", False, time.time() - started, "")]
 
     def build(name: str) -> Optional[Path]:
         tree = workdir / f"append-seam-{name}" / "probe"
         if tree.exists():
             shutil.rmtree(tree.parent)
         code, output = run(
-            [sys.executable, str(scratch / "bin" / "skeletor-new"), str(tree),
-             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
-             "--tier", tier, "--language", "python", "--force"],
+            [
+                sys.executable,
+                str(scratch / "bin" / "skeletor-new"),
+                str(tree),
+                "--name",
+                "Probe",
+                "--cli",
+                CLI_NAME,
+                "--tagline",
+                "t",
+                "--tier",
+                tier,
+                "--language",
+                "python",
+                "--force",
+            ],
             cwd=SKELETOR,
         )
         return tree if code == 0 else None
@@ -8090,14 +9116,18 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     # The shipped entry, read from the tree. Spelling it here would make this
     # gate vacuous on the release that renames it.
     code, listed = run(
-        [sys.executable, "-c",
-         "import sys; sys.path.insert(0, '.'); from scripts.paths import PRESENT_TENSE; print('\\n'.join(PRESENT_TENSE))"],
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.path.insert(0, '.'); from scripts.paths import PRESENT_TENSE; print('\\n'.join(PRESENT_TENSE))",
+        ],
         cwd=probe,
     )
     shipped = [line.strip() for line in listed.splitlines() if line.strip()]
     if code != 0 or not shipped:
-        return [Result("append seam: the tree ships no PRESENT_TENSE entry to remove", False,
-                       time.time() - started, listed)]
+        return [
+            Result("append seam: the tree ships no PRESENT_TENSE entry to remove", False, time.time() - started, listed)
+        ]
     entry = shipped[0]
 
     # The adopter's two spellings of one intent: move the shipped folder out of
@@ -8312,14 +9342,19 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     for label, mutate in (("append", region_append), ("in-block", in_block)):
         tree = build(label)
         if tree is None:
-            return [Result(f"append seam: could not scaffold the {label} tree", False,
-                           time.time() - started, "")]
+            return [Result(f"append seam: could not scaffold the {label} tree", False, time.time() - started, "")]
         target = tree / paths_rel
         text = target.read_text(encoding="utf-8")
         rewritten = mutate(text)
         if rewritten is None:
-            return [Result(f"append seam: could not place the {label} edit in the scaffolded {paths_rel}",
-                           False, time.time() - started, "")]
+            return [
+                Result(
+                    f"append seam: could not place the {label} edit in the scaffolded {paths_rel}",
+                    False,
+                    time.time() - started,
+                    "",
+                )
+            ]
         target.write_text(rewritten, encoding="utf-8")
         run(["git", "-C", str(tree), "add", "-A"], cwd=tree)
         run(["git", "-C", str(tree), "commit", "-q", "-m", f"adopter: {label} removal"], cwd=tree)
@@ -8332,8 +9367,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     for label, place in (("region", region_append), ("blank-line", blank_line_append)):
         tree = build(f"rerun-{label}")
         if tree is None:
-            return [Result(f"append seam: could not scaffold the rerun-{label} tree", False,
-                           time.time() - started, "")]
+            return [Result(f"append seam: could not scaffold the rerun-{label} tree", False, time.time() - started, "")]
         placed = place((tree / paths_rel).read_text(encoding="utf-8"))
         if placed is None:
             detail_text = (
@@ -8345,8 +9379,14 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
                 if label == "blank-line"
                 else ""
             )
-            return [Result(f"append seam: could not place a {label} append in the scaffolded {paths_rel}",
-                           False, time.time() - started, detail_text)]
+            return [
+                Result(
+                    f"append seam: could not place a {label} append in the scaffolded {paths_rel}",
+                    False,
+                    time.time() - started,
+                    detail_text,
+                )
+            ]
         (tree / paths_rel).write_text(placed, encoding="utf-8")
         # The same local edit to the second file, so the first run conflicts
         # there and the base is held back for both trees identically.
@@ -8372,9 +9412,15 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
     # region's clean re-run proving nothing.
     edited = upstream_template_edit(source.read_text(encoding="utf-8"))
     if edited is None:
-        return [Result(f"append seam: nothing to rewrite upstream in {paths_rel} — no PRESENT_TENSE "
-                       f"literal, or no frozen rule to find the seam's last line from", False,
-                       time.time() - started, "")]
+        return [
+            Result(
+                f"append seam: nothing to rewrite upstream in {paths_rel} — no PRESENT_TENSE "
+                f"literal, or no frozen rule to find the seam's last line from",
+                False,
+                time.time() - started,
+                "",
+            )
+        ]
     source.write_text(edited, encoding="utf-8")
     git_in(scratch, "commit", "--quiet", "-am", "scratch: reword inside the literal and at the seam's last line")
 
@@ -8394,9 +9440,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
             else:
                 green = output.strip().splitlines()[-1] if output.strip() else "passed"
 
-        _, report = run(
-            [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree), "--dry-run"], cwd=tree
-        )
+        _, report = run([sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree), "--dry-run"], cwd=tree)
         conflicted = "LEFT ALONE" in report and paths_rel in report.split("LEFT ALONE")[1]
         if label == "append" and conflicted:
             problems.append(
@@ -8547,6 +9591,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
             )
         if not closed:  # unreachable while the bounds above are asserted; kept as a guard
             region_problems.append(f"{seam_rel}'s region could not be bounded")
+
         def comment_run(at: int) -> str:
             block = seam_lines[at:]
             end = next((i for i, line in enumerate(block) if not line.startswith("#")), len(block))
@@ -8571,8 +9616,7 @@ def append_seam_gate(workdir: Path, venv_python: Path) -> List[Result]:
         )
     results = [
         Result(
-            f"append seam: every seam bounds an empty space between two frozen rules "
-            f"({len(seam_files)} seam(s))",
+            f"append seam: every seam bounds an empty space between two frozen rules " f"({len(seam_files)} seam(s))",
             not region_problems,
             0.0,
             "\n".join(region_problems),
@@ -8740,9 +9784,22 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
         if tree.exists():
             shutil.rmtree(tree.parent)
         code, _ = run(
-            [sys.executable, str(base / "bin" / "skeletor-new"), str(tree),
-             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
-             "--tier", tier, "--language", "python", "--force"],
+            [
+                sys.executable,
+                str(base / "bin" / "skeletor-new"),
+                str(tree),
+                "--name",
+                "Probe",
+                "--cli",
+                CLI_NAME,
+                "--tagline",
+                "t",
+                "--tier",
+                tier,
+                "--language",
+                "python",
+                "--force",
+            ],
             cwd=SKELETOR,
         )
         return tree if code == 0 else None
@@ -8812,8 +9869,14 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
         if triple:
             break
     if triple is None:
-        return [Result("moved symbol: no shipped module imports a function from another", False,
-                       time.time() - started, f"{len(shipped)} python files scanned")]
+        return [
+            Result(
+                "moved symbol: no shipped module imports a function from another",
+                False,
+                time.time() - started,
+                f"{len(shipped)} python files scanned",
+            )
+        ]
     source_rel, symbol, importer_rel, _ = triple
 
     # Upstream moves it: deleted from its module, appended to a new one, and the
@@ -8827,8 +9890,14 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
     parsed = ast.parse(text)
     block = next((n for n in parsed.body if isinstance(n, ast.FunctionDef) and n.name == symbol), None)
     if block is None or block.end_lineno is None:
-        return [Result(f"moved symbol: {symbol} is not a top-level def in the template's {source_rel}",
-                       False, time.time() - started, "")]
+        return [
+            Result(
+                f"moved symbol: {symbol} is not a top-level def in the template's {source_rel}",
+                False,
+                time.time() - started,
+                "",
+            )
+        ]
     lines = text.splitlines(keepends=True)
     moved_body = "".join(lines[block.lineno - 1 : block.end_lineno])
     template_source.write_text("".join(lines[: block.lineno - 1] + lines[block.end_lineno :]), encoding="utf-8")
@@ -8883,8 +9952,14 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
         }
     )
     if not any(entry.endswith(importer_rel) for entry in repointed):
-        return [Result(f"moved symbol: the template's {importer_rel} no longer imports {symbol}", False,
-                       time.time() - started, f"repointed {repointed}")]
+        return [
+            Result(
+                f"moved symbol: the template's {importer_rel} no longer imports {symbol}",
+                False,
+                time.time() - started,
+                f"repointed {repointed}",
+            )
+        ]
 
     git_in(scratch, "add", "-A")
     git_in(scratch, "commit", "--quiet", "-m", f"scratch: move {symbol} out of {source_rel}")
@@ -8895,8 +9970,15 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
         code, output = run(
             # head renders from `scratch`, which carries the move; the BASE is
             # the clone the tree was scaffolded from.
-            [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree),
-             "--from-dir", str(clean), "--dry-run", "--json"],
+            [
+                sys.executable,
+                str(scratch / "bin" / "skeletor-upgrade"),
+                str(tree),
+                "--from-dir",
+                str(clean),
+                "--dry-run",
+                "--json",
+            ],
             cwd=tree,
         )
         # Anchored on the line that is exactly `{`, not on the first `{` in the
@@ -8960,10 +10042,16 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
             f"moved symbol: an untouched tree takes the move cleanly and is quiet ({symbol})",
             bool(applied) and not quiet.get("shadowed") and not quiet.get("dangling"),
             time.time() - started,
-            (quiet.get("__unparseable__") or f"applied={applied} shadowed={quiet.get('shadowed')} "
-             f"dangling={quiet.get('dangling')} — an upgrade that applied nothing has no findings "
-             f"either, so this control has to see the move land before its silence means anything.")
-            if not (applied and not quiet.get("shadowed") and not quiet.get("dangling")) else "",
+            (
+                (
+                    quiet.get("__unparseable__")
+                    or f"applied={applied} shadowed={quiet.get('shadowed')} "
+                    f"dangling={quiet.get('dangling')} — an upgrade that applied nothing has no findings "
+                    f"either, so this control has to see the move land before its silence means anything."
+                )
+                if not (applied and not quiet.get("shadowed") and not quiet.get("dangling"))
+                else ""
+            ),
         )
     )
 
@@ -8982,9 +10070,13 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
             f"moved symbol: the kept module still defining {symbol} is named as shadowed",
             any(symbol in entry for entry in shadowed.get(source_rel, [])),
             0.0,
-            f"expected {source_rel} to shadow {symbol}; got {shadowed or 'nothing'}. The template moved "
-            f"that definition and this tree kept its own copy, so an importer of the old module gets the "
-            f"stale one with nothing red anywhere." if not shadowed.get(source_rel) else "",
+            (
+                f"expected {source_rel} to shadow {symbol}; got {shadowed or 'nothing'}. The template moved "
+                f"that definition and this tree kept its own copy, so an importer of the old module gets the "
+                f"stale one with nothing red anywhere."
+                if not shadowed.get(source_rel)
+                else ""
+            ),
         )
     )
 
@@ -9012,8 +10104,9 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
         return results
     squatter = collide_tree / moved_rel
     squatter.parent.mkdir(parents=True, exist_ok=True)
-    squatter.write_text('"""My own file, which happens to sit where the template moved it."""' + NEWLINE,
-                        encoding="utf-8")
+    squatter.write_text(
+        '"""My own file, which happens to sit where the template moved it."""' + NEWLINE, encoding="utf-8"
+    )
     run(["git", "-C", str(collide_tree), "add", "-A"], cwd=collide_tree)
     run(["git", "-C", str(collide_tree), "commit", "-qm", f"adopter: my own {moved_rel}"], cwd=collide_tree)
     if not annotate(collide_tree, source_rel, def_line):
@@ -9029,12 +10122,22 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
             f"moved symbol: a shadow is named even when {symbol}'s new home collided",
             landed and any(symbol in entry for entry in collided_shadows.get(source_rel, [])),
             0.0,
-            (collided_run.get("__unparseable__") or "")
-            + (f"{moved_rel} is not in collided={collided_run.get('collided')}, so the destination was "
-               f"written after all and this fixture is the shadow tree again. " if not landed else "")
-            + (f"expected {source_rel} to shadow {symbol}; got {collided_shadows or 'nothing'}."
-               if not collided_shadows.get(source_rel) else "")
-            if not (landed and collided_shadows.get(source_rel)) else "",
+            (
+                (collided_run.get("__unparseable__") or "")
+                + (
+                    f"{moved_rel} is not in collided={collided_run.get('collided')}, so the destination was "
+                    f"written after all and this fixture is the shadow tree again. "
+                    if not landed
+                    else ""
+                )
+                + (
+                    f"expected {source_rel} to shadow {symbol}; got {collided_shadows or 'nothing'}."
+                    if not collided_shadows.get(source_rel)
+                    else ""
+                )
+                if not (landed and collided_shadows.get(source_rel))
+                else ""
+            ),
         )
     )
 
@@ -9049,10 +10152,13 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
             f"moved symbol: the kept importer of {symbol} is named as dangling",
             any(symbol in entry for entry in dangling.get(importer_rel, [])),
             0.0,
-            f"expected {importer_rel} to dangle on {symbol}; got {dangling or 'nothing'} "
-            f"(applied: {found.get('updated')}). That import no longer resolves, and an unresolved "
-            f"import in a tests/ module fails at collection — the whole suite, not one test."
-            if not dangling.get(importer_rel) else "",
+            (
+                f"expected {importer_rel} to dangle on {symbol}; got {dangling or 'nothing'} "
+                f"(applied: {found.get('updated')}). That import no longer resolves, and an unresolved "
+                f"import in a tests/ module fails at collection — the whole suite, not one test."
+                if not dangling.get(importer_rel)
+                else ""
+            ),
         )
     )
 
@@ -9118,11 +10224,14 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
             f"moved symbol: an adopter's own file importing {symbol} as `{spellings[-1]}` is named as dangling",
             any(symbol in entry for entry in hit.get(adopter_rel, [])),
             0.0,
-            f"expected {adopter_rel} to dangle on {symbol}; got {hit or 'nothing'}. This file is in no "
-            f"merge classification — the template never shipped it — and it imports with the bare "
-            f"spelling the template's own tests/ use. Both were blind spots: the scan read only the "
-            f"files it had kept, and keyed modules by one dotted name."
-            if not hit.get(adopter_rel) else "",
+            (
+                f"expected {adopter_rel} to dangle on {symbol}; got {hit or 'nothing'}. This file is in no "
+                f"merge classification — the template never shipped it — and it imports with the bare "
+                f"spelling the template's own tests/ use. Both were blind spots: the scan read only the "
+                f"files it had kept, and keyed modules by one dotted name."
+                if not hit.get(adopter_rel)
+                else ""
+            ),
         )
     )
     return results
@@ -9194,9 +10303,22 @@ def ported_only_conflict_gate(workdir: Path) -> List[Result]:
         # fixed a round earlier; the unchecked-subprocess class is
         # `post_copy_steps`'s, met again inside the instrument.
         code, output = run(
-            [sys.executable, str(scratch / "bin" / "skeletor-new"), str(tree),
-             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t",
-             "--tier", tier, "--language", language, "--force"],
+            [
+                sys.executable,
+                str(scratch / "bin" / "skeletor-new"),
+                str(tree),
+                "--name",
+                "Probe",
+                "--cli",
+                CLI_NAME,
+                "--tagline",
+                "t",
+                "--tier",
+                tier,
+                "--language",
+                language,
+                "--force",
+            ],
             cwd=SKELETOR,
         )
         if code != 0 or not (tree / scaffolder.MANIFEST_NAME).exists():
@@ -9207,8 +10329,11 @@ def ported_only_conflict_gate(workdir: Path) -> List[Result]:
     # is the pre-scratch HEAD and the base render resolves to it.
     taken, left = scaffold("ported-only-taken"), scaffold("ported-only-left")
     if refused:
-        return [Result("ported-only: could not scaffold the fixture trees", False, time.time() - started,
-                       "\n".join(refused))]
+        return [
+            Result(
+                "ported-only: could not scaffold the fixture trees", False, time.time() - started, "\n".join(refused)
+            )
+        ]
 
     # The file to diverge on is derived, not named: any markdown the core overlay
     # ships that this configuration renders. A path written into this gate would
@@ -9342,6 +10467,7 @@ def entangled_gate(workdir: Path) -> List[Result]:
     started = time.time()
     tags = run(["git", "-C", str(SKELETOR), "tag", "--sort=-creatordate"], cwd=SKELETOR)[1].split()
     importer, importee = "tests/test_docs_pipeline.py", "scripts/check_doc_tables.py"
+
     def changed_py(t: str) -> List[str]:
         out = run(["git", "-C", str(SKELETOR), "diff", "--name-only", t, "HEAD", "--", "template/"], cwd=SKELETOR)[1]
         return [line for line in out.split() if line.endswith(".py")]
@@ -9363,8 +10489,10 @@ def entangled_gate(workdir: Path) -> List[Result]:
             # not moved — leaving nothing to conflict and the gate asserting
             # against an empty conflict set.
             if all(
-                run(["git", "-C", str(SKELETOR), "diff", "--quiet", t, "HEAD", "--", f"template/core/{f}"],
-                    cwd=SKELETOR)[0] != 0
+                run(
+                    ["git", "-C", str(SKELETOR), "diff", "--quiet", t, "HEAD", "--", f"template/core/{f}"], cwd=SKELETOR
+                )[0]
+                != 0
                 for f in (importer, importee)
             )
             and len(changed_py(t)) > 2
@@ -9384,8 +10512,18 @@ def entangled_gate(workdir: Path) -> List[Result]:
     try:
         target = workdir / "entangled-tree"
         must_scaffold(
-            [sys.executable, str(old_checkout / "bin" / "skeletor-new"), str(target),
-             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--force"],
+            [
+                sys.executable,
+                str(old_checkout / "bin" / "skeletor-new"),
+                str(target),
+                "--name",
+                "Probe",
+                "--cli",
+                CLI_NAME,
+                "--tagline",
+                "t",
+                "--force",
+            ],
             cwd=SKELETOR,
         )
         # Rewritten, not edited: a small change merges cleanly, and a clean merge
@@ -9399,7 +10537,13 @@ def entangled_gate(workdir: Path) -> List[Result]:
         git_in(target, "commit", "-m", "ours")
 
         code, output = run(
-            [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(target), "--dry-run", "--json"],
+            [
+                sys.executable,
+                str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"),
+                str(target),
+                "--dry-run",
+                "--json",
+            ],
             cwd=target,
         )
         payload = json.loads(output[output.index("{") : output.rindex("}") + 1]) if "{" in output else {}
@@ -9407,8 +10551,7 @@ def entangled_gate(workdir: Path) -> List[Result]:
         return [
             Result(
                 "entangled: a clean file importing a conflicted one is named",
-                importee in payload.get("conflicted", [])
-                and importer in payload.get("updated", [])
+                importee in payload.get("conflicted", []) and importer in payload.get("updated", [])
                 # The pair, and nothing listed that names no conflicted file: a
                 # second real importer is correct (a test that also imports it).
                 and entangled.get(importer) == [importee]
@@ -9602,9 +10745,18 @@ def components_gate(workdir: Path) -> List[Result]:
         rendered = rendered.replace(token, value)
     (forked / "docs" / "rules" / "commits.md").write_text(rendered, encoding="utf-8")
     run(
-        [sys.executable, str(tool), "record", str(forked), "--component", "mixed",
-         "--file", "template/core/scripts/allowlist.py:scripts/allowlist.py",
-         "--file", "template/core/docs/rules/commits.md:docs/rules/commits.md"],
+        [
+            sys.executable,
+            str(tool),
+            "record",
+            str(forked),
+            "--component",
+            "mixed",
+            "--file",
+            "template/core/scripts/allowlist.py:scripts/allowlist.py",
+            "--file",
+            "template/core/docs/rules/commits.md:docs/rules/commits.md",
+        ],
         cwd=workdir,
     )
     _, mixed = run([sys.executable, str(tool), "report", str(forked)], cwd=workdir)
@@ -9630,10 +10782,7 @@ def components_gate(workdir: Path) -> List[Result]:
     results.append(
         Result(
             "components: a provable fork, an unprovable one and a clean take read differently",
-            len(named) == 1
-            and "allowlist.py" in named[0]
-            and len(unnamed) == 1
-            and "commits.md" in unnamed[0]
+            len(named) == 1 and "allowlist.py" in named[0] and len(unnamed) == 1 and "commits.md" in unnamed[0]
             # The discriminating half: the clean sentence must NOT be what the
             # unprovable file prints, which is the bug as it shipped.
             and clean_says in fresh_prose
@@ -9793,8 +10942,13 @@ def declined_gate(tier: str, workdir: Path) -> List[Result]:
     # assertion into a JSON comparison and the real run into a refusal. A slice by
     # position is a claim about which flag is last, which nothing states and
     # anybody may change. `human` is the base and `report` composes onto it.
-    human_argv = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree),
-                  "--no-base", "--allow-untagged"]
+    human_argv = [
+        sys.executable,
+        str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"),
+        str(tree),
+        "--no-base",
+        "--allow-untagged",
+    ]
 
     def report(extra: List[str]) -> dict:
         """The envelope, or an empty one — never an exception.
@@ -9922,9 +11076,7 @@ def entry_point_gate() -> Result:
     around: two copies of a mistake agree with each other.
     """
     started = time.time()
-    tools = sorted(
-        p.name for p in (SKELETOR / "bin").glob("skeletor-*") if p.is_file() and os.access(p, os.X_OK)
-    )
+    tools = sorted(p.name for p in (SKELETOR / "bin").glob("skeletor-*") if p.is_file() and os.access(p, os.X_OK))
     dispatcher = SKELETOR / "bin" / "skeletor"
     listed_code, listed = run([str(dispatcher), "--help"], cwd=SKELETOR)
     block_code, block = run([str(dispatcher), "--markdown"], cwd=SKELETOR)
@@ -9933,7 +11085,7 @@ def entry_point_gate() -> Result:
     current = block.strip() and block.strip() in readme
     # Discovered independently of the generator, so this cannot be satisfied by
     # a generator that under-reports: the filesystem is the third opinion.
-    missing_from_help = [t for t in tools if t[len("skeletor-"):] not in listed]
+    missing_from_help = [t for t in tools if t[len("skeletor-") :] not in listed]
     missing_from_readme = [t for t in tools if f"`bin/{t}`" not in readme]
     enough = len(tools) >= 2
 
@@ -10123,7 +11275,9 @@ def maintain_summary_gate() -> List[Result]:
     nothing = summary_for("unknown", False, False)
     still_claimed = [c for c in (CI_CLAUSE, PIN_CLAUSE, UPSTREAM_CLAUSE) if c in nothing]
     if still_claimed or nothing.rstrip().endswith("—"):
-        findings.append(f"with nothing established the summary still claimed {still_claimed or 'nothing at all'}: {nothing!r}")
+        findings.append(
+            f"with nothing established the summary still claimed {still_claimed or 'nothing at all'}: {nothing!r}"
+        )
 
     # The block above stubs the verdicts, so it establishes how an answer is
     # REPORTED and nothing about how one is DERIVED. Planting `pin_verdict`
@@ -10206,26 +11360,55 @@ def new_flag_gate(workdir: Path) -> List[Result]:
     manifest = tree / ".skeletor.json"
     record = json.loads(manifest.read_text(encoding="utf-8"))
     if record["args"][-2:] != ["--timezone", "UTC"]:
-        return [Result("new flag: the record no longer ends --timezone UTC; the plant cannot land", False,
-                       time.time() - started, str(record["args"]))]
+        return [
+            Result(
+                "new flag: the record no longer ends --timezone UTC; the plant cannot land",
+                False,
+                time.time() - started,
+                str(record["args"]),
+            )
+        ]
     record["args"] = record["args"][:-2]
     manifest.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     run(["git", "commit", "-qam", "plant: a record that predates --timezone"], cwd=tree)
-    upgrade = [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--dry-run",
-               "--from-dir", str(SKELETOR)]
+    upgrade = [
+        sys.executable,
+        str(SKELETOR / "bin" / "skeletor-upgrade"),
+        str(tree),
+        "--dry-run",
+        "--from-dir",
+        str(SKELETOR),
+    ]
     results = []
     code, output = run(upgrade, cwd=tree)
-    results.append(Result("new flag: a defaulted flag the record lacks is announced",
-                          code == 0 and "📌 new flag --timezone=UTC" in output, time.time() - started, output))
+    results.append(
+        Result(
+            "new flag: a defaulted flag the record lacks is announced",
+            code == 0 and "📌 new flag --timezone=UTC" in output,
+            time.time() - started,
+            output,
+        )
+    )
     started = time.time()
     code, output = run(upgrade + ["--set-arg", "--timezone=America/Chicago"], cwd=tree)
-    results.append(Result("new flag: --set-arg sets it on the run that introduces it",
-                          code == 0 and "not recorded; the new default" in output and "📌" not in output,
-                          time.time() - started, output))
+    results.append(
+        Result(
+            "new flag: --set-arg sets it on the run that introduces it",
+            code == 0 and "not recorded; the new default" in output and "📌" not in output,
+            time.time() - started,
+            output,
+        )
+    )
     started = time.time()
     code, output = run(upgrade + ["--set-arg", "--no-such-flag=x"], cwd=tree)
-    results.append(Result("new flag: a flag the template does not ship is still refused",
-                          code != 0 and "does not ship it either" in output, time.time() - started, output))
+    results.append(
+        Result(
+            "new flag: a flag the template does not ship is still refused",
+            code != 0 and "does not ship it either" in output,
+            time.time() - started,
+            output,
+        )
+    )
     return results
 
 
@@ -10261,8 +11444,12 @@ def tracked_source_gate() -> Result:
     gone = report({"bin/skeletor-new": {"why": "w", "tracks": "no/such/file.py", "read_through": head}})
     if not (gone[0] and "outlived" in gone[1]):
         problems.append(f"a tracks path this checkout lacks was not reported:\n{gone[1]}")
-    return Result("upstream: a tracked source reads its own bookmark and goes red when stale", not problems,
-                  time.time() - started, "\n".join(problems))
+    return Result(
+        "upstream: a tracked source reads its own bookmark and goes red when stale",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
 
 
 def upstream_record_gate() -> List[Result]:
@@ -10583,13 +11770,17 @@ def absent_region_gate() -> Result:
     rel = "template/core/.github/workflows/ci.yml"
     shown = {tag: run(["git", "show", f"{tag}:{rel}"], cwd=SKELETOR) for tag in ("v0.41.1", "v0.42.0")}
     if any(code != 0 for code, _ in shown.values()):
-        return Result("absent region: the v0.41.1/v0.42.0 fixture is not in this checkout's tags", False,
-                      time.time() - started, "")
+        return Result(
+            "absent region: the v0.41.1/v0.42.0 fixture is not in this checkout's tags",
+            False,
+            time.time() - started,
+            "",
+        )
     base, ours = shown["v0.41.1"][1], shown["v0.42.0"][1]
     job = base.index("\n  release-please:\n")
-    removed = base[:job + 1]
+    removed = base[: job + 1]
     edited = base.replace("name: CI\n", "name: CI (ours)\n", 1)
-    reindented = base[:job + 1] + "\n".join("  " + line if line else line for line in base[job + 1:].split("\n"))
+    reindented = base[: job + 1] + "\n".join("  " + line if line else line for line in base[job + 1 :].split("\n"))
     problems = []
     gone, hunks = upgrader.absent_hunks(base, removed, ours)
     if not hunks or gone != hunks:
@@ -10605,8 +11796,12 @@ def absent_region_gate() -> Result:
         gone, hunks = upgrader.absent_hunks(base, theirs, ours)
         if gone:
             problems.append(f"{label}: {gone} of {hunks} hunks called absent — expected none")
-    return Result("absent region: a removed section is told apart from an edited one", not problems,
-                  time.time() - started, "\n".join(problems))
+    return Result(
+        "absent region: a removed section is told apart from an edited one",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
 
 
 def already_applied_gate() -> Result:
@@ -10634,8 +11829,12 @@ def already_applied_gate() -> Result:
     rel = "template/core/tests/repo_files.py"
     shown = {tag: run(["git", "show", f"{tag}:{rel}"], cwd=SKELETOR) for tag in ("v0.30.0", "v0.31.0")}
     if any(code != 0 for code, _ in shown.values()):
-        return Result("already-applied: the v0.30.0/v0.31.0 fixture is not in this checkout's tags", False,
-                      time.time() - started, "")
+        return Result(
+            "already-applied: the v0.30.0/v0.31.0 fixture is not in this checkout's tags",
+            False,
+            time.time() - started,
+            "",
+        )
     base, ours = shown["v0.30.0"][1], shown["v0.31.0"][1]
     anchor = "from scripts.paths import NARRATIVE, PROJECT_ROOT  # noqa: E402"
     theirs = base.replace(anchor, anchor.replace("PROJECT_ROOT", "PROJECT_ROOT, TMP_DIR"), 1)
@@ -10646,8 +11845,10 @@ def already_applied_gate() -> Result:
         once = upgrader.merge(base, theirs, ours, Path(scratch))
         twice = upgrader.merge(base, once, ours, Path(scratch)) if once else None
     if not once or not twice or twice.count("class GitRefused") < 2:
-        problems.append("the hazard did not reproduce — a second merge no longer duplicates — so the "
-                        "assertion below would pass on a fixture nothing can go wrong in")
+        problems.append(
+            "the hazard did not reproduce — a second merge no longer duplicates — so the "
+            "assertion below would pass on a fixture nothing can go wrong in"
+        )
     elif not upgrader.already_applied(base, ours, once):
         problems.append("already_applied says no to a file the previous run merged v0.31.0 into")
     # The removal half, which the first version got wrong: an adopter edit INSIDE a
@@ -10678,7 +11879,9 @@ def already_applied_gate() -> Result:
     swept = 0
     for old, new in zip(tags, tags[1:]):
         for path in run(["git", "diff", "--name-only", old, new, "--", "template"], cwd=SKELETOR)[1].split():
-            before, after = run(["git", "show", f"{old}:{path}"], cwd=SKELETOR), run(["git", "show", f"{new}:{path}"], cwd=SKELETOR)
+            before, after = run(["git", "show", f"{old}:{path}"], cwd=SKELETOR), run(
+                ["git", "show", f"{new}:{path}"], cwd=SKELETOR
+            )
             if before[0] or after[0]:
                 continue
             swept += 1
@@ -10740,7 +11943,8 @@ def template_comment_names_gate() -> Result:
         f"template comments name no callable the template removed ({len(cites)} cited)",
         bool(cites) and not stale,
         time.time() - started,
-        "\n".join(stale) or ("" if cites else "no citation found — the pattern matched nothing, so this checked nothing"),
+        "\n".join(stale)
+        or ("" if cites else "no citation found — the pattern matched nothing, so this checked nothing"),
     )
 
 
@@ -10857,16 +12061,14 @@ def checkout_path_literal_gate() -> List[Result]:
 
     results.append(
         Result(
-            f"path literals: no file names this checkout's own path "
-            f"({len(tracked)} tracked, {len(names)} name(s))",
+            f"path literals: no file names this checkout's own path " f"({len(tracked)} tracked, {len(names)} name(s))",
             not findings,
             time.time() - started,
             (
-                "a reader in another checkout follows these to a path they do not have:\n  "
-                + "\n  ".join(findings)
-            )
-            if findings
-            else "",
+                ("a reader in another checkout follows these to a path they do not have:\n  " + "\n  ".join(findings))
+                if findings
+                else ""
+            ),
         )
     )
     return results
@@ -11190,8 +12392,24 @@ def hostile_parent_gate(tier: str, workdir: Path, venv_python: Path) -> List[Res
     nest.mkdir(exist_ok=True)
     target = nest / "hosted"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Hosted",
-         "--slug", "hosted", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Hosted",
+            "--slug",
+            "hosted",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+        ],
         cwd=workdir,
     )
     if code != 0:
@@ -11255,9 +12473,25 @@ def product_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok
         started = time.time()
         target = workdir / f"product-{label}"
         code, output = run(
-            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Product",
-             "--slug", "product", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
-             "--language", "python", *extra],
+            [
+                sys.executable,
+                str(SCAFFOLDER),
+                str(target),
+                "--allow-dirty",
+                "--name",
+                "Product",
+                "--slug",
+                "product",
+                "--tagline",
+                "t",
+                "--cli",
+                CLI_NAME,
+                "--tier",
+                tier,
+                "--language",
+                "python",
+                *extra,
+            ],
             cwd=workdir,
         )
         if code != 0:
@@ -11282,9 +12516,7 @@ def product_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok
         run(["git", "add", "-A"], cwd=target)
         run(["git", "commit", "--amend", "--no-edit"], cwd=target)
 
-        roots = sorted(
-            d.name for d in target.iterdir() if d.is_dir() and (d / "__main__.py").exists()
-        )
+        roots = sorted(d.name for d in target.iterdir() if d.is_dir() and (d / "__main__.py").exists())
         results.append(
             Result(
                 f"product package ({label}): the tree has {len(roots)} root __main__.py",
@@ -11323,9 +12555,25 @@ def newest_floor_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resul
     if tree.exists():
         shutil.rmtree(tree.parent)
     code, output = run(
-        [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-new"), str(tree), "--name", "Probe",
-         "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--language", "python",
-         "--python", floor, "--python-ceiling", floor],
+        [
+            sys.executable,
+            str(clean_skeletor(workdir) / "bin" / "skeletor-new"),
+            str(tree),
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tagline",
+            "t",
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--python",
+            floor,
+            "--python-ceiling",
+            floor,
+        ],
         cwd=SKELETOR,
     )
     if code != 0:
@@ -11357,8 +12605,23 @@ def oldest_floor_gate(tier: str, workdir: Path) -> List[Result]:
     if tree.exists():
         shutil.rmtree(tree.parent)
     code, output = run(
-        [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-new"), str(tree), "--name", "Probe",
-         "--cli", CLI_NAME, "--tagline", "t", "--tier", tier, "--language", "both", "--python", floor],
+        [
+            sys.executable,
+            str(clean_skeletor(workdir) / "bin" / "skeletor-new"),
+            str(tree),
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tagline",
+            "t",
+            "--tier",
+            tier,
+            "--language",
+            "both",
+            "--python",
+            floor,
+        ],
         cwd=SKELETOR,
     )
     if code != 0:
@@ -11366,12 +12629,14 @@ def oldest_floor_gate(tier: str, workdir: Path) -> List[Result]:
     files = sorted(str(p) for p in tree.rglob("*.py") if ".venv" not in p.parts and "node_modules" not in p.parts)
     checker = "import ast, sys\nfor f in sys.argv[1:]:\n    ast.parse(open(f, encoding='utf-8').read(), f)\n"
     code, output = run([interpreter, "-c", checker, *files], cwd=tree)
-    return [Result(
-        f"python {floor} floor: all {len(files)} rendered .py files parse on a real python{floor}",
-        code == 0 and bool(files),
-        time.time() - started,
-        output[-1500:],
-    )]
+    return [
+        Result(
+            f"python {floor} floor: all {len(files)} rendered .py files parse on a real python{floor}",
+            code == 0 and bool(files),
+            time.time() - started,
+            output[-1500:],
+        )
+    ]
 
 
 def parenthesised_except_gate(tree: Path) -> Result:
@@ -11429,8 +12694,21 @@ def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
     if tree.exists():
         shutil.rmtree(tree.parent)
     code, output = run(
-        [sys.executable, str(own / "bin" / "skeletor-new"), str(tree), "--name", "Probe", "--cli", CLI_NAME,
-         "--tagline", "t", "--tier", "core", "--language", "python"],
+        [
+            sys.executable,
+            str(own / "bin" / "skeletor-new"),
+            str(tree),
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tagline",
+            "t",
+            "--tier",
+            "core",
+            "--language",
+            "python",
+        ],
         cwd=SKELETOR,
     )
     if code != 0:
@@ -11459,7 +12737,11 @@ def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
     def rehearse() -> Tuple[int, str]:
         done = subprocess.run(
             [sys.executable, str(own / "bin" / "skeletor-upgrade"), str(tree), "--rehearse", "--allow-untagged"],
-            cwd=tree, capture_output=True, text=True, timeout=1800, env={**os.environ, "SKIP": skip},
+            cwd=tree,
+            capture_output=True,
+            text=True,
+            timeout=1800,
+            env={**os.environ, "SKIP": skip},
         )
         return done.returncode, done.stdout + done.stderr
 
@@ -11489,8 +12771,14 @@ def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
             if wants_red
             else "a release that breaks nothing says so, from beside the tree"
         )
-        results.append(Result(f"rehearse: {label}, and writes nothing", ok, time.time() - started,
-                              "" if ok else f"exit {code}, untouched={untouched()}\n{output[-2500:]}"))
+        results.append(
+            Result(
+                f"rehearse: {label}, and writes nothing",
+                ok,
+                time.time() - started,
+                "" if ok else f"exit {code}, untouched={untouched()}\n{output[-2500:]}",
+            )
+        )
 
     started = time.time()
     release(beside, hook=True)
@@ -11504,8 +12792,14 @@ def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
         and "· rehearsal plant" in output
         and "README.md" in output
     )
-    results.append(Result("rehearse: a hook the release adds, red over an existing file, is named with the file",
-                          ok, time.time() - started, "" if ok else f"exit {code}, landed={landed}\n{output[-2500:]}"))
+    results.append(
+        Result(
+            "rehearse: a hook the release adds, red over an existing file, is named with the file",
+            ok,
+            time.time() - started,
+            "" if ok else f"exit {code}, landed={landed}\n{output[-2500:]}",
+        )
+    )
 
     started = time.time()
     release(failing)
@@ -11520,8 +12814,14 @@ def rehearse_gate(workdir: Path, venv_python: Path) -> List[Result]:
         and "1 test(s) fail after the upgrade that did not before" in output
         and "test_rehearsal_probe" in output
     )
-    results.append(Result("rehearse: a gate red on both sides still names the test the release broke",
-                          ok, time.time() - started, "" if ok else f"exit {code}\n{output[-2500:]}"))
+    results.append(
+        Result(
+            "rehearse: a gate red on both sides still names the test the release broke",
+            ok,
+            time.time() - started,
+            "" if ok else f"exit {code}\n{output[-2500:]}",
+        )
+    )
     return results
 
 
@@ -11553,8 +12853,21 @@ def cli_rename_gate(workdir: Path) -> List[Result]:
         if tree.exists():
             shutil.rmtree(tree.parent)
         must_scaffold(
-            [sys.executable, str(clean / "bin" / "skeletor-new"), str(tree),
-             "--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", "core", "--language", "python"],
+            [
+                sys.executable,
+                str(clean / "bin" / "skeletor-new"),
+                str(tree),
+                "--name",
+                "Probe",
+                "--cli",
+                CLI_NAME,
+                "--tagline",
+                "t",
+                "--tier",
+                "core",
+                "--language",
+                "python",
+            ],
             cwd=SKELETOR,
         )
         wrapper = tree / CLI_NAME
@@ -11578,7 +12891,9 @@ def cli_rename_gate(workdir: Path) -> List[Result]:
         if (tree / CLI_NAME).exists():
             problems.append(f"the old wrapper {CLI_NAME} is still there — the tree now has both")
         if not (tree / "al").is_symlink() or os.readlink(tree / "al") != new:
-            problems.append(f"the alias was not repointed: al -> {os.readlink(tree / 'al') if (tree / 'al').is_symlink() else 'missing'}")
+            problems.append(
+                f"the alias was not repointed: al -> {os.readlink(tree / 'al') if (tree / 'al').is_symlink() else 'missing'}"
+            )
         recorded = json.loads((tree / load_scaffolder().MANIFEST_NAME).read_text(encoding="utf-8"))["args"]
         if recorded[recorded.index("--cli") + 1] != new:
             problems.append(f"the record still says --cli {recorded[recorded.index('--cli') + 1]}")
@@ -11598,8 +12913,14 @@ def cli_rename_gate(workdir: Path) -> List[Result]:
     git_in(other, "commit", "--quiet", "--allow-empty", "-m", "scratch: a commit past the recorded ref")
     behind = scaffold("cli-rename-behind")
     code, output = run(
-        [sys.executable, str(other / "bin" / "skeletor-upgrade"), str(behind), "--set-arg", f"cli={new}",
-         "--allow-untagged"],
+        [
+            sys.executable,
+            str(other / "bin" / "skeletor-upgrade"),
+            str(behind),
+            "--set-arg",
+            f"cli={new}",
+            "--allow-untagged",
+        ],
         cwd=behind,
     )
     if code == 0 or "nothing was written" not in output or (behind / new).exists():
@@ -11611,7 +12932,11 @@ def cli_rename_gate(workdir: Path) -> List[Result]:
     git_in(taken, "add", "-A")
     git_in(taken, "commit", "--quiet", "-m", "adopter: a command of their own")
     code, output = run([*upgrade, str(taken), "--set-arg", f"cli={new}", "--allow-untagged"], cwd=taken)
-    if code == 0 or "already exists" not in output or (taken / new).read_text(encoding="utf-8") != "#!/bin/sh\necho mine\n":
+    if (
+        code == 0
+        or "already exists" not in output
+        or (taken / new).read_text(encoding="utf-8") != "#!/bin/sh\necho mine\n"
+    ):
         problems.append(f"a rename onto a name the tree uses was not refused cleanly:\n{output[-900:]}")
 
     # **The move goes with the record.** A conflict elsewhere holds the record back,
@@ -11625,8 +12950,9 @@ def cli_rename_gate(workdir: Path) -> List[Result]:
     if line is None:
         problems.append(f"no README line names ./{CLI_NAME}, so the held-move fixture cannot make its conflict")
     else:
-        readme.write_text(readme.read_text(encoding="utf-8").replace(line, line + "  <!-- adopter: ours -->", 1),
-                          encoding="utf-8")
+        readme.write_text(
+            readme.read_text(encoding="utf-8").replace(line, line + "  <!-- adopter: ours -->", 1), encoding="utf-8"
+        )
         git_in(held, "commit", "--quiet", "-am", "adopter: edit a line the rename rewrites")
         code, first = run([*upgrade, str(held), "--set-arg", f"cli={new}", "--allow-untagged"], cwd=held)
         conflicted_readme = "LEFT ALONE" in first and "README.md" in first.split("LEFT ALONE", 1)[1]
@@ -11635,11 +12961,16 @@ def cli_rename_gate(workdir: Path) -> List[Result]:
         elif (held / new).exists() or not (held / CLI_NAME).exists():
             problems.append("a run that held the record back moved the wrapper anyway — the v0.37.0 trap")
         else:
-            code, second = run([*upgrade, str(held), "--set-arg", f"cli={new}", "--ported", "--allow-untagged"],
-                               cwd=held)
+            code, second = run(
+                [*upgrade, str(held), "--set-arg", f"cli={new}", "--ported", "--allow-untagged"], cwd=held
+            )
             recorded = json.loads((held / load_scaffolder().MANIFEST_NAME).read_text(encoding="utf-8"))["args"]
-            if code != 0 or not (held / new).is_file() or (held / CLI_NAME).exists() or \
-                    recorded[recorded.index("--cli") + 1] != new:
+            if (
+                code != 0
+                or not (held / new).is_file()
+                or (held / CLI_NAME).exists()
+                or recorded[recorded.index("--cli") + 1] != new
+            ):
                 problems.append(f"the --ported run did not move and record together:\n{second[-900:]}")
             # The conflict was never ported here, so what is owed must survive the
             # run that advanced past it — the only copy, since it will not be offered
@@ -11752,9 +13083,26 @@ def shell_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: 
     target = workdir / "renamed"
     started = time.time()
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "Renamed",
-         "--slug", "renamed", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
-         "--language", "python", "--shell-package", name],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Renamed",
+            "--slug",
+            "renamed",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--shell-package",
+            name,
+        ],
         cwd=workdir,
     )
     if code != 0:
@@ -11831,8 +13179,24 @@ def shell_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: 
     started = time.time()
     plain = workdir / "default-package"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(plain), "--allow-dirty", "--name", "Plain",
-         "--slug", "plain", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier, "--language", "python"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(plain),
+            "--allow-dirty",
+            "--name",
+            "Plain",
+            "--slug",
+            "plain",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+        ],
         cwd=workdir,
     )
     results.append(
@@ -11870,9 +13234,26 @@ def shell_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: 
     started = time.time()
     preflag = workdir / "pre-flag-manifest"
     code, output = run(
-        [sys.executable, str(SCAFFOLDER), str(preflag), "--allow-dirty", "--name", "Preflag",
-         "--slug", "preflag", "--tagline", "t", "--cli", CLI_NAME, "--tier", tier,
-         "--language", "python", "--shell-package", "cli"],
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(preflag),
+            "--allow-dirty",
+            "--name",
+            "Preflag",
+            "--slug",
+            "preflag",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+            "--shell-package",
+            "cli",
+        ],
         cwd=workdir,
     )
     troubles = [] if code == 0 else [f"scaffold failed: exit {code}\n{output[-400:]}"]
@@ -11919,8 +13300,14 @@ def shell_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: 
             troubles.append(f"{flag}: not among a scaffold's recorded arguments — the entry is stale")
             continue
         code, output = run(
-            [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(target),
-             "--set-arg", f"{flag.lstrip('-')}=whatever", "--dry-run"],
+            [
+                sys.executable,
+                str(SKELETOR / "bin" / "skeletor-upgrade"),
+                str(target),
+                "--set-arg",
+                f"{flag.lstrip('-')}=whatever",
+                "--dry-run",
+            ],
             cwd=workdir,
         )
         if code == 0 or flag not in output:
@@ -11940,9 +13327,24 @@ def shell_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: 
         started = time.time()
         reject = workdir / f"bad-{bad}"
         code, output = run(
-            [sys.executable, str(SCAFFOLDER), str(reject), "--allow-dirty", "--name", "Bad",
-             "--slug", "bad", "--tagline", "t", "--cli", CLI_NAME, "--tier", "core",
-             "--shell-package", bad],
+            [
+                sys.executable,
+                str(SCAFFOLDER),
+                str(reject),
+                "--allow-dirty",
+                "--name",
+                "Bad",
+                "--slug",
+                "bad",
+                "--tagline",
+                "t",
+                "--cli",
+                CLI_NAME,
+                "--tier",
+                "core",
+                "--shell-package",
+                bad,
+            ],
             cwd=workdir,
         )
         named = "--shell-package" in output

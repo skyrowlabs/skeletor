@@ -30,7 +30,6 @@ import argparse
 import json
 import os
 import re
-import sys
 import urllib.error
 import urllib.request
 from collections import defaultdict
@@ -51,7 +50,7 @@ TIMEOUT_S = 15
 
 @dataclass
 class Pin:
-    ecosystem: str          # pypi | npm | github | python
+    ecosystem: str  # pypi | npm | github | python
     name: str
     version: str
     where: List[str] = field(default_factory=list)
@@ -70,11 +69,12 @@ class Pin:
 class Finding:
     pin: Pin
     latest: Optional[str]
-    status: str             # current | behind | ahead | disagrees | unknown | allowlisted
+    status: str  # current | behind | ahead | disagrees | unknown | allowlisted
     note: str = ""
 
 
 # ── discovery ────────────────────────────────────────────────────────────────
+
 
 def _files() -> List[Path]:
     out = []
@@ -130,9 +130,7 @@ def discover() -> Dict[str, Pin]:
         # `github:` half of either. Bumping the reachable half is exactly the
         # split pin that ships a tree whose own `test_lint_tool_parity.py` is
         # red on arrival. Found by trying to bump isort, 2026-09-08.
-        for match in re.finditer(
-            r"-\s+repo:\s+https://github\.com/([\w.-]+/[\w.-]+)\s*\n\s*rev:\s*(\S+)", text
-        ):
+        for match in re.finditer(r"-\s+repo:\s+https://github\.com/([\w.-]+/[\w.-]+)\s*\n\s*rev:\s*(\S+)", text):
             line = text[: match.start(2)].count("\n") + 1
             add("github", match.group(1).removesuffix(".git"), match.group(2), path, line)
 
@@ -189,6 +187,7 @@ def discover() -> Dict[str, Pin]:
 
 # ── registries ───────────────────────────────────────────────────────────────
 
+
 def _get(url: str) -> Optional[dict]:
     request = urllib.request.Request(url, headers={"User-Agent": "skeletor-check-pins"})
     if url.startswith("https://api.github.com/") and (token := os.environ.get("GITHUB_TOKEN")):
@@ -217,8 +216,11 @@ def latest_version(pin: Pin) -> Tuple[Optional[str], str]:
             # know about a `9.0.0b5` that nobody flagged. Walk back to the
             # newest stable rather than telling people to pin a beta.
             data = next(
-                (r for r in (_get(f"https://api.github.com/repos/{pin.name}/releases?per_page=30") or [])
-                 if not r.get("prerelease") and not _prerelease(r.get("tag_name", ""))),
+                (
+                    r
+                    for r in (_get(f"https://api.github.com/repos/{pin.name}/releases?per_page=30") or [])
+                    if not r.get("prerelease") and not _prerelease(r.get("tag_name", ""))
+                ),
                 None,
             )
         if data and data.get("tag_name"):
@@ -278,6 +280,7 @@ def ahead(pin: Pin, latest: str) -> bool:
 
 # ── allowlist ────────────────────────────────────────────────────────────────
 
+
 def allowlisted() -> Dict[str, str]:
     """Pins deliberately left behind, with their reasons."""
     if not ALLOWLIST.exists():
@@ -296,6 +299,7 @@ def allowlisted() -> Dict[str, str]:
 
 # ── report ───────────────────────────────────────────────────────────────────
 
+
 def evaluate() -> List[Finding]:
     exempt = allowlisted()
     findings = []
@@ -311,7 +315,9 @@ def evaluate() -> List[Finding]:
             status = "allowlisted" if key in exempt else "behind"
             findings.append(Finding(pin, latest, status, exempt.get(key, note)))
         elif ahead(pin, latest):
-            findings.append(Finding(pin, latest, "ahead", "newer than the registry's latest: typo, yank or pre-release?"))
+            findings.append(
+                Finding(pin, latest, "ahead", "newer than the registry's latest: typo, yank or pre-release?")
+            )
         else:
             findings.append(Finding(pin, latest, "current", note))
     order = {"disagrees": 0, "behind": 1, "ahead": 2, "unknown": 3, "allowlisted": 4, "current": 5}
@@ -395,20 +401,22 @@ def main() -> int:
     stale = stale_exemptions(findings)
 
     if args.json:
-        print(json.dumps(
-            [
-                {
-                    "key": f.pin.key,
-                    "pinned": f.pin.version,
-                    "latest": f.latest,
-                    "status": f.status,
-                    "note": f.note,
-                    "where": f.pin.where,
-                }
-                for f in findings
-            ],
-            indent=2,
-        ))
+        print(
+            json.dumps(
+                [
+                    {
+                        "key": f.pin.key,
+                        "pinned": f.pin.version,
+                        "latest": f.latest,
+                        "status": f.status,
+                        "note": f.note,
+                        "where": f.pin.where,
+                    }
+                    for f in findings
+                ],
+                indent=2,
+            )
+        )
         if stale:
             # A consumer reading only the findings array would see a clean
             # report while the allowlist quietly exempts something that is gone.

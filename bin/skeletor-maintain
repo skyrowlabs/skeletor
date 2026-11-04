@@ -104,10 +104,21 @@ def ci_verdict() -> Tuple[str, str]:
     if not shutil.which("gh"):
         return "unknown", "gh is not on PATH — cannot read the last verify run"
 
-    code, output = run([
-        "gh", "run", "list", "--workflow", "verify.yml", "--branch", RELEASE_BRANCH,
-        "--limit", "1", "--json", "conclusion,displayTitle,url",
-    ])
+    code, output = run(
+        [
+            "gh",
+            "run",
+            "list",
+            "--workflow",
+            "verify.yml",
+            "--branch",
+            RELEASE_BRANCH,
+            "--limit",
+            "1",
+            "--json",
+            "conclusion,displayTitle,url",
+        ]
+    )
     if code != 0:
         return "unknown", f"gh could not read the run list:\n{output.strip()}"
     try:
@@ -321,12 +332,16 @@ def upstream_verdict() -> Tuple[bool, str, bool]:
     """
     declared, root, source = declared_upstreams()
     if not declared:
-        return False, (
-            f"   nothing declared — this checkout watches no upstream, so \"nothing has moved\"\n"
-            f"   is not a claim this run can make. {UPSTREAMS.name} is the public record; the\n"
-            f"   repositories to watch go in {LOCAL_UPSTREAMS.name} (gitignored) — see the\n"
-            f"   `upstreams` comment in {UPSTREAMS.name} for the shape."
-        ), False
+        return (
+            False,
+            (
+                f'   nothing declared — this checkout watches no upstream, so "nothing has moved"\n'
+                f"   is not a claim this run can make. {UPSTREAMS.name} is the public record; the\n"
+                f"   repositories to watch go in {LOCAL_UPSTREAMS.name} (gitignored) — see the\n"
+                f"   `upstreams` comment in {UPSTREAMS.name} for the shape."
+            ),
+            False,
+        )
 
     lines: List[str] = []
     work = False
@@ -343,7 +358,9 @@ def upstream_verdict() -> Tuple[bool, str, bool]:
         watermark = record.get("read_through", "")
         code, _ = run(["git", "-C", str(checkout), "cat-file", "-e", f"{watermark}^{{commit}}"])
         if code != 0:
-            lines.append(f"   {name}: watermark {watermark} is not a commit in that checkout — fetch it, or fix the record")
+            lines.append(
+                f"   {name}: watermark {watermark} is not a commit in that checkout — fetch it, or fix the record"
+            )
             work = True
             continue
 
@@ -364,9 +381,11 @@ def upstream_verdict() -> Tuple[bool, str, bool]:
         # which is exactly what a path that held still reports.
         for path in sorted(sources):
             if run(["git", "-C", str(checkout), "cat-file", "-e", f"HEAD:{path}"])[0] != 0:
-                lines.append(f"   {name}: {path} is recorded as harvested and git cannot see it there "
-                             f"— the record has outlived its subject, or the path is ignored upstream "
-                             f"and belongs under sources_untracked")
+                lines.append(
+                    f"   {name}: {path} is recorded as harvested and git cannot see it there "
+                    f"— the record has outlived its subject, or the path is ignored upstream "
+                    f"and belongs under sources_untracked"
+                )
                 work = True
 
         # Named, never measured, and never counted as work. A path gitignored
@@ -395,8 +414,10 @@ def upstream_verdict() -> Tuple[bool, str, bool]:
         for path, entry in sorted(tracked.items()):
             ours, mark = entry.get("tracks", ""), entry.get("read_through", watermark)
             if not (SKELETOR / ours).is_file():
-                lines.append(f"   {name}: {path} is tracked by {ours or '(nothing)'}, which this checkout "
-                             f"does not have — the record has outlived its subject")
+                lines.append(
+                    f"   {name}: {path} is tracked by {ours or '(nothing)'}, which this checkout "
+                    f"does not have — the record has outlived its subject"
+                )
                 work = True
                 continue
             code, count = run(["git", "-C", str(checkout), "rev-list", "--count", f"{mark}..HEAD", "--", path])
@@ -404,8 +425,10 @@ def upstream_verdict() -> Tuple[bool, str, bool]:
                 lines.append(f"   {name}: {path}'s bookmark {mark} is not a commit in that checkout")
                 work = True
             elif count.strip() not in ("0", ""):
-                lines.append(f"   {name}: ⇄ {path} moved in {count.strip()} commit(s) since {mark[:9]}; "
-                             f"{ours} follows it — read the diff, port what generalises, advance read_through")
+                lines.append(
+                    f"   {name}: ⇄ {path} moved in {count.strip()} commit(s) since {mark[:9]}; "
+                    f"{ours} follows it — read the diff, port what generalises, advance read_through"
+                )
                 work = True
 
         code, count = run(["git", "-C", str(checkout), "rev-list", "--count", f"{watermark}..HEAD"])
@@ -418,9 +441,11 @@ def upstream_verdict() -> Tuple[bool, str, bool]:
         # are itemised and everything else is a count. Reversing that would
         # bury the four paths somebody has already judged worth reading under
         # every commit the upstream made this week.
-        code, changed = run(
-            ["git", "-C", str(checkout), "diff", "--name-only", f"{watermark}..HEAD", "--", *sources]
-        ) if sources else (0, "")
+        code, changed = (
+            run(["git", "-C", str(checkout), "diff", "--name-only", f"{watermark}..HEAD", "--", *sources])
+            if sources
+            else (0, "")
+        )
         touched = [path for path in changed.split() if path]
 
         lines.append(f"   {name}: {moved} commit(s) since {watermark[:9]}  ({checkout.name})")

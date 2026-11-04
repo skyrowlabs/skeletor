@@ -81,7 +81,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, NoReturn, Optional, Tuple
 
 SKELETOR = Path(__file__).resolve().parent.parent
 COMPONENTS_NAME = ".skeletor-components.json"
@@ -104,7 +104,7 @@ def detail(message: str = "") -> None:
     print(f"   {message}" if message else "", file=sys.stderr)
 
 
-def die(message: str) -> "NoReturn":  # type: ignore[valid-type]
+def die(message: str) -> NoReturn:
     say("❌", message)
     raise SystemExit(1)
 
