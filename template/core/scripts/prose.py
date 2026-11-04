@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.output import fail, item, ok  # noqa: E402
+from scripts.paths import is_foreign  # noqa: E402
 
 COMMAND = "{{CLI}}"
 # The lookarounds exempt every identifier that merely starts with the command's letters.
@@ -143,7 +144,8 @@ def offences(path: Path, root: Path) -> list[str]:
 def prose_files(root: Path) -> Iterable[Path]:
     for suffix in MASKS:
         for path in sorted(root.rglob(f"*{suffix}")):
-            if not _NOT_PROSE & set(path.relative_to(root).parts):
+            rel = path.relative_to(root)
+            if not _NOT_PROSE & set(rel.parts) and not is_foreign(rel):
                 yield path
 
 

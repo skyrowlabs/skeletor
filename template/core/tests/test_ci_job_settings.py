@@ -80,7 +80,7 @@ pytestmark = [pytest.mark.unit]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scanning import scanned  # noqa: E402
-from scripts.paths import GITHUB_DIR, TESTS_DIR  # noqa: E402
+from scripts.paths import GITHUB_DIR, PROJECT_ROOT, TESTS_DIR, is_foreign  # noqa: E402
 from scripts.yaml_text import read_uncommented  # noqa: E402
 
 CI = GITHUB_DIR / "workflows" / "ci.yml"
@@ -151,7 +151,7 @@ def history_dependent_markers() -> set:
     """Markers of every suite holding a test that refuses a shallow clone."""
     markers = set()
     for path in sorted(TESTS_DIR.rglob("test_*.py")):
-        if "__pycache__" in path.relative_to(TESTS_DIR).parts:
+        if "__pycache__" in path.relative_to(TESTS_DIR).parts or is_foreign(path.relative_to(PROJECT_ROOT)):
             continue
         text = path.read_text(encoding="utf-8")
         if _NEEDS_HISTORY.search(text) and ".git" in text:

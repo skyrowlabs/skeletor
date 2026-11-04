@@ -343,11 +343,18 @@ UNTRACKED_DIRS = {".git", ".venv", ".venv-ci", "node_modules", "__pycache__", "t
 
 
 def python_files(tree: Path) -> List[str]:
-    """Every Python file in the tree, as the filenames pre-commit would pass."""
+    """Every Python file in the tree, as the filenames pre-commit would pass.
+
+    Less the config's top-level `exclude:`, which pre-commit applies before any
+    hook sees a name: a tree's declared foreign subtree is excluded there.
+    """
+    config = tree / ".pre-commit-config.yaml"
+    found = re.search(r"^exclude: '([^']*)'", config.read_text(encoding="utf-8"), re.M) if config.exists() else None
+    excluded = re.compile(found.group(1)) if found else None
     return [
-        str(path.relative_to(tree))
-        for path in sorted(tree.rglob("*.py"))
-        if not UNTRACKED_DIRS & set(path.relative_to(tree).parts)
+        rel
+        for rel in (path.relative_to(tree).as_posix() for path in sorted(tree.rglob("*.py")))
+        if not UNTRACKED_DIRS & set(Path(rel).parts) and not (excluded and excluded.search(rel))
     ]
 
 
@@ -4532,6 +4539,80 @@ def scheduled_rehearsal_gate(workdir: Path, venv_python: Path) -> List[Result]:
                           caught, time.time() - started, f"{red[-1500:]}\n--- unit ---\n{unit[-400:]}"))
     results.append(Result("scheduled rehearsal: leaves no worktree registered", len(worktrees) == 1, 0.0,
                           "\n".join(worktrees)))
+    return results
+
+
+#: A vendored tree that fails the tree's own gates when read as its source.
+FOREIGN_PLANT = {
+    "vendor/lib.py": "import os\nx=1\n",
+    "vendor/data.json": '{\n  // JSONC, which check-json refuses\n  "a": 1\n}\n',
+    "vendor/NOTES.md": "Run `scripts/vendor_build.py` first.\n",
+    "vendor/conf.yml": "manual: docs/vendor-manual.md\n",
+}
+
+
+def _declare_foreign(tree: Path, configs: bool) -> None:
+    """Append `vendor` to FOREIGN in its seam's space, and with `configs`, exclude it in each linter."""
+    if not configs:
+        paths = tree / "scripts" / "paths.py"
+        text = paths.read_text(encoding="utf-8")
+        at = text.index("# ── Skeletor's again below this line", text.index("FOREIGN: tuple = ()"))
+        paths.write_text(text[:at] + 'FOREIGN += ("vendor",)\n\n\n' + text[at:], encoding="utf-8")
+        return
+    edits = {
+        ".flake8": ("\n    tmp\n", "\n    tmp,\n    vendor\n"),
+        "pyproject.toml": ("  | tmp\n)/", "  | tmp\n  | vendor\n)/"),
+        ".pre-commit-config.yaml": ("\nrepos:", "\nexclude: '^vendor/'\nrepos:"),
+    }
+    for name, (old, new) in edits.items():
+        text = (tree / name).read_text(encoding="utf-8")
+        if old not in text:
+            raise AssertionError(f"foreign plant: {name} no longer holds {old!r}")
+        (tree / name).write_text(text.replace(old, new, 1), encoding="utf-8")
+    pyproject = tree / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    pyproject.write_text(re.sub(r'(^skip = \[.*?)"tmp"\]', r'\1"tmp", "vendor"]', text, count=1, flags=re.M),
+                         encoding="utf-8")
+
+
+def foreign_subtree_gate(workdir: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
+    """A subtree in `FOREIGN`, excluded in each linter's config, is read by no gate; undeclared, it is.
+
+    The seam skeletor's own `template/` needs, shipped general. Three states: the
+    vendored tree fails the gates as source; declared but not excluded, the lint
+    probe names the linters still reading it; excluded too, every gate is green.
+    """
+    started = time.time()
+    result, tree = scaffold("core", "python", workdir, name="foreign")
+    if not result.ok:
+        return [Result(f"foreign subtree: {result.label}", False, result.seconds, result.output)]
+    (tree / ".venv").symlink_to(venv_python.parents[1])
+    for name, body in FOREIGN_PLANT.items():
+        (tree / name).parent.mkdir(parents=True, exist_ok=True)
+        (tree / name).write_text(body, encoding="utf-8")
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "-qm", "plant: a vendored tree")
+    red = sorted(r.label for r in gates(tree, venv_python, pyright_ok) if not r.ok)
+    results = [Result("foreign subtree: undeclared, a vendored tree fails the unit suite, docs and lint",
+                      {"pytest -m unit", f"{CLI_NAME} check docs"} <= set(red) and any("flake8" in r for r in red),
+                      time.time() - started, "\n".join(red))]
+    _declare_foreign(tree, configs=False)
+    git_in(tree, "commit", "-qam", "declare vendor foreign")
+    code, probe = run([str(venv_python), "-m", "pytest", "tests/test_scratch_is_not_linted.py", "-q"], cwd=tree,
+                      env_extra={"PYTHONPATH": str(tree)})
+    results.append(Result("foreign subtree: declared but not excluded, the lint probe names the linters reading it",
+                          code != 0 and "FOREIGN names `vendor`, and these linters still read it" in probe
+                          and "flake8" in probe, 0.0, probe[-1500:]))
+    _declare_foreign(tree, configs=True)
+    # One commit, as a fresh scaffold has, and no reports from the first pass.
+    git_in(tree, "add", "-A")
+    git_in(tree, "reset", "--soft", git_in(tree, "rev-list", "--max-parents=0", "HEAD")[1].strip())
+    git_in(tree, "commit", "-q", "--amend", "--no-edit")
+    shutil.rmtree(tree / "tmp", ignore_errors=True)
+    started = time.time()
+    still = [r for r in gates(tree, venv_python, pyright_ok) if not r.ok]
+    results.append(Result("foreign subtree: declared and excluded, every gate is green", not still,
+                          time.time() - started, "\n\n".join(f"{r.label}\n{r.output[-800:]}" for r in still)))
     return results
 
 
@@ -12058,6 +12139,7 @@ def main() -> int:
         results += pending_added_gate(workdir)
         results += cron_notice_gate(workdir)
         results += scheduled_rehearsal_gate(workdir, venv_python)
+        results += foreign_subtree_gate(workdir, venv_python, pyright_ok)
         for gate in sidecar_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
