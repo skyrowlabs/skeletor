@@ -62,8 +62,8 @@ LANGUAGE_CONFIGS = (
 
 
 #: The python lint gates, as (label, argv) with the paths to check appended.
-#: `{{CLI}} commit` runs this same list over the paths it commits, so a tree
-#: that changes its linters here (ruff, say) changes them for both.
+#: A command that lints a subset of paths runs this same list over them, so a
+#: tree that changes its linters here (ruff, say) changes them everywhere.
 PYTHON_LINTERS = (
     ("flake8 (errors)", ("flake8", "--select=E9,F63,F7,F82,F401", "--show-source")),
     ("isort", ("isort", "--check-only", "--diff")),

@@ -43,6 +43,7 @@ directory.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import shutil
@@ -67,6 +68,14 @@ CHECK = PROJECT_ROOT / SHELL_PACKAGE / "check.py"
 PACKAGE = PROJECT_ROOT / "package.json"
 
 
+def _table_tools(text: str, table: str) -> list[str]:
+    """The first argv element of each `(label, argv)` row of `table`, read with `ast`."""
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == table for t in node.targets):
+            return [argv[0] for _label, argv in ast.literal_eval(node.value)]
+    return []
+
+
 def _walkers() -> list[str]:
     """Tools this tree runs over the whole tree, as `{{CLI}} check lint` runs them.
 
@@ -81,6 +90,10 @@ def _walkers() -> list[str]:
     if CHECK.exists():
         text = CHECK.read_text(encoding="utf-8")
         found += re.findall(r"""run\(\[\s*["']([\w-]+)["'][^\]]*["']\.["']""", text)
+        # A table run over the tree, `run([*argv, "."]) for label, argv in TABLE`,
+        # names its tools in the table: the literal form above matches nothing there.
+        for table in re.findall(r"""run\(\[\*argv,\s*["']\.["']\]\)[^\n]*for \w+, argv in (\w+)""", text):
+            found += _table_tools(text, table)
         if re.search(r"pyright[^\n]*--project", text):
             found.append("pyright")
     if PACKAGE.exists():
