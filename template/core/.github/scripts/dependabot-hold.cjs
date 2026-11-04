@@ -44,15 +44,51 @@ const DEV_SECTIONS = ['devDependencies'];
 //: changed package.json the manifest decides; alone, its majors are runtime.
 const LOCKFILE = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml)$/;
 
-//: One leading version per line, for the three ecosystems dependabot.yml names.
-const VERSION_LINES = [
-  // pip: `name==1.2.3`, `name>=1.2`, `name[extra]~=1.2`, and pyproject's `"name>=1.2",`
-  /^([-+])\s*"?([A-Za-z0-9._-]+)\s*(?:\[[^\]]*\])?\s*[><=~!]+\s*v?(\d+)(?:\.(\d+))?/,
+//: npm and Actions: one version per line, at the line's start.
+const LINE_VERSIONS = [
   // npm package.json: `"name": "^1.2.3"`
   /^([-+])\s*"([^"]+)"\s*:\s*"[~^>=<\s]*v?(\d+)(?:\.(\d+))?/,
   // GitHub Actions: `uses: owner/repo@v4`
   /^([-+]).*\buses:\s*([^@\s]+)@v?(\d+)(?:\.(\d+))?/,
 ];
+
+//: pip: every `name==1.2.3`, `name>=1.2` or `name[extra]~=1.2` on the line, so a
+//: one-line pyproject list `dev = ["pytest>=8.0", "black>=24"]` reads as two.
+//: Anchoring at the line's start read none of it, and its majors merged (mind-head).
+const PIP_SPEC =
+  /(?:^|[\s"',[])([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(?:===|==|~=|>=|<=|!=|>|<)\s*v?(\d+)(?:\.(\d+))?/g;
+
+//: Files whose lines the patterns above claim to read. A changed line in one of
+//: them that yields no version is held as unknown: a shape this cannot read must
+//: not be read as "no major".
+const READ_SHAPES = [
+  /(^|\/)[^/]*requirements[^/]*\.txt$/,
+  /(^|\/)pyproject\.toml$/,
+  /(^|\/)package\.json$/,
+  /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/,
+];
+
+//: A changed line with nothing to read: blank, a comment, a hash, or punctuation.
+const NOTHING_TO_READ = /^\s*(?:$|#|\/\/|--hash=|[[\]{}(),]+\s*$)/;
+
+//: Every version on one diff line, as { sign, name, major, minor }.
+function versionsOn(line) {
+  const sign = line[0];
+  if (sign !== '-' && sign !== '+') return [];
+  for (const pattern of LINE_VERSIONS) {
+    const m = pattern.exec(line);
+    if (m)
+      return [{ sign, name: m[2], major: parseInt(m[3], 10), minor: parseInt(m[4] || '0', 10) }];
+  }
+  const body = line.slice(1);
+  if (NOTHING_TO_READ.test(body)) return [];
+  return [...body.matchAll(PIP_SPEC)].map((m) => ({
+    sign,
+    name: m[1],
+    major: parseInt(m[2], 10),
+    minor: parseInt(m[3] || '0', 10),
+  }));
+}
 
 const SECURITY_FOOTER = /disable automated security fix PRs/i;
 const SECURITY_LABELS = ['security', 'dependabot-security'];
@@ -92,6 +128,8 @@ function majorBumps(file, files, manifests) {
   const after = new Map();
   let section = null;
   const base = packageJson ? parsed(manifests && manifests[name]) : null;
+  const readable = READ_SHAPES.some((pattern) => pattern.test(name));
+  const unread = [];
   for (const line of (file.patch || '').split('\n')) {
     // Each hunk starts afresh: a section open in one hunk says nothing about the
     // next, and carrying it classed a runtime major as dev (dream-doll).
@@ -105,15 +143,19 @@ function majorBumps(file, files, manifests) {
       continue;
     }
     if (SECTION_CLOSE.test(line)) section = null;
-    for (const pattern of VERSION_LINES) {
-      const m = pattern.exec(line);
-      if (!m) continue;
-      const version = { major: parseInt(m[3], 10), minor: parseInt(m[4] || '0', 10), section };
-      (m[1] === '-' ? before : after).set(m[2].toLowerCase(), version);
-      break;
+    const found = versionsOn(line);
+    for (const { sign, name: pkg, major, minor } of found) {
+      (sign === '-' ? before : after).set(pkg.toLowerCase(), { major, minor, section });
     }
+    const changed = line[0] === '-' || line[0] === '+';
+    if (readable && changed && !found.length && !NOTHING_TO_READ.test(line.slice(1)))
+      unread.push(line);
   }
-  const bumps = [];
+  const bumps = unread.slice(0, 1).map((line) => ({
+    finding: `\`${line.slice(1).trim()}\` in ${name}`,
+    tier: 'unknown',
+    what: 'a changed line this cannot read',
+  }));
   for (const [pkg, next] of after) {
     const prev = before.get(pkg);
     if (!prev) continue;
@@ -133,7 +175,11 @@ function majorBumps(file, files, manifests) {
       const declared = declaredSection(base, pkg) || next.section;
       tier = declared ? (DEV_SECTIONS.includes(declared) ? 'dev' : 'runtime') : 'unknown';
     }
-    bumps.push({ finding: `${finding} in ${name}`, tier });
+    bumps.push({
+      finding: `${finding} in ${name}`,
+      tier,
+      what: 'a major whose section is not known',
+    });
   }
   return bumps;
 }
@@ -164,7 +210,7 @@ function decide({ pr, files, manifests }) {
     return {
       merge: false,
       tier: 'unknown',
-      reason: `${kind} with a major whose section is not known: ${unknown[0].finding} — left for review`,
+      reason: `${kind} with ${unknown[0].what}: ${unknown[0].finding} — left for review`,
     };
   }
   if (bumps.length) {
@@ -176,9 +222,7 @@ function decide({ pr, files, manifests }) {
   }
   // The title is a backstop only for a diff that showed no version at all.
   const read = (files || []).some((file) =>
-    (file.patch || '')
-      .split('\n')
-      .some((line) => VERSION_LINES.some((pattern) => pattern.test(line)))
+    (file.patch || '').split('\n').some((line) => versionsOn(line).length > 0)
   );
   if (
     !read &&
