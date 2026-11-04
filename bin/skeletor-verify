@@ -5381,6 +5381,15 @@ def pending_added_gate(workdir: Path) -> List[Result]:
     return results
 
 
+def unnamed_sidecars(patches: Path) -> List[str]:
+    """Every sidecar under `tmp/upgrade/`, as the report should spell it."""
+    return [
+        str(Path("tmp", "upgrade", f.relative_to(patches)))
+        for f in sorted(patches.rglob("*"))
+        if f.is_file() and f.suffix in (".patch", ".new")
+    ]
+
+
 def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
     """`tmp/upgrade/` describes one run, and `--dry-run` says it wrote nothing.
 
@@ -5522,7 +5531,15 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
     report = patches / "REPORT.md"
     text = report.read_text(encoding="utf-8") if report.exists() else ""
     sections = re.findall(r"^### (\S+)$", text, re.MULTILINE)
-    named = f"tmp/upgrade/{conflict}.patch" in text and f"tmp/upgrade/{collision}.new" in text
+    # Every sidecar on disk, named by the path it has: v0.71.0 printed `.patch` for a
+    # conflict whose sidecar under `--no-base` is `.new`, and asserted the text.
+    on_disk = unnamed_sidecars(patches)
+    named = (
+        len(on_disk) >= 2
+        and all(f"`{side}`" in text for side in on_disk)
+        and f"`{conflict}`: conflict" in text
+        and f"`{collision}`: yours" in text
+    )
     prompted = all(re.search(rf"^### {name}\n\n<!-- ", text, re.MULTILINE) for name in ("VERDICT", "GATES", "NOTES"))
     results.append(
         Result(
@@ -5549,7 +5566,11 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
             "sidecars: a re-run of the same upgrade keeps what was filled in",
             "all green" in again
             and "- `resolved.txt`: resolved by hand after the first run" in again
-            and "\nconflicts: 3\n" in again,
+            and "\nconflicts: 3\n" in again
+            and "<!-- This run: " in again
+            and "<!-- Re-run: This run: " in again
+            and re.search(r"from base [\w.-]+@[0-9a-f]{12};", again) is not None
+            and all(f"`{side}`" in again for side in unnamed_sidecars(patches)),
             time.time() - started,
             again or "no tmp/upgrade/REPORT.md",
         )

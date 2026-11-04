@@ -209,26 +209,49 @@ def previous_report(patches: Path, title: str) -> Dict[str, List[str]]:
     return {heading: [line for line in body if line.strip()] for heading, body in sections.items()}
 
 
+def written_sidecars(patches: Path) -> Dict[str, str]:
+    """`{path in the tree: its sidecar under tmp/upgrade/}`, read off the disk rather than assumed."""
+    return {
+        str(path.relative_to(patches))[: -len(path.suffix)]: str(Path("tmp", "upgrade", path.relative_to(patches)))
+        for path in sidecars(patches)
+    }
+
+
 def write_report(
-    patches: Path, title: str, pending: Dict[str, str], tally: str, branch: str, previous: Dict[str, List[str]]
+    patches: Path,
+    title: str,
+    pending: Dict[str, str],
+    unpending: Dict[str, str],
+    tally: str,
+    branch: str,
+    previous: Dict[str, List[str]],
 ) -> Path:
-    """`tmp/upgrade/REPORT.md`: what this tool can count filled, the rest prompted or carried forward."""
+    """`tmp/upgrade/REPORT.md`: what this tool can count filled, the rest prompted or carried forward.
+
+    `pending` is counted as conflicts; `unpending` is a sidecar left to read and
+    is listed without being counted (sky.boss's owned dependabot.yml).
+    """
     conflicts = [f"- `{rel}`: {what}" for rel, what in pending.items()]
     for line in previous.get("CONFLICTS", []):
         found = CONFLICT_ENTRY.match(line)
-        if found and found.group(1) not in pending:
+        if found and found.group(1) not in pending and found.group(1) not in unpending:
             resolved = "resolved by hand after the first run"
             conflicts.append(line if resolved in line else f"- `{found.group(1)}`: {resolved}")
+    # A re-run's own counts follow the first run's rather than replacing them,
+    # which erased run 1's work from the report (mind.head, proto.pilot).
+    tallies = [line for line in previous.get("METRICS", []) if line.startswith("<!-- ")]
+    tallies.append(f"<!-- {'Re-run: ' if tallies else ''}{tally} -->")
     carried = {}
     for line in previous.get("METRICS", []):
         key, _, value = line.partition(":")
         if key.strip() in REPORT_METRICS and value.strip().isdigit():
             carried[key.strip()] = value.strip()
     carried["conflicts"] = str(len(conflicts))
+    listed = conflicts + [f"- `{rel}`: {what} (not a conflict)" for rel, what in unpending.items()]
     filled = {
-        "METRICS": [f"<!-- {tally} -->"] + [f"{key}: {carried.get(key, UNFILLED)}" for key in REPORT_METRICS],
+        "METRICS": tallies + [f"{key}: {carried.get(key, UNFILLED)}" for key in REPORT_METRICS],
         "BRANCH": previous.get("BRANCH") or [branch],
-        "CONFLICTS": conflicts or ["None."],
+        "CONFLICTS": listed or ["None."],
     }
     lines = [
         f"# Upgrade report: {title}",
@@ -3836,19 +3859,35 @@ def main() -> int:
             branch = subprocess.run(
                 ["git", "-C", str(target), "branch", "--show-current"], capture_output=True, text=True
             ).stdout.strip()
+            origin = subprocess.run(
+                ["git", "-C", str(target), "remote", "get-url", "origin"], capture_output=True, text=True
+            ).stdout.strip()
+            # Prefixed, because a bare SHA in a report read across repositories
+            # inherits the reader's checkout (node-zero, sky.boss).
+            slug = re.sub(r"\.git$", "", origin.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]) or target.name
             counts = {"added": added, "updated": updated, "merged": merged, "left for you": pending}
             tally = "This run: " + ", ".join(f"{len(rels)} {name}" for name, rels in counts.items()) + "."
             if declined:
                 tally += f" {len(declined)} file(s) you deleted before stay deleted; that is not a decline."
+            on_disk = written_sidecars(patches)
+            why = {
+                **{rel: "conflict; the template's side is" for rel in conflicted},
+                **{rel: "yours before the template's, which is" for rel in collided},
+            }
+            moved = {rel: "owned by this tree, never merged; the template's version moved:" for rel in owned_files}
+            moved.update({rel: "deleted by you; the template's version moved since:" for rel in declined})
             report = write_report(
                 patches,
                 title,
+                {rel: f"{what} `{on_disk.get(rel, 'no sidecar')}`" for rel, what in why.items()},
                 {
-                    **{rel: f"conflict, the template's diff is `tmp/upgrade/{rel}.patch`" for rel in conflicted},
-                    **{rel: f"yours before the template's, which is `tmp/upgrade/{rel}.new`" for rel in collided},
+                    rel: f"{moved.get(rel, 'the template wrote')} `{side}`"
+                    for rel, side in on_disk.items()
+                    if rel not in why
                 },
                 tally,
-                f"{branch or 'detached HEAD'} from base {(pre_upgrade or 'no commit')[:12]}; commit: {UNFILLED}",
+                f"{branch or 'detached HEAD'} from base {slug}@{(pre_upgrade or 'no commit')[:12]};"
+                f" commit: {UNFILLED}",
                 previous,
             )
             kept = " (what you filled in is kept)" if previous else ""
