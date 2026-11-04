@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Bootstrap only: put the package on sys.path so `scripts.paths` — which
@@ -65,7 +65,7 @@ class Run:
             raise ValueError(f"unknown outcome '{self.outcome}' (expected one of {OUTCOMES})")
         # The two rails. Both are asserted here rather than in each job, so a
         # new job cannot forget them.
-        if self.outcome == "ok" and not self.agent_ran:
+        if self.outcome == "ok" and not self.agent_ran and _uses_agent(self.job):
             raise ValueError(
                 f"{self.job}: recorded 'ok' but its agent never ran. A collection stage that "
                 "succeeded and a triage stage that never started look identical from outside — "
@@ -78,6 +78,14 @@ class Run:
             )
         if self.outcome in ("declined", "failed") and not self.reason:
             raise ValueError(f"{self.job}: '{self.outcome}' requires a reason — a verdict with no reason is unreadable")
+
+
+def _uses_agent(job: str) -> bool:
+    """Whether `job` has an agent stage; an unknown key is held to the rail."""
+    from scripts.reporting.jobs import JOBS_BY_KEY
+
+    known = JOBS_BY_KEY.get(job)
+    return known is None or known.agent
 
 
 def record(run: Run) -> None:
@@ -125,4 +133,4 @@ def last_run(job: str) -> dict | None:
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

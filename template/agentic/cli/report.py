@@ -9,6 +9,8 @@ that does not exist are both silent failures, and each has happened.
 from __future__ import annotations
 
 import importlib
+import json
+import os
 import sys
 
 import click
@@ -52,7 +54,12 @@ def _register() -> None:
 
         def make(key: str, cadence: str, writes: str):
             @click.command(name=key, help=f"{cadence} — writes {writes}")
-            def command() -> None:
+            @click.option("--dry-run", is_flag=True, help="run the deterministic stage only; record nothing")
+            def command(dry_run: bool) -> None:
+                if dry_run:
+                    from scripts.reporting.agent_runner import DRY_RUN_ENV
+
+                    os.environ[DRY_RUN_ENV] = "1"
                 _run_module(key)
 
             return command
@@ -120,13 +127,13 @@ def cron(print_: bool, check_: bool, install: bool) -> None:
 
 def _install(live: str) -> None:
     """Write the merged crontab, after saving the one it replaces."""
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     from scripts.paths import TMP_DIR
     from scripts.reporting import shellout
     from scripts.reporting.jobs import merged_crontab
 
-    backup = TMP_DIR / "reporting" / f"crontab-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.bak"
+    backup = TMP_DIR / "reporting" / f"crontab-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.bak"
     backup.parent.mkdir(parents=True, exist_ok=True)
     backup.write_text(live, encoding="utf-8")
     merged = merged_crontab(live)
@@ -138,6 +145,24 @@ def _install(live: str) -> None:
     kept = len(live.splitlines())
     ok(f"installed this tree's block; {len(merged.splitlines())} lines now, from {kept}")
     detail(f"The crontab it replaced is at {backup.relative_to(PROJECT_ROOT)}.")
+
+
+@report.command()
+@click.option("--json", "as_json", is_flag=True, help="the machine envelope sky.boss reads")
+def status(as_json: bool) -> None:
+    """Every job: last result, how long ago, whether it is overdue, when it runs next."""
+    from scripts.reporting import status as standing
+
+    envelope = standing.envelope()
+    if as_json:
+        click.echo(json.dumps(envelope, indent=2))
+        return
+    for entry in envelope["jobs"]:
+        if entry["intentionally_off"]:
+            skip(f"{entry['job']:<14} off — {entry['unscheduled_reason']}")
+            continue
+        row = f"{entry['job']:<14} {entry['result']:<9} {entry['last_age']:<10} next {entry['next_run'] or '—'}"
+        (warn if entry["overdue"] else ok)(row + ("  OVERDUE" if entry["overdue"] else ""))
 
 
 @report.command()

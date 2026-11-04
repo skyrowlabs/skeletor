@@ -34,6 +34,33 @@ Never hand-copy a schedule from prose into a crontab, and remember that
 *registered* is not *installed in your crontab*. When the two disagree,
 `cron --check` tells you which one your machine is actually following.
 
+## The lane drainers, and standing down for free
+
+`agent-task` and `agent-fix` work the capture lanes `{{CLI}} task` and `{{CLI}} bug`
+file into: one issue per run, oldest first, on a branch named
+`agent/<lane>/<issue>`, opened as a **draft** pull request for a person to
+review. Both live in `scripts/reporting/drain.py`, and they ship switched off in
+`scripts/reporting_schedule_allowlist.yaml`. Turning one on means deciding who
+reviews its pull requests.
+
+Most nights a lane is empty, so the empty check runs before any agent and costs
+a `gh issue list`. An empty lane is `declined`, with a ledger row and a
+heartbeat; a lane GitHub could not answer for is `failed`, because "I could not
+look" is not "empty". An issue that already has an open draft from its drainer,
+or that has failed three times, is skipped. The attempt count is a marker comment
+on the issue itself.
+
+`{{CLI}} report <key> --dry-run` runs any job's deterministic stage, says what
+the agent stage would do, and records nothing.
+
+`overnight` has no agent. Every night it writes `tmp/reporting/overnight.md`:
+what failed, what is overdue, or that the night was idle, because "no digest"
+reads the same as "the jobs died".
+
+`{{CLI}} report status --json` is the machine view: every job's last result,
+its age, whether it is overdue against its cron schedule, and its next run.
+sky.boss reads that envelope, so adding a tree there is a `projects.toml` entry.
+
 ## The grid is load-bearing
 
 Two rules generate it, and both are about a resource nothing locks: **one shared

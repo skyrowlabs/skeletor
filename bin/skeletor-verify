@@ -4055,10 +4055,13 @@ def secrets_contract_gate(workdir: Path, venv_python: Path) -> List[Result]:
     key header must turn it red, or a clean run proves nothing.
     """
     results: List[Result] = []
-    for tier, expected in (("core", []), ("agentic", ["HEARTBEAT_REPO_REPORT"])):
+    for tier in ("core", "agentic"):
         tree = workdir / f"{tier}-python"
         if not tree.exists():
             continue
+        # Every heartbeat URL is a secret; the set is the tree's own job registry.
+        jobs = tree / "scripts" / "reporting" / "jobs.py"
+        expected = re.findall(r'heartbeat_var="([A-Z_]+)"', jobs.read_text(encoding="utf-8")) if jobs.exists() else []
         started = time.time()
         proc = subprocess.run(
             [str(venv_python), "scripts/env_shape.py", "--json"],
@@ -4258,6 +4261,59 @@ def rescaffold_gate(tier: str, workdir: Path) -> List[Result]:
     results.append(check_upgrade_is_noop(tree))
     results[-1].label = f"rescaffold: {results[-1].label}"
     return results
+
+
+def owned_gate(workdir: Path) -> List[Result]:
+    """A file the adopter owns is never merged into, and `--ported` makes a collision owned.
+
+    sky.boss kept its own `dependabot.yml` with `--ported`, and the manifest then
+    recorded the template's hash for it, so the next template change would have
+    three-way merged into a file that shares nothing with the template's. Planted
+    through `--no-base`, as `sidecar_gate` does: one recorded hash tampered (the
+    template moved a file the adopter owns), one entry deleted (a collision).
+    """
+    started = time.time()
+    manifest_name = load_scaffolder().MANIFEST_NAME
+    result, tree = scaffold("core", "python", workdir, name="owned")
+    if not result.ok:
+        return [Result(f"owned: {result.label}", False, result.seconds, result.output)]
+    manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
+    mine, collision = "README.md", ".github/dependabot.yml"
+    if mine not in manifest["files"] or collision not in manifest["files"]:
+        return [Result("owned: the fixture's two paths are not in a fresh manifest", False, 0.0, "")]
+    manifest["files"][mine] = "0" * 64
+    del manifest["files"][collision]
+    (tree / manifest_name).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    for rel in (mine, collision):
+        (tree / rel).write_text("the adopter's own\n", encoding="utf-8")
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "-m", "plant: an owned file and a collision")
+    upgrade = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree),
+               "--no-base", "--allow-untagged"]
+    # stdout alone: the envelope goes there and the report to stderr, which `run` merges.
+    ran = subprocess.run([*upgrade, "--own", mine, "--ported", "--json"], cwd=tree, capture_output=True, text=True)
+    code, output = ran.returncode, ran.stderr
+    problems = []
+    try:
+        envelope = json.loads(ran.stdout)
+    except ValueError:
+        envelope = {}
+    recorded = json.loads((tree / manifest_name).read_text(encoding="utf-8")).get("owned")
+    if code != 0:
+        problems.append(f"the run failed:\n{output[-800:]}")
+    if mine in envelope.get("conflicted", []) or mine not in envelope.get("owned", []):
+        problems.append(f"{mine} was not reported as owned, or was reported as a conflict")
+    if recorded != sorted([mine, collision]):
+        problems.append(f"the manifest records owned={recorded}, not the owned file plus the ported collision")
+    if (tree / mine).read_text(encoding="utf-8") != "the adopter's own\n":
+        problems.append(f"{mine} was written to")
+    if not (tree / "tmp" / "upgrade" / f"{mine}.new").exists():
+        problems.append("the template moved an owned file and no sidecar says so")
+    code, again = run([*upgrade, "--dry-run"], cwd=tree)
+    if "🏠" not in again or "conflict" in again.split("🏠")[0].lower() and mine in again.split("🏠")[0]:
+        problems.append(f"a second run does not carry ownership forward:\n{again[-800:]}")
+    return [Result("owned: never merged into, and a ported collision becomes owned", not problems,
+                   time.time() - started, "\n".join(problems))]
 
 
 def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
@@ -9785,6 +9841,42 @@ def new_flag_gate(workdir: Path) -> List[Result]:
     return results
 
 
+def tracked_source_gate() -> Result:
+    """A source that `tracks` a template file reports on its own bookmark, and goes red when stale.
+
+    `upstream.local.json` may give a source as `{why, tracks, read_through}`: a
+    template file following one upstream file, read to its own commit. Planted
+    against this checkout as its own upstream, so no second repository is needed:
+    a bookmark at the root commit must report movement, one at HEAD must not, and
+    a `tracks` naming a file this checkout lacks must be reported as outlived.
+    """
+    started = time.time()
+    maintain = load_tool(SKELETOR / "bin" / "skeletor-maintain", "skeletor_maintain_tracked")
+    origin = run(["git", "remote", "get-url", "origin"], cwd=SKELETOR)[1].strip()
+    root = run(["git", "rev-list", "--max-parents=0", "HEAD"], cwd=SKELETOR)[1].split()[0]
+    head = run(["git", "rev-parse", "HEAD"], cwd=SKELETOR)[1].strip()
+    problems = []
+
+    def report(sources: dict) -> tuple:
+        record = {"origin": origin, "read_through": head, "sources": sources}
+        maintain.declared_upstreams = lambda: ({"self": record}, SKELETOR / "upstream.local.json", "stub")
+        maintain.find_checkout = lambda _origin, _root: SKELETOR
+        work, text, _ = maintain.upstream_verdict()
+        return work, text
+
+    moved = report({"bin/skeletor-new": {"why": "w", "tracks": "bin/skeletor-new", "read_through": root}})
+    if not (moved[0] and "⇄ bin/skeletor-new" in moved[1]):
+        problems.append(f"a bookmark at the root commit reported no movement:\n{moved[1]}")
+    still = report({"bin/skeletor-new": {"why": "w", "tracks": "bin/skeletor-new", "read_through": head}})
+    if still[0] or "⇄" in still[1]:
+        problems.append(f"a bookmark at HEAD reported movement:\n{still[1]}")
+    gone = report({"bin/skeletor-new": {"why": "w", "tracks": "no/such/file.py", "read_through": head}})
+    if not (gone[0] and "outlived" in gone[1]):
+        problems.append(f"a tracks path this checkout lacks was not reported:\n{gone[1]}")
+    return Result("upstream: a tracked source reads its own bookmark and goes red when stale", not problems,
+                  time.time() - started, "\n".join(problems))
+
+
 def upstream_record_gate() -> List[Result]:
     """The public record carries no pointer into a private checkout.
 
@@ -11517,6 +11609,7 @@ def main() -> int:
         results.append(already_applied_gate())
         results.append(absent_region_gate())
         results += upstream_record_gate()
+        results.append(tracked_source_gate())
         results += shared_helper_api_gate()
         results += template_annotations_gate()
         results += maintain_summary_gate()
@@ -11683,6 +11776,7 @@ def main() -> int:
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 
+        results += owned_gate(workdir)
         for gate in sidecar_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)

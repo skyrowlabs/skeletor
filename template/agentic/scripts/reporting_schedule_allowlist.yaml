@@ -8,3 +8,9 @@
 # the two must stay distinguishable.
 
 # governor: "proposes gate changes; ships switched off until its proposals have been read once"
+
+# The drainers open draft pull requests unattended. Turning one on is a decision
+# about who reviews them, so it is made by deleting its line here and running
+# `{{CLI}} report cron --install`. Try it first with `{{CLI}} report <key> --dry-run`.
+agent-task: 'opens a draft PR per night from the agent-task lane; switched on deliberately'
+agent-fix: 'opens a draft PR per night from the agent-bug lane; switched on deliberately'

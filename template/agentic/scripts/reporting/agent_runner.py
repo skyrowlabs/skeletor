@@ -89,6 +89,15 @@ DEFAULT_AGENT_CMD = f"claude -p {PROMPT_TOKEN} --permission-mode acceptEdits"
 #: the prompt describes is a suggestion rather than a bound.
 AGENT_CMD_VAR = "{{CLI_ENV_PREFIX}}_AGENT_CMD"
 
+#: Set by `{{CLI}} report <key> --dry-run`. Every job then runs its deterministic
+#: stage, says what its agent stage would do, and records nothing: a round can run
+#: every job in every tree without spending a token or writing a ledger row.
+DRY_RUN_ENV = "{{CLI_ENV_PREFIX}}_DRY_RUN"
+
+
+def dry_run() -> bool:
+    return os.environ.get(DRY_RUN_ENV) == "1"
+
 
 def agent_argv(prompt: str) -> list[str]:
     """The command to run, with the prompt substituted in.
@@ -159,6 +168,8 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
 
     def decline(reason: str) -> int:
         skip(f"{job.key} declined: {reason}")
+        if dry_run():
+            return 0
         run_ledger.record(
             run_ledger.Run(
                 job=job.key,
@@ -216,6 +227,9 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "{{BASE_BRAN
         argv = agent_argv(prompt)
     except ValueError as exc:
         return decline(str(exc))
+    if dry_run():
+        skip(f"{job.key} (dry run, nothing recorded): would run {argv[0]} over {len(prompt)} characters of prompt")
+        return 0
 
     head_before = _head()
     artifact_before = _artifact_hash(job)

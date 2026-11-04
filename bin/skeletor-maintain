@@ -385,6 +385,29 @@ def upstream_verdict() -> Tuple[bool, str, bool]:
             if not path.startswith("_"):
                 lines.append(f"   {name}: {path} is ignored upstream — harvested, and not watchable from here")
 
+        # A source given as `{why, tracks, read_through}` is a template file
+        # FOLLOWING an upstream one, with a bookmark of its own: the template
+        # port is reviewed against that file alone, so one upstream-wide
+        # watermark cannot say how far it has been read. Advancing the entry's
+        # `read_through` after reading the diff is what keeps it current.
+        tracked = {path: entry for path, entry in sources.items() if isinstance(entry, dict)}
+        sources = {path: entry for path, entry in sources.items() if not isinstance(entry, dict)}
+        for path, entry in sorted(tracked.items()):
+            ours, mark = entry.get("tracks", ""), entry.get("read_through", watermark)
+            if not (SKELETOR / ours).is_file():
+                lines.append(f"   {name}: {path} is tracked by {ours or '(nothing)'}, which this checkout "
+                             f"does not have — the record has outlived its subject")
+                work = True
+                continue
+            code, count = run(["git", "-C", str(checkout), "rev-list", "--count", f"{mark}..HEAD", "--", path])
+            if code != 0:
+                lines.append(f"   {name}: {path}'s bookmark {mark} is not a commit in that checkout")
+                work = True
+            elif count.strip() not in ("0", ""):
+                lines.append(f"   {name}: ⇄ {path} moved in {count.strip()} commit(s) since {mark[:9]}; "
+                             f"{ours} follows it — read the diff, port what generalises, advance read_through")
+                work = True
+
         code, count = run(["git", "-C", str(checkout), "rev-list", "--count", f"{watermark}..HEAD"])
         moved = count.strip() if code == 0 else "?"
         if moved in ("0", ""):

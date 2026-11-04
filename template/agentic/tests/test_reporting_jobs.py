@@ -42,7 +42,7 @@ def _cli_commands():
 
     report = module("report").report
 
-    return set(report.commands) - {"cron", "watch"}
+    return set(report.commands) - {"cron", "watch", "status"}
 
 
 def test_every_registry_entry_has_a_subcommand():
@@ -66,7 +66,8 @@ def test_every_job_module_exists():
 def test_every_job_has_a_prompt_named_after_its_module():
     """The prompt's filename is how the fix policy is resolved. A prompt named
     anything else is a job whose blast radius nothing can look up."""
-    missing = [job.key for job in JOBS if not (SCRIPTS_DIR / "reporting" / "prompts" / f"{job.module}.md").exists()]
+    prompts = SCRIPTS_DIR / "reporting" / "prompts"
+    missing = [job.key for job in JOBS if job.agent and not (prompts / f"{job.module}.md").exists()]
     assert not missing, f"Jobs with no prompts/<module>.md: {missing}"
 
 
@@ -280,9 +281,9 @@ def test_a_reader_sink_names_its_reader():
 
 def test_a_queue_sink_is_one_the_prompt_files_into():
     """Declared and wired are checked together: the prompt runs a capture command."""
-    intake = re.compile(r"\./\S+ (?:%s) " % "|".join(lane.key for lane in LANES))
+    intake = re.compile(r"\./\S+ (?:{}) ".format("|".join(lane.key for lane in LANES)))
     for job in scanned(JOBS, "registered jobs"):
-        files = bool(intake.search(_prompt(job)))
+        files = job.agent and bool(intake.search(_prompt(job)))
         assert (job.findings_sink == SINK_QUEUE) == files, (
             f"{job.key}: findings_sink={job.findings_sink!r}, and its prompt "
             f"{'does' if files else 'does not'} run a capture command"

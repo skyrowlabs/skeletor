@@ -129,6 +129,9 @@ class Job:
     heartbeat_var: str | None = None  # env var holding its dead-man-switch URL
     findings_sink: str | None = None  # one of SINKS, for a job that writes a report
     reader: str = ""  # for SINK_READER: who reads it, and how often
+    #: False for a job with no agent stage at all; only then may it record `ok`
+    #: without one, because `run_ledger` otherwise reads that as a stopped job.
+    agent: bool = True
 
     def needle(self) -> str:
         """What identifies THIS tree's line for this job in a live crontab.
@@ -168,10 +171,12 @@ def in_first_week(when: datetime | None = None) -> bool:
     return (when or now_local()).day <= 7
 
 
-#: ONE fully-worked job ships here — registry entry, module, prompt, heartbeat
-#: variable — because a registry seeded with entries whose modules do not exist
-#: is a registry whose own tests are red on arrival, and a suite people have
-#: learned to expect red from has stopped working.
+#: Every entry ships its module, prompt and heartbeat variable, because a
+#: registry naming modules that do not exist is red on arrival. `repo-report` is
+#: the worked example to copy. The two drainers work the capture lanes in
+#: `scripts/lanes.py` (one issue each per run, a draft pull request each) and ship
+#: switched off in `reporting_schedule_allowlist.yaml`; `overnight` reports on
+#: the night, every night, with no agent.
 #:
 #: Add the rest by copying this shape. `docs/AGENTIC_AUTOMATION.md` § Adding a
 #: job lists the five places a new entry touches; `tests/test_reporting_jobs.py`
@@ -187,6 +192,36 @@ JOBS: list[Job] = [
         commits=True,
         heartbeat_var="HEARTBEAT_REPO_REPORT",
         findings_sink=SINK_QUEUE,
+    ),
+    Job(
+        key="agent-task",
+        module="agent_task",
+        cadence="nightly 02:15",
+        cron="15 2 * * *",
+        writes="—",
+        fix_policy="code",
+        commits=True,
+        heartbeat_var="HEARTBEAT_AGENT_TASK",
+    ),
+    Job(
+        key="agent-fix",
+        module="agent_fix",
+        cadence="nightly 03:15",
+        cron="15 3 * * *",
+        writes="—",
+        fix_policy="code",
+        commits=True,
+        heartbeat_var="HEARTBEAT_AGENT_FIX",
+    ),
+    Job(
+        key="overnight",
+        module="overnight",
+        cadence="nightly 06:30",
+        cron="30 6 * * *",
+        writes="tmp/reporting/overnight.md",
+        heartbeat_var="HEARTBEAT_OVERNIGHT",
+        findings_sink=SINK_NONE,
+        agent=False,
     ),
 ]
 
