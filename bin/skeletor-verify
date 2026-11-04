@@ -7147,8 +7147,8 @@ def repository_identity() -> Tuple[Optional[str], str]:
     trailing `.` as the repository and shifted the capture one component left:
 
         https://github.com/skyrowlabs/skeletor.git   -> skyrowlabs   ✓
-        /home/jeston/skyrow.labs/skeletor            -> skyrow.labs  ✓
-        /home/jeston/skyrow.labs/skeletor/.          -> skeletor     ✗
+        /srv/work/skeletor                           -> work         ✓
+        /srv/work/skeletor/.                         -> skeletor     ✗
 
     So the word `skeletor` arrived through the input designed to name the OWNER,
     landed on the repository's own name, and the exclusion never saw it because
@@ -9952,12 +9952,12 @@ ORIGIN_SPELLINGS = {
     "https://github.com/skyrowlabs/skeletor.git": ("skyrowlabs", "skeletor"),
     "git@github.com:skyrowlabs/skeletor.git": ("skyrowlabs", "skeletor"),
     "https://github.com/skyrowlabs/skeletor": ("skyrowlabs", "skeletor"),
-    "/home/jeston/skyrow.labs/skeletor": ("skyrow.labs", "skeletor"),
+    "/srv/work/skeletor": ("work", "skeletor"),
     # The one that shipped a bug. The old pattern read the trailing `.` as the
     # repository and returned `skeletor` as the OWNER, which then became a
     # forbidden token and banned the word from every rendered `.skeletor.json`.
-    "/home/jeston/skyrow.labs/skeletor/.": ("skyrow.labs", "skeletor"),
-    "/home/jeston/skyrow.labs/skeletor/": ("skyrow.labs", "skeletor"),
+    "/srv/work/skeletor/.": ("work", "skeletor"),
+    "/srv/work/skeletor/": ("work", "skeletor"),
     # No remote, and git's complaint when there is none. Both must decline
     # rather than parse: the error text splits into components a permissive
     # reader will take for a URL, and `author_tokens` would then ban the word

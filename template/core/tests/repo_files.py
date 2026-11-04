@@ -145,6 +145,23 @@ def present(pattern: str, root: Path = PROJECT_ROOT, *, foreign: bool = False) -
     return [root / line for line in dict.fromkeys(names) if line.strip() and (foreign or not is_foreign(line))]
 
 
+def python_sources(root: Path = PROJECT_ROOT) -> list:
+    """Python in the tree: every `*.py`, and every suffixless file whose shebang names python.
+
+    A `bin/` tool is python with no suffix, so a check asking what the tree
+    defines or runs that reads `*.py` alone does not see it.
+    """
+    found = present("*.py", root=root)
+    for path in present("*", root=root):
+        if path.suffix or not path.is_file():
+            continue
+        with path.open("rb") as handle:
+            first = handle.readline(200)
+        if first.startswith(b"#!") and b"python" in first:
+            found.append(path)
+    return found
+
+
 # Released as the name of the function above, and therefore permanent: adopter
 # test files import it and neither this repository nor the generator that wrote
 # it can enumerate them. It describes the population slightly wrong, which is
