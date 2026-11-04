@@ -1105,18 +1105,41 @@ const cases = JSON.parse(process.argv[3]);
 #: The badge-URL case is jam.sense's: every version-update body links to a docs
 #: page whose URL says "security", and a substring test held back every one.
 HOLD_CASES = (
-    ("minor pip", {}, {"scripts/requirements.txt": "-requests==2.31.0\n+requests==2.32.0"}, True, "patch or minor"),
-    ("major pip", {}, {"scripts/requirements.txt": "-requests==2.31.0\n+requests==3.0.0"}, False, "requests 2.x -> 3.x"),
-    ("major npm", {}, {"package.json": '-    "eslint": "^8.57.0",\n+    "eslint": "^9.0.0",'}, False, "eslint 8.x"),
+    ("minor pip", {}, {"requirements.txt": "-requests==2.31.0\n+requests==2.32.0"}, True, "an update, patch or minor"),
+    ("dev major, gate toolchain", {}, {"scripts/requirements.txt": "-pytest==8.3.0\n+pytest==9.0.0"}, True,
+     "dev-tool majors only (pytest 8.x -> 9.x"),
+    ("dev major, requirements-dev", {}, {"requirements-dev.txt": "-pytest-cov==5.0\n+pytest-cov==7.0"}, True,
+     "dev-tool majors only"),
+    ("runtime major pip", {}, {"requirements.txt": "-requests==2.31.0\n+requests==3.0.0"}, False,
+     "runtime major: requests 2.x -> 3.x"),
+    ("runtime major pyproject", {}, {"pyproject.toml": '-    "requests>=2.31",\n+    "requests>=3.0",'}, False,
+     "runtime major: requests 2.x"),
+    ("dev major npm", {}, {"package.json": '   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^10.0.0",'},
+     True, "dev-tool majors only (eslint 9.x"),
+    ("runtime major npm", {}, {"package.json": '   "dependencies": {\n-    "react": "^18.0.0",\n+    "react": "^19.0.0",'},
+     False, "runtime major: react 18.x"),
+    ("npm major, section unseen", {}, {"package.json": '-    "eslint": "^8.57.0",\n+    "eslint": "^9.0.0",'}, False,
+     "runtime major: eslint 8.x"),
+    ("lockfile beside a dev manifest", {},
+     {"package.json": '   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^10.0.0",',
+      "package-lock.json": '-      "debug": "3.2.7",\n+      "debug": "4.4.0",'}, True, "dev-tool majors only"),
+    ("lockfile alone", {}, {"package-lock.json": '-      "debug": "3.2.7",\n+      "debug": "4.4.0",'}, False,
+     "runtime major: debug 3.x"),
     ("major action", {}, {".github/workflows/ci.yml": "-      - uses: actions/checkout@v6\n+      - uses: actions/checkout@v7"},
-     False, "actions/checkout 6.x"),
+     False, "runtime major: actions/checkout 6.x"),
     ("grouped, major hidden", {"title": "bump the pip group with 4 updates"},
-     {"scripts/requirements.txt": "-a==1.0\n+a==1.1\n-b==1.0\n+b==2.0"}, False, "b 1.x -> 2.x"),
+     {"requirements.txt": "-a==1.0\n+a==1.1\n-b==1.0\n+b==2.0"}, False, "runtime major: b 1.x -> 2.x"),
     ("title says major", {"title": "bump x (major)"}, {}, False, "title"),
-    ("security footer", {"body": "You can disable automated security fix PRs for this repo"}, {}, False, "alerts footer"),
-    ("security label", {"labels": [{"name": "security"}]}, {}, False, "`security` label"),
+    ("security footer, patch", {"body": "You can disable automated security fix PRs for this repo"}, {}, True,
+     "security update (alerts footer), patch or minor"),
+    ("security label, patch", {"labels": [{"name": "security"}]}, {}, True, "`security` label"),
+    ("security, runtime major", {"labels": [{"name": "security"}]},
+     {"requirements.txt": "-requests==2.31.0\n+requests==3.0.0"}, False,
+     "security update (`security` label) with a runtime major: requests"),
+    ("security, dev major", {"labels": [{"name": "security"}]},
+     {"scripts/requirements.txt": "-pytest==8.3.0\n+pytest==9.0.0"}, True, "security update (`security` label) with dev-tool"),
     ("security in a badge URL", {"body": "[badge](https://docs.github.com/managing-security-vulnerabilities/x)"}, {},
-     True, "patch or minor"),
+     True, "an update, patch or minor"),
     ("not dependabot", {"user": {"login": "someone"}}, {}, False, "not dependabot[bot]"),
 )
 
@@ -1159,7 +1182,7 @@ def dependabot_config_gate(tree: Path) -> Result:
 
 
 def dependabot_hold_gate(tree: Path) -> Result:
-    """`dependabot-hold.cjs` merges a patch or minor bump and holds every case jam.sense learned to hold."""
+    """`dependabot-hold.cjs` merges patches, minors and dev-tool majors, and holds a runtime major."""
     started = time.time()
     if not shutil.which("node"):
         return Result("dependabot hold: node is not on PATH — SKIPPED", True, 0.0, "install node to run this gate")
@@ -1176,6 +1199,8 @@ def dependabot_hold_gate(tree: Path) -> Result:
         f"{label}: expected merge={merges} with {fragment!r}, got {got[label]}"
         for label, _, _, merges, fragment in HOLD_CASES
         if got[label]["merge"] != merges or fragment not in got[label]["reason"]
+        # Only a runtime-major hold is labelled for `dep-migrate`; every other verdict is not.
+        or (got[label].get("tier") == "runtime-major") != ("runtime major" in fragment)
     ]
     return Result(f"dependabot hold: all {len(HOLD_CASES)} cases decided as designed", not wrong,
                   time.time() - started, "\n".join(wrong))
