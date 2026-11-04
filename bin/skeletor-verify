@@ -4458,6 +4458,35 @@ def owned_gate(workdir: Path) -> List[Result]:
                    time.time() - started, "\n".join(problems))]
 
 
+def cron_notice_gate(workdir: Path) -> List[Result]:
+    """An upgrade that changes the job registry says to recheck the crontab; one that does not, does not.
+
+    The crontab is generated from the registry and an upgrade never touches it, so
+    v0.65.0's new seat requirement went unmentioned until `cron --check` was run
+    by hand (proto.pilot). Planted through `--no-base`: a tampered hash on
+    `scripts/reporting/jobs.py` is a registry the template moved.
+    """
+    started = time.time()
+    manifest_name = load_scaffolder().MANIFEST_NAME
+    result, tree = scaffold("agentic", "python", workdir, name="cron-notice")
+    if not result.ok:
+        return [Result(f"cron notice: {result.label}", False, result.seconds, result.output)]
+    upgrade = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree),
+               "--no-base", "--allow-untagged", "--dry-run"]
+    _, quiet = run(upgrade, cwd=tree)
+    manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
+    registry = "scripts/reporting/jobs.py"
+    if registry not in manifest["files"]:
+        return [Result("cron notice: the registry is not in a fresh agentic manifest", False, 0.0, "")]
+    manifest["files"][registry] = "0" * 64
+    (tree / manifest_name).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    git_in(tree, "commit", "-am", "plant: the template moved the registry")
+    _, loud = run(upgrade, cwd=tree)
+    ok = "report cron --check" not in quiet and f"would change {registry}" in loud and "report cron --check" in loud
+    return [Result("cron notice: a changed job registry names `report cron --check`, an unchanged one does not",
+                   ok, time.time() - started, f"--- current ---\n{quiet[-600:]}\n--- moved ---\n{loud[-900:]}")]
+
+
 def pending_added_gate(workdir: Path) -> List[Result]:
     """A file a held-back run added is skeletor's: edited, it is not owned; deleted, it is declined.
 
@@ -11979,6 +12008,7 @@ def main() -> int:
 
         results += owned_gate(workdir)
         results += pending_added_gate(workdir)
+        results += cron_notice_gate(workdir)
         for gate in sidecar_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)

@@ -4023,6 +4023,17 @@ def main() -> int:
                 detail(f"The template's version moved since it was recorded for {len(moved_since)} of them;")
                 detail(f"{where} tmp/upgrade/<path>.new: {', '.join(moved_since)}")
 
+        # The job registry is what `report cron --check` compares the live crontab
+        # with, and an upgrade never touches the crontab: v0.65.0 made the check
+        # require a seat line and nothing here said so (proto.pilot, stash.flow).
+        registry = "scripts/reporting/jobs.py"
+        if registry in set(added + updated + merged + conflicted):
+            cli = recorded[recorded.index("--cli") + 1] if "--cli" in recorded[:-1] else "<cli>"
+            verb = "would change" if args.dry_run else "changed"
+            say("🕐", f"this upgrade {verb} {registry}, which the crontab is generated from")
+            detail(f"The installed crontab does not change with it: run `./{cli} report cron --check`,")
+            detail(f"and `./{cli} report cron --install` if it is red.")
+
         if declined:
             # Deliberately a one-line standing state, not a roll-call. This is
             # permanent — the manifest is re-copied from the head render every
