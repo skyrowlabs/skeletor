@@ -2851,6 +2851,12 @@ def check_the_baseline_is_refused_on_a_fresh_tree(tree: Path, venv_python: Path)
     """
     started = time.time()
     report = tree / "tmp" / "coverage.xml"
+    # The set and key a no-flag `test coverage` uses, read from the tree's registry.
+    _, listed = run([str(venv_python), "-m", shell_package(tree).name, "test", "suites", "--scheduled"], cwd=tree)
+    marker = " or ".join(line.strip() for line in listed.splitlines() if line.strip())
+    commands = (shell_package(tree) / "test_cmds.py").read_text(encoding="utf-8")
+    found = re.search(r'^SCHEDULED_KEY = "([^"]+)"', commands, re.M)
+    key = found.group(1) if found else ""
 
     def measure() -> Tuple[int, dict, str]:
         code, output = run(
@@ -2860,7 +2866,7 @@ def check_the_baseline_is_refused_on_a_fresh_tree(tree: Path, venv_python: Path)
                 "pytest",
                 "tests/",
                 "-m",
-                "unit",
+                marker,
                 "-q",
                 "--cov",
                 "--cov-report=",
@@ -2872,7 +2878,7 @@ def check_the_baseline_is_refused_on_a_fresh_tree(tree: Path, venv_python: Path)
         if code != 0:
             return code, {}, output
         code, envelope = run(
-            [str(venv_python), "scripts/check_coverage_budget.py", "--suite", "unit", "--json", "--update"],
+            [str(venv_python), "scripts/check_coverage_budget.py", "--suite", key, "--json", "--update"],
             cwd=tree,
         )
         try:
@@ -2884,7 +2890,7 @@ def check_the_baseline_is_refused_on_a_fresh_tree(tree: Path, venv_python: Path)
     def baseline() -> float:
         # `--update` writes `own_baseline_pct` where a manifest can tell the
         # tree's code from ours, and removes the shipped `baseline_pct`.
-        entry = json.loads((tree / "tests" / "coverage_budget.json").read_text())["suites"]["unit"]
+        entry = json.loads((tree / "tests" / "coverage_budget.json").read_text())["suites"][key]
         return float(entry.get("own_baseline_pct", entry.get("baseline_pct", 0.0)))
 
     code, payload, output = measure()
@@ -2918,7 +2924,7 @@ def check_the_baseline_is_refused_on_a_fresh_tree(tree: Path, venv_python: Path)
         code == 0
         and (payload.get("own_statements") or 0) > 0
         and payload.get("own_pct") is not None
-        and "own_baseline_pct" in json.loads((tree / "tests" / "coverage_budget.json").read_text())["suites"]["unit"]
+        and "own_baseline_pct" in json.loads((tree / "tests" / "coverage_budget.json").read_text())["suites"][key]
         and baseline() > 0.0
     )
     results.append(
@@ -6592,8 +6598,12 @@ def coverage_gate(workdir: Path, venv_python: Path) -> Result:
 
     budget = target / "tests" / "coverage_budget.json"
     data = json.loads(budget.read_text(encoding="utf-8"))
-    assert "unit" in data.get("suites", {}), f"no unit suite in {budget} — the plant would prove nothing"
-    data["suites"]["unit"]["baseline_pct"] = 99.9
+    # The key a no-flag `test coverage` checks, read from the render rather than spelled here.
+    commands = (shell_package(target) / "test_cmds.py").read_text(encoding="utf-8")
+    found = re.search(r'^SCHEDULED_KEY = "([^"]+)"', commands, re.M)
+    key = found.group(1) if found else ""
+    assert key in data.get("suites", {}), f"no {key!r} suite in {budget} — the plant would prove nothing"
+    data["suites"][key]["baseline_pct"] = 99.9
     budget.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     breached, output = run([str(target / CLI_NAME), "test", "coverage"], cwd=target)
 
