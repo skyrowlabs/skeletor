@@ -660,6 +660,19 @@ def files_under(root: Path) -> Dict[str, Path]:
     return out
 
 
+def record_owned(target: Path, owned: List[str]) -> None:
+    """Write `owned` into the tree's manifest, leaving every other key as it is."""
+    path = target / MANIFEST_NAME
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if sorted(data.get("owned") or []) == owned:
+        return
+    if owned:
+        data["owned"] = owned
+    else:
+        data.pop("owned", None)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -2584,6 +2597,15 @@ def main() -> int:
         "Affects only the head render; --from-dir still overrides the base.",
     )
     parser.add_argument(
+        "--own",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="this file is yours: never merge a template change into it, and report only when the "
+        "template's version moves. Repeatable, and recorded under `owned` in the manifest. "
+        "`--ported` records it for you on a collision (a file you had before the template claimed it).",
+    )
+    parser.add_argument(
         "--ported",
         action="store_true",
         help="assert every conflict and collision is resolved as you want it, and advance "
@@ -2642,6 +2664,9 @@ def main() -> int:
         die(f"{target / MANIFEST_NAME} records no arguments — it cannot be re-rendered")
 
     hashes: Dict[str, str] = manifest.get("files") or {}
+    #: Paths the adopter owns. Beside `files`, never in it: `files` must stay a
+    #: bijection with the base render, and ownership is a decision, not a render.
+    owned = set(manifest.get("owned") or []) | {Path(own).as_posix().removeprefix("./") for own in args.own}
 
     workdir = Path(tempfile.mkdtemp(prefix="skeletor-upgrade-"))
     # A list, because `--ref` adds a second one. It was a single Optional while
@@ -3054,6 +3079,7 @@ def main() -> int:
                     detail("no file this scaffold ships. Nothing below is an artefact of them.")
 
         added, updated, merged, conflicted, collided, declined, dropped = [], [], [], [], [], [], []
+        owned_files: List[str] = []
         #: Conflicts that a run of the tree's own formatters over both rendered
         #: sides would have resolved. Reported, never acted on without the flag.
         formatting_only: List[str] = []
@@ -3158,6 +3184,15 @@ def main() -> int:
                 continue
             if rel == renamed_from:
                 continue  # moved, below — never reported as dropped
+            if rel in owned and rel in head_files:
+                # Never merged. A sidecar only when the template's version moved
+                # since it was recorded, because then there is something to read.
+                owned_files.append(rel)
+                if sha256(head_files[rel]) != hashes.get(rel) and not args.dry_run:
+                    sidecar = patches / f"{rel}.new"
+                    sidecar.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(head_files[rel], sidecar)
+                continue
             ours = read(head_files.get(rel))
             base = read(base_files.get(rel))
             live_path = target / rel
@@ -3680,6 +3715,7 @@ def main() -> int:
                         "collided": collided,
                         "entangled": entangled,
                         "declined": declined,
+                        "owned": owned_files,
                         # The machine half of the `standing state` block. It was
                         # human-only for a release, which is the asymmetry
                         # `head_ref` was added here to close: a consumer that has
@@ -3952,6 +3988,20 @@ def main() -> int:
                 detail("tmp/upgrade/<path>.new.")
             else:
                 detail("where it has always been; the template's is in tmp/upgrade/<path>.new.")
+
+        # A collision resolved with `--ported` is a file the adopter kept, so it
+        # is recorded as theirs; otherwise the template's hash makes it read as
+        # an edit and every later template change three-way merges into it.
+        owned_final = sorted((owned | (set(collided) if args.ported else set())) & set(head_files))
+        if not args.dry_run:
+            record_owned(target, owned_final)
+        if owned_final:
+            moved_since = [rel for rel in owned_final if sha256(head_files[rel]) != hashes.get(rel)]
+            say("🏠", f"{len(owned_final)} file(s) you own — never merged: {', '.join(owned_final)}")
+            if moved_since:
+                where = "a real run would put" if args.dry_run else "the template's is in"
+                detail(f"The template's version moved since it was recorded for {len(moved_since)} of them;")
+                detail(f"{where} tmp/upgrade/<path>.new: {', '.join(moved_since)}")
 
         if declined:
             # Deliberately a one-line standing state, not a roll-call. This is
@@ -4451,6 +4501,7 @@ def main() -> int:
                     detail("this is a relabel of the record and not a change to your files.")
                 else:
                     shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
+                    record_owned(target, sorted(owned & set(head_files)))
                     say("📌", f"{MANIFEST_NAME}: {ref} → {head_ref}")
                     detail("The two renders are identical, so only the recorded ref moved. Your")
                     detail("files were not touched, and the next upgrade now renders its base from")
