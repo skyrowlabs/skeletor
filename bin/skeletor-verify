@@ -4616,6 +4616,37 @@ def foreign_subtree_gate(workdir: Path, venv_python: Path, pyright_ok: bool) -> 
     return results
 
 
+#: (label, base, tree, template, merges?) for a requirements file, as `adopt_floors` sees it.
+FLOOR_CASES = (
+    ("a bot-moved floor beside a template insert merges",
+     "click>=8.1\npytest>=8.0\n", "click>=8.5.0\npytest>=8.0\n", "click>=8.1\npyyaml>=6.0\npytest>=8.0\n", True),
+    ("a floor both sides moved still conflicts",
+     "click>=8.1\npytest>=8.0\n", "click>=8.5.0\npytest>=8.0\n", "click>=9.0\npytest>=8.0\n", False),
+)
+
+
+def requirements_floor_gate(workdir: Path) -> Result:
+    """An upgrade treats a requirement only the tree moved as agreement, and one both moved as a conflict.
+
+    Six trees in the v0.66.0 round conflicted on `scripts/requirements.txt` where
+    Dependabot had moved `click` and the template inserted `pyyaml` beside it.
+    """
+    started = time.time()
+    upgrade = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade")
+    scratch = workdir / "floors"
+    scratch.mkdir(exist_ok=True)
+    wrong = []
+    for label, base, tree, template, merges in FLOOR_CASES:
+        result = upgrade.merge_file("scripts/requirements.txt", base, tree, template, scratch)
+        if (result is not None) != merges or (merges and ("click>=8.5.0" not in result or "pyyaml" not in result)):
+            wrong.append(f"{label}: got {result!r}")
+    # The same texts under another name merge as plain text, which is what makes the first case discriminate.
+    if upgrade.merge_file("notes.txt", *FLOOR_CASES[0][1:4], scratch) is not None:
+        wrong.append("outside a requirements file the first case merged too, so it shows nothing")
+    return Result("requirements: a floor only the tree moved merges; one both moved conflicts", not wrong,
+                  time.time() - started, "\n".join(wrong))
+
+
 def pending_added_gate(workdir: Path) -> List[Result]:
     """A file a held-back run added is skeletor's: edited, it is not owned; deleted, it is declined.
 
@@ -12140,6 +12171,7 @@ def main() -> int:
         results += cron_notice_gate(workdir)
         results += scheduled_rehearsal_gate(workdir, venv_python)
         results += foreign_subtree_gate(workdir, venv_python, pyright_ok)
+        results.append(requirements_floor_gate(workdir))
         for gate in sidecar_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)

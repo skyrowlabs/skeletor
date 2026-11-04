@@ -2074,6 +2074,50 @@ def read(path: Optional[Path]) -> Optional[str]:
         return None  # binary: compared by bytes below, never merged
 
 
+#: A pip requirements file, and one requirement line's package name.
+_REQUIREMENTS = re.compile(r"(^|/)[^/]*requirements[^/]*\.txt$")
+_REQUIREMENT = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(?:===|==|~=|>=|<=|!=|>|<)")
+
+
+def adopt_floors(base: str, theirs: str, ours: str) -> Tuple[str, str]:
+    """Base and template, given the tree's line for every requirement only the tree moved.
+
+    Dependabot moves a floor in the tree, and a template edit on the next line
+    then conflicted with no disagreement behind it: six trees, v0.66.0's `pyyaml`
+    beside a bumped `click`. A requirement the template also changed keeps its
+    conflict. For the merge only; what is recorded is still the render.
+    """
+
+    def by_name(text: str) -> dict:
+        found = {}
+        for line in text.splitlines():
+            match = _REQUIREMENT.match(line)
+            if match:
+                found[match.group(1).lower()] = line
+        return found
+
+    tree, was, now = by_name(theirs), by_name(base), by_name(ours)
+    moved = {name: line for name, line in tree.items() if was.get(name) == now.get(name) not in (None, line)}
+
+    def adopt(text: str) -> str:
+        lines = text.splitlines(keepends=True)
+        for index, line in enumerate(lines):
+            match = _REQUIREMENT.match(line)
+            name = match.group(1).lower() if match else None
+            if name in moved:
+                lines[index] = moved[name] + ("\n" if line.endswith("\n") else "")
+        return "".join(lines)
+
+    return adopt(base), adopt(ours)
+
+
+def merge_file(rel: str, base: str, theirs: str, ours: str, workdir: Path) -> Optional[str]:
+    """`merge`, with a requirements file's tree-moved floors taken as agreed first."""
+    if _REQUIREMENTS.search(rel):
+        base, ours = adopt_floors(base, theirs, ours)
+    return merge(base, theirs, ours, workdir)
+
+
 def merge(base: str, theirs: str, ours: str, workdir: Path) -> Optional[str]:
     """Three-way merge, or `None` if it conflicts. Markers are never returned."""
     paths = {}
@@ -3382,7 +3426,7 @@ def main() -> int:
                 carried.append(rel)
                 continue
 
-            resolved = merge(base, theirs, ours, workdir)
+            resolved = merge_file(rel, base, theirs, ours, workdir)
             if resolved is None:
                 conflicted.append(rel)
                 # All or nothing. A partial count cannot tell a region the adopter
