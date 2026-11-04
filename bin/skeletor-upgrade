@@ -155,6 +155,43 @@ def report_stale(stale: List[Path], target: Path, because: List[str]) -> None:
         detail(f"… and {len(stale) - 10} more")
 
 
+#: The upgrade report, written beside the sidecars by every real run and replaced
+#: by the next. Its sections are the one copy of the format: this tool fills the
+#: mechanical ones and each judgment section carries its own prompt, so a session
+#: upgrading the tree in or out of a round writes the same report. A file of
+#: yours by this name in `tmp/upgrade/` is overwritten; nothing else there is.
+REPORT_NAME = "REPORT.md"
+
+#: `(heading, prompt)` for the sections this tool cannot fill, in report order;
+#: `None` marks where the mechanical sections go.
+REPORT_SECTIONS: Tuple[Tuple[str, Optional[str]], ...] = (
+    ("VERDICT", "One line: clean, ported or blocked, and on what."),
+    ("METRICS", None),
+    ("BRANCH", None),
+    ("CONFLICTS", None),
+    ("GATES", "What the tree's gates said after this run, as run: `check pre-push`, `check scheduled`."),
+    ("FEEDBACK-FOR-SKELETOR", "Defects in the template or the upgrade, each with the file and line you verified."),
+    ("SUGGESTIONS", "Changes you would make, ranked, each with a recommendation."),
+    ("FOR-THE-OWNER", "Decisions only this repository's owner can make. Empty is a fine answer."),
+    ("NOTES", "Anything else worth keeping."),
+)
+
+
+def write_report(patches: Path, facts: Dict[str, List[str]], title: str) -> Path:
+    """`tmp/upgrade/REPORT.md`: the mechanical sections filled, the rest prompted."""
+    lines = [
+        "<!-- Written by skeletor-upgrade for this run; the next real run replaces it. -->",
+        f"# Upgrade report: {title}",
+    ]
+    for heading, prompt in REPORT_SECTIONS:
+        lines += ["", f"## {heading}", ""]
+        lines += facts[heading] if prompt is None else [f"<!-- {prompt} -->"]
+    patches.mkdir(parents=True, exist_ok=True)
+    report = patches / REPORT_NAME
+    report.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return report
+
+
 def clear_sidecars(patches: Path) -> int:
     """Remove the previous run's sidecars, so the directory describes this run.
 
@@ -3739,11 +3776,57 @@ def main() -> int:
             conflicted + collided + dropped, added + updated + merged, base_files, head_files, target
         )
 
+        report = None
+        if not args.dry_run:
+            branch = subprocess.run(
+                ["git", "-C", str(target), "branch", "--show-current"], capture_output=True, text=True
+            ).stdout.strip()
+            counts = {
+                "added": added,
+                "updated": updated,
+                "merged": merged,
+                "conflicted": conflicted,
+                "collided": collided,
+                "declined": declined,
+                "no longer shipped": dropped,
+            }
+            unresolved = [
+                f"- `{rel}`: conflict, the template's diff is `tmp/upgrade/{rel}.patch`" for rel in conflicted
+            ]
+            unresolved += [
+                f"- `{rel}`: yours before the template's, which is `tmp/upgrade/{rel}.new`" for rel in collided
+            ]
+            report = write_report(
+                patches,
+                {
+                    "METRICS": [
+                        (
+                            f"- recorded base: {ref} → {head_ref}"
+                            if advanced
+                            else (
+                                f"- recorded base: held at {ref}, {len(pending)} file(s) pending; head is {head_ref}"
+                                if pending
+                                else f"- recorded base: {ref}, unchanged, as nothing applied; head is {head_ref}"
+                            )
+                        ),
+                        "- " + ", ".join(f"{len(rels)} {name}" for name, rels in counts.items()),
+                    ],
+                    "BRANCH": [
+                        f"- {branch or 'detached HEAD'} at {(pre_upgrade or 'no commit')[:12]}, before this run;"
+                        " nothing here is committed"
+                    ],
+                    "CONFLICTS": unresolved or ["None."],
+                },
+                f"{ref} → {head_ref}",
+            )
+            say("📝", f"{report.relative_to(target)}: the mechanical sections are filled; the rest are yours")
+
         if args.json:
             print(
                 json.dumps(
                     {
                         "target": str(target),
+                        "report": str(report.relative_to(target)) if report else None,
                         "base_ref": ref,
                         # The version the tree is being compared *against*. A
                         # consumer reading an empty diff off `base_ref` alone has

@@ -5516,6 +5516,23 @@ def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
         )
     )
 
+    # The report a real run writes names each pending file beside its sidecar,
+    # and leaves the judgment sections to whoever reads it. The dry run above
+    # wrote nothing, so this report is the real run's.
+    report = patches / "REPORT.md"
+    text = report.read_text(encoding="utf-8") if report.exists() else ""
+    sections = re.findall(r"^## (\S+)$", text, re.MULTILINE)
+    named = f"tmp/upgrade/{conflict}.patch" in text and f"tmp/upgrade/{collision}.new" in text
+    prompted = all(re.search(rf"^## {name}\n\n<!-- ", text, re.MULTILINE) for name in ("VERDICT", "GATES", "NOTES"))
+    results.append(
+        Result(
+            f"sidecars: REPORT.md names both pending files ({len(sections)} sections)",
+            named and prompted and "1 conflicted, 1 collided" in text and len(sections) >= 9,
+            time.time() - started,
+            text or "no tmp/upgrade/REPORT.md",
+        )
+    )
+
     # The third way out, and the one both of the above walk past: a dry run that
     # finds nothing to do. It `return`s before the footer, so the stale warning
     # was unreachable from the case that needs it most — there is no plan above,
