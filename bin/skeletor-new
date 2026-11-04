@@ -480,8 +480,13 @@ for _opener in OPENERS:
             raise SystemExit(f"❌ marker `{_opener.strip()}` is a substring of `{_other.strip()}`")
 
 
-def drop_absent_prose(target: Path) -> None:
+def drop_absent_prose(target: Path, rendered: Iterable[str]) -> None:
     """Remove every marked block whose condition this tree does not satisfy.
+
+    Only in `rendered`, the files this scaffold wrote. In a `--force` target the
+    rest is the adopter's: a doc of theirs that quotes a marker failed the
+    scaffold halfway, and a well-formed one was silently edited (found by
+    scaffolding skeletor into itself, whose docs quote the markers).
 
     Two conditions, and they ask about different kinds of thing. `SCAFFOLD-IF
     <path>` and its inverse ask whether a FILE is here, which is the right
@@ -511,7 +516,7 @@ def drop_absent_prose(target: Path) -> None:
     test in the step itself (`if this repository has one`), which is the same
     condition in the language that file speaks.
     """
-    for path in sorted(target.rglob("*")):
+    for path in sorted(target / rel for rel in set(rendered)):
         if not path.is_file() or path.suffix != ".md":
             continue
         try:
@@ -706,7 +711,7 @@ def produced_files(written: List[str], after_copy: Dict[str, str], final: Dict[s
     return {rel for rel in produced if rel in final}
 
 
-def post_copy_steps(tree: Path, values: Dict[str, str]) -> None:
+def post_copy_steps(tree: Path, values: Dict[str, str], rendered: Iterable[str]) -> None:
     """Everything the scaffolder does after the overlays are on disk.
 
     Register whatever docs the chosen overlays actually shipped, then generate
@@ -725,7 +730,7 @@ def post_copy_steps(tree: Path, values: Dict[str, str]) -> None:
     live here.
     """
     register_shipped_docs(tree, values)
-    drop_absent_prose(tree)
+    drop_absent_prose(tree, rendered)
     subprocess.run([sys.executable, "scripts/docs/regen.py"], cwd=str(tree), capture_output=True)
     # The editor's issue and pull-request views, rendered from `scripts/lanes.py`
     # and — where the tier ships one — the job registry. It belongs here rather
@@ -791,7 +796,7 @@ def pristine_post_copy(target: Path, written: List[str], values: Dict[str, str])
             shutil.copy2(source, destination)
         (clean / "tmp").mkdir(exist_ok=True)
         (clean / "tmp" / ".gitkeep").touch()
-        post_copy_steps(clean, values)
+        post_copy_steps(clean, values, written)
         return hash_tree(clean)
 
 
@@ -1262,7 +1267,7 @@ def report_a_dry_run(
         written = copy_overlays(preview, overlays, values, values["CLI"], omitted(args, overlays, values))
         if written is None:
             return 1
-        post_copy_steps(preview, values)
+        post_copy_steps(preview, values, written)
         produced = set(hash_tree(preview))
         # Read inside the block, because `preview` is a temporary directory and
         # the report below runs after it is removed. Only the collisions — the
@@ -1558,7 +1563,7 @@ def main() -> int:
 
     after_copy = hash_tree(target)
     pristine = pristine_post_copy(target, written, values) if populated else {}
-    post_copy_steps(target, values)
+    post_copy_steps(target, values, written)
 
     # Last, and after the two steps above: both write files, and a manifest
     # hashed before them would describe a tree that no longer exists. The two
@@ -1770,8 +1775,11 @@ def main() -> int:
     print(f"   ./{cli_name} check pre-push")
     print()
     print("Then fill in the SCAFFOLD markers — they are the parts only you can write:")
-    sys.stdout.flush()   # else the grep below prints above this line
-    subprocess.run(["grep", "-rln", "SCAFFOLD", "--include=*.md", "--include=*.yml", "--include=*.py", "."], cwd=str(target))
+    # The files this scaffold wrote, never the adopter's own (which may quote the word).
+    for rel in sorted(set(written)):
+        path = target / rel
+        if path.suffix in (".md", ".yml", ".py") and path.is_file() and "SCAFFOLD" in path.read_text(errors="ignore"):
+            print(f"./{rel}")
     return 0
 
 

@@ -3773,6 +3773,17 @@ def populated_tree_gate(tier: str, workdir: Path) -> List[Result]:
     # decoys above were all files skeletor ignores, and this one it reads.
     (populated / "docs").mkdir(parents=True, exist_ok=True)
     (populated / "docs" / "adopted.md").write_text("# Adopted\n\nours, from before.\n", encoding="utf-8")
+    # The adopter's prose may quote skeletor's markers. Unclosed, the marker pass
+    # killed the scaffold halfway; well-formed, it rewrote their file (skeletor's
+    # own docs, scaffolded into itself). Theirs, so both must come through untouched.
+    scaffolder = load_scaffolder()
+    own_markers = {
+        "docs/quotes-a-marker.md": f"# Notes\n\nWe saw `{scaffolder.CONDITIONAL_OPEN}x -->` in a template.\n",
+        "docs/own-conditional.md": f"# Ours\n\n{scaffolder.CONDITIONAL_OPEN}no/such/path -->\nkept\n"
+        f"{scaffolder.CONDITIONAL_CLOSE}\n",
+    }
+    for rel, text in own_markers.items():
+        (populated / rel).write_text(text, encoding="utf-8")
     # The fifth shape: a MANIFEST, where naming the file is not enough because
     # the loss is inside it. `--force` over a node product replaces
     # `package.json` wholesale, and CI stays green — every `npm run` in
@@ -3845,6 +3856,16 @@ def populated_tree_gate(tier: str, workdir: Path) -> List[Result]:
             f"wrongly named a key the template also supplies: {'suites.unit' in overwrite_report}\n"
             f"leaked a non-JSON file's content: {'# Theirs' in overwrite_report}\n"
             f"{overwrite_report[:1500]}",
+        )
+    )
+
+    altered = [rel for rel, text in own_markers.items() if (populated / rel).read_text(encoding="utf-8") != text]
+    results.append(
+        Result(
+            "populated: the marker pass leaves the adopter's own markdown alone",
+            result.ok and not altered,
+            0.0,
+            f"altered: {altered}\n{result.output[-800:]}",
         )
     )
 
