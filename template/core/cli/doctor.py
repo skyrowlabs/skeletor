@@ -352,9 +352,8 @@ def repository_settings() -> list[Fact]:
     if (repo.get("description") or "").strip():
         facts.append(Fact("repository description is set", OK, repo["description"]))
     else:
-        facts.append(
-            Fact("repository description is set", PROBLEM, "empty — `{{CLI}} settings --apply` writes the tagline")
-        )
+        empty = "empty — `{{CLI}} settings --apply` writes the tagline"
+        facts.append(Fact("repository description is set", PROBLEM, empty))
     return facts
 
 

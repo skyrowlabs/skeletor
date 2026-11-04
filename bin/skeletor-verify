@@ -3565,6 +3565,48 @@ def badge_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     return results
 
 
+def name_length_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """Scaffold at every name length from 1 to 16 and require black to leave each tree alone.
+
+    A wrapped line holding `{{CLI}}` or `{{PROJECT_SLUG}}` is stable under black
+    for the name lengths where the joined form overflows, and rewritten where it
+    fits. The grid's own trees all use `probe`, so a line in that band is invisible
+    here: v0.62.0's `cli/doctor.py` turned `lint` red in the five adopters whose
+    CLI is two letters (skyrow-workspace, rehearsing the round). Sixteen lengths
+    cover every band a 120-column line can have with these names in it.
+    """
+    results: List[Result] = []
+    started = time.time()
+    failed: List[str] = []
+    swept = 0
+    for length in range(1, 17):
+        target = workdir / "name-length" / ("n" * length)
+        if target.exists():
+            shutil.rmtree(target)
+        code, output = run(
+            [sys.executable, str(SCAFFOLDER), str(target), "--allow-dirty", "--name", "N" * length,
+             "--slug", "s" * length, "--cli", "c" * length, "--tagline", "t", "--tier", tier, "--no-git"],
+            cwd=workdir,
+        )
+        if code != 0:
+            failed.append(f"length {length}: scaffold refused\n{output[-400:]}")
+            continue
+        args = hook_args(target, "black")
+        code, output = run([str(venv_python), "-m", "black", *args, "--check", "."], cwd=target)
+        swept += 1
+        if code != 0:
+            failed.append(f"length {length}: {output.strip()[-400:]}")
+    results.append(
+        Result(
+            f"name lengths 1-16: black leaves every tree alone ({swept} swept)",
+            not failed and swept == 16,
+            time.time() - started,
+            "\n".join(failed),
+        )
+    )
+    return results
+
+
 def long_path_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
     """Scaffold once into a long path and re-run the formatter on the result.
 
@@ -11670,6 +11712,9 @@ def main() -> int:
         results += lane_views_gate(workdir)
 
         for gate in long_path_gate(fullest, workdir, venv_python):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+        for gate in name_length_gate(fullest, workdir, venv_python):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 
