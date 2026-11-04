@@ -150,6 +150,21 @@ Three things about this table are load-bearing:
    the moment branch protection is satisfied, so without the exemption every
    eligible bump merges having never run the suite it exists to be checked by.
 
+### Dependency updates
+
+`.github/dependabot.yml` proposes version updates monthly, each held back five
+days (`cooldown`) so a hijacked release can be yanked before it is proposed.
+`.github/workflows/dependabot-auto-merge.yml` merges a Dependabot pull request
+once CI passes on it, using the GitHub App's token (`APP_ID`, `APP_PRIVATE_KEY`)
+so the merge itself runs CI on the base branch. It leaves a major bump, read from
+the diff, and a security update for a person; the decision is
+`.github/scripts/dependabot-hold.cjs`. Without the App's secrets it merges
+nothing and says so in the run.
+
+The lint tools (black, flake8, isort, pyright) are ignored there. Each is pinned
+in two files and `tests/test_lint_tool_parity.py` is red until both agree, so a
+bump to one of them could never merge. Bump those by hand, in both files.
+
 ## Releases
 
 <!-- SCAFFOLD-IF .github/release-please-config.json -->

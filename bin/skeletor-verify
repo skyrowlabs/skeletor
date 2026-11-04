@@ -1101,6 +1101,59 @@ const cases = JSON.parse(process.argv[3]);
 """
 
 
+#: (label, pull request, files as {filename: patch}, merges?, reason fragment).
+#: The badge-URL case is jam.sense's: every version-update body links to a docs
+#: page whose URL says "security", and a substring test held back every one.
+HOLD_CASES = (
+    ("minor pip", {}, {"scripts/requirements.txt": "-requests==2.31.0\n+requests==2.32.0"}, True, "patch or minor"),
+    ("major pip", {}, {"scripts/requirements.txt": "-requests==2.31.0\n+requests==3.0.0"}, False, "requests 2.x -> 3.x"),
+    ("major npm", {}, {"package.json": '-    "eslint": "^8.57.0",\n+    "eslint": "^9.0.0",'}, False, "eslint 8.x"),
+    ("major action", {}, {".github/workflows/ci.yml": "-      - uses: actions/checkout@v6\n+      - uses: actions/checkout@v7"},
+     False, "actions/checkout 6.x"),
+    ("grouped, major hidden", {"title": "bump the pip group with 4 updates"},
+     {"scripts/requirements.txt": "-a==1.0\n+a==1.1\n-b==1.0\n+b==2.0"}, False, "b 1.x -> 2.x"),
+    ("title says major", {"title": "bump x (major)"}, {}, False, "title"),
+    ("security footer", {"body": "You can disable automated security fix PRs for this repo"}, {}, False, "alerts footer"),
+    ("security label", {"labels": [{"name": "security"}]}, {}, False, "`security` label"),
+    ("security in a badge URL", {"body": "[badge](https://docs.github.com/managing-security-vulnerabilities/x)"}, {},
+     True, "patch or minor"),
+    ("not dependabot", {"user": {"login": "someone"}}, {}, False, "not dependabot[bot]"),
+)
+
+_HOLD_HARNESS = """
+const decide = require(process.argv[2]);
+const out = {};
+for (const [label, pr, files] of JSON.parse(process.argv[3])) {
+  const full = { title: 'bump x from 1.0 to 1.1', body: '', labels: [], user: { login: 'dependabot[bot]' }, ...pr };
+  out[label] = decide({ pr: full, files: Object.entries(files).map(([filename, patch]) => ({ filename, patch })) });
+}
+console.log(JSON.stringify(out));
+"""
+
+
+def dependabot_hold_gate(tree: Path) -> Result:
+    """`dependabot-hold.cjs` merges a patch or minor bump and holds every case jam.sense learned to hold."""
+    started = time.time()
+    if not shutil.which("node"):
+        return Result("dependabot hold: node is not on PATH — SKIPPED", True, 0.0, "install node to run this gate")
+    script = tree / ".github" / "scripts" / "dependabot-hold.cjs"
+    harness = tree / "hold-harness.cjs"
+    harness.write_text(_HOLD_HARNESS, encoding="utf-8")
+    cases = [[label, pr, files] for label, pr, files, _, _ in HOLD_CASES]
+    code, output = run(["node", str(harness), str(script), json.dumps(cases)], cwd=tree)
+    harness.unlink(missing_ok=True)
+    if code != 0:
+        return Result("dependabot hold: the script runs", False, time.time() - started, output)
+    got = json.loads(output.strip().splitlines()[-1])
+    wrong = [
+        f"{label}: expected merge={merges} with {fragment!r}, got {got[label]}"
+        for label, _, _, merges, fragment in HOLD_CASES
+        if got[label]["merge"] != merges or fragment not in got[label]["reason"]
+    ]
+    return Result(f"dependabot hold: all {len(HOLD_CASES)} cases decided as designed", not wrong,
+                  time.time() - started, "\n".join(wrong))
+
+
 def gating_gate(tier: str, workdir: Path) -> List[Result]:
     """Execute the rendered gate script, rather than reading its source.
 
@@ -11661,6 +11714,7 @@ def main() -> int:
         for gate in prose_check_gate(fullest, workdir, venv_python):
             results.append(gate)
 
+        results.append(dependabot_hold_gate(workdir / f"{fullest}-python"))
         for gate in gating_gate(fullest, workdir):
             results.append(gate)
 

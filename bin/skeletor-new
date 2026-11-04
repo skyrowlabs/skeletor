@@ -250,6 +250,7 @@ def substitutions(args) -> Dict[str, str]:
         # Only a tree with a package.json has an npm ecosystem to update.
         "DEPENDABOT_NPM": (
             "\n\n  - package-ecosystem: npm\n    directory: /\n    schedule:\n      interval: monthly\n"
+            "    cooldown:\n      default-days: 5\n"
             "    open-pull-requests-limit: 5\n    labels: [dependencies]\n    commit-message:\n"
             "      prefix: build\n      include: scope"
             if args.language in ("node", "both")
