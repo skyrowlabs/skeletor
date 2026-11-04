@@ -1238,12 +1238,43 @@ HOLD_CASES = (
         True,
         "dev-tool majors only",
     ),
+    # dream-doll#28: dev patches, read line by line as an engines `node` 18 -> 20 major.
     (
-        "lockfile alone",
+        "lockfile alone, dev patches and an engines change",
         {},
-        {"package-lock.json": '-      "debug": "3.2.7",\n+      "debug": "4.4.0",'},
+        {
+            "package-lock.json": '@@ -100,9 +100,9 @@\n     "node_modules/brace-expansion": {\n'
+            '-      "version": "5.0.6",\n+      "version": "5.0.12",\n       "dev": true,\n'
+            '@@ -110,7 +110,7 @@\n       "engines": {\n-        "node": "18 || 20 || >=22"\n+        "node": "20 || >=22"\n'
+            '@@ -200,7 +200,7 @@\n     "node_modules/minimatch/node_modules/brace-expansion": {\n'
+            '-      "version": "1.1.15",\n+      "version": "1.1.21",\n       "dev": true,'
+        },
+        True,
+        "an update, patch or minor",
+    ),
+    (
+        "lockfile alone, dev major",
+        {},
+        {
+            "package-lock.json": '     "node_modules/debug": {\n-      "version": "3.2.7",\n+      "version": "4.4.0",\n'
+            '       "dev": true,'
+        },
+        True,
+        "dev-tool majors only (debug 3.x",
+    ),
+    (
+        "lockfile alone, the base lockfile names a runtime entry",
+        {"_manifests": {"package-lock.json": '{"packages": {"node_modules/debug": {"version": "3.2.7"}}}'}},
+        {"package-lock.json": '     "node_modules/debug": {\n-      "version": "3.2.7",\n+      "version": "4.4.0",'},
         False,
         "runtime major: debug 3.x",
+    ),
+    (
+        "lockfile alone, major not known to be dev",
+        {},
+        {"package-lock.json": '     "node_modules/debug": {\n-      "version": "3.2.7",\n+      "version": "4.4.0",'},
+        False,
+        "a lockfile major not known to be dev: debug 3.x",
     ),
     (
         "major action",
