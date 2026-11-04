@@ -34,8 +34,10 @@ const HOLD_PRE_1_0_MINOR = false;
 //: pins `click` too, which runs this tree's own CLI, and the suite exercises it.
 const DEV_MANIFESTS = [/(^|\/)scripts\/requirements\.txt$/, /(^|\/)requirements-dev[^/]*\.txt$/];
 
-//: The package.json sections that are dev. Read from the hunk, so a bump whose
-//: hunk does not show its section is unknown, and unknown is held.
+//: The package.json sections that are dev. Read from the base-ref manifest the
+//: workflow fetches; without it, from the hunk, where a 3-line context often
+//: does not show the section. Either way a section not established is `unknown`,
+//: which is held and not labelled runtime (dream-doll's eslint read as runtime).
 const DEV_SECTIONS = ['devDependencies'];
 
 //: A lockfile restates its manifest plus every transitive package, so beside a
@@ -58,8 +60,27 @@ const SECURITY_LABELS = ['security', 'dependabot-security'];
 const SECTION_OPEN = /^[-+ ]\s*"(\w*[dD]ependencies)"\s*:\s*\{/;
 const SECTION_CLOSE = /^[-+ ]\s*\},?\s*$/;
 
-//: Every major bump in one file, each marked dev or runtime.
-function majorBumps(file, files) {
+//: A base manifest as JSON; one absent or unparseable is null, so the hunk decides.
+function parsed(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+//: The section `pkg` is declared in, from the parsed base manifest, or null.
+function declaredSection(manifest, pkg) {
+  if (!manifest || typeof manifest !== 'object') return null;
+  const sections = Object.keys(manifest).filter(
+    (key) => /dependencies$/i.test(key) && manifest[key] && pkg in manifest[key]
+  );
+  return sections.length === 1 ? sections[0] : null;
+}
+
+//: Every major bump in one file, each marked dev, runtime or unknown.
+function majorBumps(file, files, manifests) {
   const name = file.filename || '';
   if (LOCKFILE.test(name)) {
     const dir = name.slice(0, name.lastIndexOf('/') + 1);
@@ -70,7 +91,14 @@ function majorBumps(file, files) {
   const before = new Map();
   const after = new Map();
   let section = null;
+  const base = packageJson ? parsed(manifests && manifests[name]) : null;
   for (const line of (file.patch || '').split('\n')) {
+    // Each hunk starts afresh: a section open in one hunk says nothing about the
+    // next, and carrying it classed a runtime major as dev (dream-doll).
+    if (line.startsWith('@@')) {
+      section = null;
+      continue;
+    }
     const opened = SECTION_OPEN.exec(line);
     if (opened) {
       section = opened[1];
@@ -100,13 +128,17 @@ function majorBumps(file, files) {
       finding = `${pkg} 0.${prev.minor} -> 0.${next.minor} (pre-1.0 minor)`;
     }
     if (!finding) continue;
-    const dev = packageJson ? DEV_SECTIONS.includes(next.section) : devManifest;
-    bumps.push({ finding: `${finding} in ${name}`, dev });
+    let tier = devManifest ? 'dev' : 'runtime';
+    if (packageJson) {
+      const declared = declaredSection(base, pkg) || next.section;
+      tier = declared ? (DEV_SECTIONS.includes(declared) ? 'dev' : 'runtime') : 'unknown';
+    }
+    bumps.push({ finding: `${finding} in ${name}`, tier });
   }
   return bumps;
 }
 
-module.exports = function decide({ pr, files }) {
+function decide({ pr, files, manifests }) {
   const author = (pr && pr.user && pr.user.login) || '';
   if (author !== 'dependabot[bot]') {
     return { merge: false, reason: `authored by ${author || 'nobody'}, not dependabot[bot]` };
@@ -117,14 +149,22 @@ module.exports = function decide({ pr, files }) {
   const kind = security
     ? `a security update (${label ? `\`${label}\` label` : 'alerts footer'})`
     : 'an update';
-  const bumps = (files || []).flatMap((file) => majorBumps(file, files));
-  const runtime = bumps.filter((bump) => !bump.dev);
+  const bumps = (files || []).flatMap((file) => majorBumps(file, files, manifests));
+  const runtime = bumps.filter((bump) => bump.tier === 'runtime');
+  const unknown = bumps.filter((bump) => bump.tier === 'unknown');
   if (runtime.length) {
-    // `runtime-major` is what the workflow labels for the agentic `dep-migrate` job.
+    // `runtime-major` is the tier the workflow labels, for whoever drafts migrations.
     return {
       merge: false,
       tier: 'runtime-major',
       reason: `${kind} with a runtime major: ${runtime[0].finding} — left for review`,
+    };
+  }
+  if (unknown.length) {
+    return {
+      merge: false,
+      tier: 'unknown',
+      reason: `${kind} with a major whose section is not known: ${unknown[0].finding} — left for review`,
     };
   }
   if (bumps.length) {
@@ -152,4 +192,12 @@ module.exports = function decide({ pr, files }) {
     };
   }
   return { merge: true, reason: `${kind}, patch or minor, with CI green` };
-};
+}
+
+//: The manifests whose base-ref text `decide` reads, for the workflow to fetch.
+decide.manifestPaths = (files) =>
+  (files || [])
+    .map((file) => file.filename || '')
+    .filter((name) => /(^|\/)package\.json$/.test(name));
+
+module.exports = decide;

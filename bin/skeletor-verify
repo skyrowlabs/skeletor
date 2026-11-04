@@ -1119,7 +1119,19 @@ HOLD_CASES = (
     ("runtime major npm", {}, {"package.json": '   "dependencies": {\n-    "react": "^18.0.0",\n+    "react": "^19.0.0",'},
      False, "runtime major: react 18.x"),
     ("npm major, section unseen", {}, {"package.json": '-    "eslint": "^8.57.0",\n+    "eslint": "^9.0.0",'}, False,
-     "runtime major: eslint 8.x"),
+     "section is not known: eslint 8.x"),
+    # dream-doll's: a devDependencies opener in hunk 1 classed hunk 2's runtime major as dev.
+    ("section does not cross hunks", {},
+     {"package.json": '@@ -10,4 +10,4 @@\n   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^9.1.0",'
+      '\n@@ -2,4 +2,4 @@\n-    "react": "^18.0.0",\n+    "react": "^19.0.0",'}, False, "section is not known: react"),
+    ("the base manifest names a runtime section",
+     {"_manifests": {"package.json": '{"dependencies": {"react": "^18.0.0"}, "devDependencies": {"eslint": "^9.0.0"}}'}},
+     {"package.json": '@@ -10,4 +10,4 @@\n   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^9.1.0",'
+      '\n@@ -2,4 +2,4 @@\n-    "react": "^18.0.0",\n+    "react": "^19.0.0",'}, False, "runtime major: react 18.x"),
+    # dream-doll#22: eslint deep in devDependencies, its hunk too short to show the opener.
+    ("the base manifest names a dev section",
+     {"_manifests": {"package.json": '{"devDependencies": {"eslint": "^9.0.0"}}'}},
+     {"package.json": '-    "eslint": "^9.0.0",\n+    "eslint": "^10.0.0",'}, True, "dev-tool majors only (eslint 9.x"),
     ("lockfile beside a dev manifest", {},
      {"package.json": '   "devDependencies": {\n-    "eslint": "^9.0.0",\n+    "eslint": "^10.0.0",',
       "package-lock.json": '-      "debug": "3.2.7",\n+      "debug": "4.4.0",'}, True, "dev-tool majors only"),
@@ -1147,8 +1159,10 @@ _HOLD_HARNESS = """
 const decide = require(process.argv[2]);
 const out = {};
 for (const [label, pr, files] of JSON.parse(process.argv[3])) {
-  const full = { title: 'bump x from 1.0 to 1.1', body: '', labels: [], user: { login: 'dependabot[bot]' }, ...pr };
-  out[label] = decide({ pr: full, files: Object.entries(files).map(([filename, patch]) => ({ filename, patch })) });
+  const { _manifests: manifests, ...rest } = pr;
+  const full = { title: 'bump x from 1.0 to 1.1', body: '', labels: [], user: { login: 'dependabot[bot]' }, ...rest };
+  const listed = Object.entries(files).map(([filename, patch]) => ({ filename, patch }));
+  out[label] = decide({ pr: full, files: listed, manifests });
 }
 console.log(JSON.stringify(out));
 """
