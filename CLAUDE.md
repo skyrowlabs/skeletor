@@ -1264,12 +1264,13 @@ envelope for the reason `head_ref` did. `pending_ref_gate` grew the assertion,
 and no other gate could carry it: every other upgrade gate runs against a fresh
 scaffold, where the two candidate bases are the same map.
 
-**`--ported` does not protect an addition**, which the help text claimed by
-omission. A conflicted file is never written, so the flag moves the record and
-not your bytes — for conflicts. It is a *re-run*, so a file the upgrade added
-and you deleted in between is still absent from the manifest, still reads as
-new, and is written again. Port, then `--ported`, then delete what you did not
-want. mind.head found it by doing it in the other order.
+**A held-back run records what it added, under `pending_added`.** `files` must
+stay the base render, which has none of those files, so they used to be unknown
+to the next run. A file deleted in between was written again, and one edited in
+between read as a collision, which `--ported` then recorded as owned. mind.head
+hit both, the second by lint-fixing three added files. The next run now reads an
+added file against the hash it was written with, exactly as it reads a file in
+`files`. The key is dropped when the base advances.
 
 **`upstream.json` is provenance in the other direction, and it exists because
 that direction had been recorded backwards.** skeletor was extracted from one

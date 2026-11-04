@@ -4406,6 +4406,8 @@ def owned_gate(workdir: Path) -> List[Result]:
         problems.append(f"{mine} was not reported as owned, or was reported as a conflict")
     if recorded != sorted([mine, collision]):
         problems.append(f"the manifest records owned={recorded}, not the owned file plus the ported collision")
+    if mine in envelope.get("diverged", []):
+        problems.append(f"{mine} is owned and still listed among the edits an upgrade merges into")
     if (tree / mine).read_text(encoding="utf-8") != "the adopter's own\n":
         problems.append(f"{mine} was written to")
     if not (tree / "tmp" / "upgrade" / f"{mine}.new").exists():
@@ -4415,6 +4417,60 @@ def owned_gate(workdir: Path) -> List[Result]:
         problems.append(f"a second run does not carry ownership forward:\n{again[-800:]}")
     return [Result("owned: never merged into, and a ported collision becomes owned", not problems,
                    time.time() - started, "\n".join(problems))]
+
+
+def pending_added_gate(workdir: Path) -> List[Result]:
+    """A file a held-back run added is skeletor's: edited, it is not owned; deleted, it is declined.
+
+    mind.head's sequence: a conflicted upgrade added three files, the tree
+    lint-fixed them, and the `--ported` re-run read them as collisions and
+    recorded them as owned. Planted through `--no-base`: one tampered hash with an
+    edited file holds the base back, and one file deleted with its entry is an
+    addition the base does not have.
+    """
+    started = time.time()
+    manifest_name = load_scaffolder().MANIFEST_NAME
+    results: List[Result] = []
+    for case in ("edited", "deleted"):
+        result, tree = scaffold("core", "python", workdir, name=f"pending-{case}")
+        if not result.ok:
+            return [Result(f"pending added: {result.label}", False, result.seconds, result.output)]
+        manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
+        conflict, added = "README.md", "docs/ARCHITECTURE.md"
+        if conflict not in manifest["files"] or added not in manifest["files"]:
+            return [Result("pending added: the fixture's two paths are not in a fresh manifest", False, 0.0, "")]
+        manifest["files"][conflict] = "0" * 64
+        del manifest["files"][added]
+        (tree / manifest_name).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        (tree / conflict).write_text("the adopter's own\n", encoding="utf-8")
+        (tree / added).unlink()
+        git_in(tree, "add", "-A")
+        git_in(tree, "commit", "-m", "plant: a conflict and an addition the base lacks")
+        upgrade = [sys.executable, str(clean_skeletor(workdir) / "bin" / "skeletor-upgrade"), str(tree),
+                   "--no-base", "--allow-untagged"]
+        code, first = run(upgrade, cwd=tree)
+        held = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
+        problems = []
+        if not (tree / added).exists() or added not in (held.get("pending_added") or {}):
+            problems.append(f"the held-back run did not add {added} and record it:\n{first[-800:]}")
+        if case == "edited":
+            (tree / added).write_text((tree / added).read_text(encoding="utf-8") + "\nlint-fixed\n", encoding="utf-8")
+            code, second = run([*upgrade, "--ported"], cwd=tree)
+            after = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
+            if added in (after.get("owned") or []) or added not in after["files"] or "pending_added" in after:
+                problems.append(f"after --ported: owned={after.get('owned')}, recorded={added in after['files']}, "
+                                f"pending={after.get('pending_added')}\n{second[-800:]}")
+        else:
+            (tree / added).unlink()
+            # Committed, or the second run refuses a dirty tree and proves nothing.
+            git_in(tree, "add", "-A")
+            git_in(tree, "commit", "-m", "decline the added file")
+            code, second = run(upgrade, cwd=tree)
+            if (tree / added).exists():
+                problems.append(f"{added} was deleted after the run added it, and the next run wrote it back")
+        results.append(Result(f"pending added ({case}): a file the held-back run added stays skeletor's",
+                              not problems, time.time() - started, "\n".join(problems)))
+    return results
 
 
 def sidecar_gate(tier: str, workdir: Path) -> List[Result]:
@@ -9558,7 +9614,10 @@ def declined_gate(tier: str, workdir: Path) -> List[Result]:
             and dropped in human
             and f"{dropped}   (the template has changed it since)" not in human
             and (sidecars / f"{moved}.new").exists()
-            and not (sidecars / f"{dropped}.new").exists(),
+            and not (sidecars / f"{dropped}.new").exists()
+            # `arriving` is added in the same run, so the moved decline is named
+            # as something a new file may rely on (sky.boss's actionlint.yaml).
+            and "Read the change before declining it again: " + moved in human,
             time.time() - started,
             human + "\n" + "\n".join(str(p.relative_to(sidecars)) for p in sidecars.rglob("*") if p.is_file()),
         )
@@ -11880,6 +11939,7 @@ def main() -> int:
             results.append(gate)
 
         results += owned_gate(workdir)
+        results += pending_added_gate(workdir)
         for gate in sidecar_gate(fullest, workdir):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)

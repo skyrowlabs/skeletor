@@ -495,11 +495,9 @@ def refuse_a_dirty_tree(target: Path, ported: bool = False) -> None:
         detail("conflicted file is never written by this tool, and --ported moves the record")
         detail("rather than the bytes. `git checkout -- .` still discards both at once.")
         detail()
-        detail("What --ported does NOT protect is a file this upgrade ADDED and you then")
-        detail("deleted. The base has not advanced yet, so the manifest has never heard of")
-        detail("it, and a file the manifest does not name is a new file rather than a")
-        detail("decline — so this run renders it again. Delete it AFTER the base advances,")
-        detail("when the entry exists for your deletion to be read against.")
+        detail("A file the held-back run ADDED is recorded under `pending_added`, so editing")
+        detail("it merges and deleting it declines it, as for any file skeletor wrote. A run")
+        detail("held back before v0.65.0 recorded none: delete such a file after the base advances.")
         return
     say("❌", f"{len(dirty)} tracked file(s) have uncommitted changes:")
     _list_dirty(dirty)
@@ -670,6 +668,17 @@ def record_owned(target: Path, owned: List[str]) -> None:
         data["owned"] = owned
     else:
         data.pop("owned", None)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def record_pending_added(target: Path, pending: Dict[str, str]) -> None:
+    """Write `pending_added` into the manifest: what a held-back run added, by hash."""
+    path = target / MANIFEST_NAME
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if pending:
+        data["pending_added"] = dict(sorted(pending.items()))
+    else:
+        data.pop("pending_added", None)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
@@ -2612,10 +2621,9 @@ def main() -> int:
         "the recorded base to this skeletor. Without it, a run that leaves anything "
         "pending holds the base where it is. Safe on the dirty tree hand-porting leaves, "
         "and not refused on one: a CONFLICTED file is never written, so this moves the "
-        "record and not your bytes. That holds for conflicts and not for additions — "
-        "this is a re-run, so a file the upgrade added and you deleted in between is "
-        "still absent from the manifest, still reads as new, and is written again. "
-        "Port, then --ported, then delete what you did not want.",
+        "record and not your bytes. A file the held-back run added is recorded under "
+        "`pending_added`, so an edit to it merges and a deletion declines it; neither "
+        "makes it yours.",
     )
     parser.add_argument(
         "--show",
@@ -2664,6 +2672,11 @@ def main() -> int:
         die(f"{target / MANIFEST_NAME} records no arguments — it cannot be re-rendered")
 
     hashes: Dict[str, str] = manifest.get("files") or {}
+    # Files a held-back run added: skeletor wrote them, but `files` must stay the
+    # base render, which has none of them (mind.head: `--ported` then owned them).
+    pending_added: Dict[str, str] = {
+        rel: digest for rel, digest in (manifest.get("pending_added") or {}).items() if rel not in hashes
+    }
     #: Paths the adopter owns. Beside `files`, never in it: `files` must stay a
     #: bijection with the base render, and ownership is a decision, not a render.
     owned = set(manifest.get("owned") or []) | {Path(own).as_posix().removeprefix("./") for own in args.own}
@@ -3158,7 +3171,9 @@ def main() -> int:
         # a decision anybody made. The function carries the argument.
         normalising = normaliser if args.normalise else None
         divergence_inputs = (hashes or {}, head_files, base_files)
-        diverged = standing_divergence(target, *divergence_inputs, normalising)
+        # An owned file is never merged, so it is reported once, as owned, and
+        # kept out of every list that says an upgrade merges into it.
+        diverged = [rel for rel in standing_divergence(target, *divergence_inputs, normalising) if rel not in owned]
 
         renamed_from, renamed_to = cli_rename_paths(set_args_applied)
         already_moved = False
@@ -3241,7 +3256,7 @@ def main() -> int:
                 # manifest would be a second home for a fact the filesystem
                 # already states, and would go stale the moment somebody changed
                 # their mind by restoring the file.
-                if hashes and rel in hashes:
+                if hashes and (rel in hashes or rel in pending_added):
                     declined.append(rel)
                     # Only worth a sidecar if there is something new to look at:
                     # the template has moved since they declined it. Unchanged,
@@ -3266,7 +3281,7 @@ def main() -> int:
                 # No base text for this file — either it is absent from the base
                 # render, or there is no base render at all. Fall back to the
                 # recorded hash, which answers "untouched?" and nothing else.
-                recorded_hash = hashes.get(rel)
+                recorded_hash = hashes.get(rel, pending_added.get(rel))
                 if recorded_hash is None:
                     # Never recorded, so skeletor never wrote it: the user had a
                     # file here before the template claimed the path. Handled the
@@ -3525,6 +3540,9 @@ def main() -> int:
             # hunks that were applied. A superfluous merge is the cheap error
             # here; a lost template change is the expensive one.
             if pending and not args.ported:
+                # What this run wrote at a path the base lacks is still skeletor's.
+                wrote = {rel: sha256(head_files[rel]) for rel in added + updated if rel not in hashes}
+                record_pending_added(target, {**pending_added, **wrote})
                 say("⏸️ ", f"{MANIFEST_NAME} left at {ref} — {len(pending)} file(s) still pending")
                 detail("Advancing it would record the new render as this tree's base for files")
                 detail("the new render never reached, and their changes would stop being offered.")
@@ -3624,7 +3642,9 @@ def main() -> int:
                     head_files,
                     head_files,
                 )
-                diverged = standing_divergence(target, *divergence_inputs, normalising)
+                diverged = [
+                    rel for rel in standing_divergence(target, *divergence_inputs, normalising) if rel not in owned
+                ]
 
         # One call, two renderings. It was computed separately for the JSON and
         # for the human report — two call sites for one answer, which is the
@@ -4022,7 +4042,7 @@ def main() -> int:
             # names were unavailable in precisely the steady state, while the edited
             # list directly below, under the same "standing state" sentence, named
             # all 25 of its files. The asymmetry was the finding.
-            fresh = [rel for rel in declined if sha256(head_files[rel]) != hashes.get(rel)]
+            fresh = [rel for rel in declined if sha256(head_files[rel]) != hashes.get(rel, pending_added.get(rel))]
             for rel in declined:
                 item(f"{rel}   (the template has changed it since)" if rel in fresh else rel)
             # A rename is indistinguishable from a deletion when only one side is
@@ -4052,6 +4072,13 @@ def main() -> int:
                     detail("would be in tmp/upgrade/<path>.new after a real run; --show <path> prints it now.")
                 else:
                     detail("is in tmp/upgrade/<path>.new.")
+                # A file this release adds can need the change a decline refuses:
+                # the auto-merge workflow arrived needing an actionlint.yaml entry,
+                # in a tree that had deleted actionlint.yaml (sky.boss, v0.64.0).
+                if added:
+                    detail()
+                    detail(f"This release also adds {len(added)} file(s), which may rely on what changed in")
+                    detail("those. Read the change before declining it again: " + ", ".join(fresh))
 
         if diverged:
             # The symmetric half of the block above, and it took an adopter to
