@@ -1,0 +1,26 @@
+name: Unit setup
+description: >-
+  The interpreter and every dependency the unit suite imports. ci.yml's unit job
+  and coverage-nightly.yml both use this, so one edit here reaches both.
+
+# A tree whose suite needs more than scripts/requirements.txt (its own
+# requirements file, a system package) adds the step here. sky.boss's nightly
+# failed at import because its ci.yml had learned its own requirements and the
+# nightly's copy of the steps had not.
+
+inputs:
+  python-version:
+    description: The interpreter to install.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v7
+      with:
+        python-version: ${{ inputs.python-version }}
+    - run: pip install -r scripts/requirements.txt
+      shell: bash
+    - name: Install the project, if it is one
+      run: python scripts/install_project.py
+      shell: bash

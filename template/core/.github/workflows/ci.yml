@@ -489,16 +489,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7
+      # The interpreter, scripts/requirements.txt and the project itself: one
+      # action, shared with coverage-nightly.yml so the two install the same thing.
+      - uses: ./.github/actions/unit-setup
         with:
           python-version: ${{ matrix.python }}
-      - run: pip install -r scripts/requirements.txt
-
-      # A no-op until the tree declares `[project]`; from then on, the suite
-      # imports the package and fails collection without it. The setup block
-      # runs the same script, so a fresh clone and CI install the same thing.
-      - name: Install the project, if it is one
-        run: python scripts/install_project.py
 
       # `--junitxml` is not optional decoration: the step below reads that file
       # and has nothing to say without it. It ran without one for as long as

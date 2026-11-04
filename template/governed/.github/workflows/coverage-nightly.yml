@@ -60,19 +60,12 @@ jobs:
           ref: {{BASE_BRANCH}}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v7
+      # ci.yml's unit job installs through the same action, so the two cannot
+      # differ: they once did twice, and each time the nightly failed at import
+      # while pull requests were green (proto.pilot, then sky.boss).
+      - uses: ./.github/actions/unit-setup
         with:
           python-version: '{{PY}}'
-
-      - run: pip install -r scripts/requirements.txt
-
-      # The same step as ci.yml's unit job, and its reasons are written there.
-      # This one was missing for the template's whole life, so in any tree that
-      # is a package the suite failed at collection on the project's own
-      # dependencies — proto.pilot's, every night, while its pull requests were
-      # green. `check_workflow_drift.py` now requires it of any job running pytest.
-      - name: Install the project, if it is one
-        run: python scripts/install_project.py
 
       # One junit report per marker, because the two ratchets below measure
       # opposite kinds of thing. A skip count belongs to the run that produced
