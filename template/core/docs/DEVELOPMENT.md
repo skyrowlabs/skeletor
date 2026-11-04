@@ -185,6 +185,16 @@ unpushed tag names a version only your machine can resolve, and `{{CLI}} --versi
 reads exactly this. Conventional commit subjects are still the rule; they are
 what a reader of `git log` between two tags gets instead of a changelog.
 <!-- /SCAFFOLD-IF -->
+<!-- SCAFFOLD-IF-DIFFER {{BASE_BRANCH}} {{RELEASE_BRANCH}} -->
+
+The release lands on `{{RELEASE_BRANCH}}`, so back-merge it. Until you do,
+`{{BASE_BRANCH}}` does not contain the release commit, and `git describe` there
+names the release before this one (mind.head):
+
+```bash
+git switch {{BASE_BRANCH}} && git merge --no-ff {{RELEASE_BRANCH}} && git push
+```
+<!-- /SCAFFOLD-IF -->
 
 A release closes the report window: in-flight reports under
 `docs/reports/regular/` freeze into `docs/reports/releases/<tag>/`. See
