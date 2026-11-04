@@ -26,7 +26,8 @@ MERGER = GITHUB_DIR / "workflows" / "dependabot-auto-merge.yml"
 def test_the_merger_runs_after_ci_passes_and_merges_with_the_app_token():
     text = read_uncommented(MERGER)
     ci_name = re.search(r"^name:\s*(.+?)\s*$", read_uncommented(GITHUB_DIR / "workflows" / "ci.yml"), re.MULTILINE)
-    assert ci_name and f'workflows: ["{ci_name.group(1)}"]' in text, "it must follow the workflow named in ci.yml"
+    follows = ci_name and re.search(rf"workflows:\s*\[\s*['\"]{re.escape(ci_name.group(1))}['\"]\s*\]", text)
+    assert follows, "it must follow the workflow named in ci.yml"
     assert "workflow_run.conclusion == 'success'" in text
     assert re.search(r"GH_TOKEN:\s*\$\{\{\s*steps\.app-token\.outputs\.token", text), "a GITHUB_TOKEN merge runs no CI"
 

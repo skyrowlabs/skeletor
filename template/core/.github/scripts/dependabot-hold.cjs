@@ -66,15 +66,26 @@ module.exports = function decide({ pr, files }) {
   }
   for (const file of files || []) {
     const finding = majorBump(file.patch);
-    if (finding) return { merge: false, reason: `major bump in ${file.filename}: ${finding} — left for review` };
+    if (finding)
+      return {
+        merge: false,
+        reason: `major bump in ${file.filename}: ${finding} — left for review`,
+      };
   }
-  if (String(pr.title || '').toLowerCase().includes('major')) {
+  if (
+    String(pr.title || '')
+      .toLowerCase()
+      .includes('major')
+  ) {
     return { merge: false, reason: 'the title names a major update — left for review' };
   }
   const labels = (pr.labels || []).map((l) => String((l && l.name) || l).toLowerCase());
   const label = labels.find((name) => SECURITY_LABELS.includes(name));
   if (label || SECURITY_FOOTER.test(pr.body || '')) {
-    return { merge: false, reason: `a security update (${label ? `\`${label}\` label` : 'alerts footer'}) — left for review` };
+    return {
+      merge: false,
+      reason: `a security update (${label ? `\`${label}\` label` : 'alerts footer'}) — left for review`,
+    };
   }
   return { merge: true, reason: 'patch or minor version update with CI green' };
 };
