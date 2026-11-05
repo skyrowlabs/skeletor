@@ -92,6 +92,12 @@ Commit after each **independent logical idea**, not after finishing everything:
 - **Never commit directly to `{{RELEASE_BRANCH}}`** — that is the release branch. It
   moves by merge from `{{BASE_BRANCH}}`, and releases are tagged on it.
 <!-- /SCAFFOLD-IF -->
+<!-- SCAFFOLD-IF-DIFFER {{BASE_BRANCH}} {{RELEASE_BRANCH}} -->
+- **Title a `{{BASE_BRANCH}}` → `{{RELEASE_BRANCH}}` pull request `chore(release): …`.**
+  Its merge commit carries the title, and a changelog built from commit subjects
+  reads that as one more commit: a `fix(...)` title is listed beside the fixes it
+  merges (sky.boss's 0.2.0). `chore` is a hidden type.
+<!-- /SCAFFOLD-IF -->
 - **Force-push is permitted on your own unreviewed branch** — amending or squashing your own
   in-flight work is how four CI runs become one — but **never** on `{{BASE_BRANCH}}` or
   `{{RELEASE_BRANCH}}`, and never from an unattended agent.

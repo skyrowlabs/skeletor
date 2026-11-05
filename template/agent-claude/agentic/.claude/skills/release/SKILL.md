@@ -53,8 +53,12 @@ place:
 
 ```bash
 gh pr create --base {{RELEASE_BRANCH}} --head {{BASE_BRANCH}} \
-  --title "release: <version>" --body "<the changelog Release Please will generate>"
+  --title "chore(release): <version>" --body "<the changelog Release Please will generate>"
 ```
+
+The title becomes the merge commit's message, and Release Please reads it as one
+more commit. `chore` is a hidden section, so it adds nothing to the changelog; a
+`fix(...)` title appeared in sky.boss's 0.2.0 changelog a second time.
 
 A PR into the release branch runs **everything**. Watch it; fix what breaks; push
 fixes to `{{BASE_BRANCH}}`. Report when every check is green.
