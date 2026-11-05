@@ -473,6 +473,30 @@ report the actual failure output rather than a summary of it.
 """
 
 
+def self_standing(recorded: Optional[str], newest: Optional[str]) -> Tuple[bool, str, bool]:
+    """`(behind, detail, measured)` for skeletor's own tree, from its recorded ref and newest tag.
+
+    A describe string (`v0.72.1-3-gabc`) is compared by the tag it starts from.
+    Either side unknown is unmeasured, never current.
+    """
+    if not recorded or not newest:
+        return False, "skeletor's own tree: could not read its recorded ref or the newest tag", False
+    tag = recorded.split("-", 1)[0]
+    if tag == newest:
+        return False, f"skeletor's own tree records {recorded}, the newest release", True
+    return True, f"skeletor's own tree records {recorded}; the newest release is {newest}", True
+
+
+def self_verdict() -> Tuple[bool, str, bool]:
+    """Whether skeletor's own tree has taken its newest release, which it went five without (Jeston)."""
+    try:
+        recorded = json.loads((SKELETOR / ".skeletor.json").read_text(encoding="utf-8")).get("skeletor_ref")
+    except (OSError, ValueError):
+        recorded = None
+    code, newest = run(["git", "-C", str(SKELETOR), "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"])
+    return self_standing(recorded, newest.strip() if code == 0 else None)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="skeletor-maintain",
@@ -497,6 +521,7 @@ def main() -> int:
     conclusion, ci_detail = ci_verdict()
     stale, pins_detail, pins_measured = pin_verdict()
     upstream_moved, upstream_detail, upstream_measured = upstream_verdict()
+    self_behind, self_detail, self_measured = self_verdict()
 
     print(f"skeletor maintenance — {RELEASE_BRANCH}")
     print(f"   CI:   {ci_detail}")
@@ -504,6 +529,7 @@ def main() -> int:
     print(f"   pins: {pins_line if pins_measured else pins_line + ' (of the ones a registry answered for)'}")
     print("   from upstream:")
     print(upstream_detail)
+    print(f"   self: {self_detail}")
     if unpulled not in ("0", ""):
         print(f"   git:  {unpulled} commit(s) on origin/{RELEASE_BRANCH} not pulled")
     print()
@@ -526,6 +552,15 @@ def main() -> int:
         # line above had it. Not work — a fresh clone legitimately watches
         # nothing — but not an answer either.
         print(f"⚠️  no upstream is being watched from this checkout — write {LOCAL_UPSTREAMS.name} to start")
+    if not self_measured:
+        print(f"⚠️  {self_detail}")
+    if self_behind:
+        newest = self_detail.rsplit(" ", 1)[-1]
+        work.append(
+            f"{self_detail}. Take it as skeletor's first adopter: `bin/skeletor-upgrade . --ref {newest}`, "
+            "then `./skel check pre-push`, then commit as one `chore(skeletor):` change. A conflict here "
+            "is a finding about that release."
+        )
     if stale:
         work.append(f"`bin/skeletor-check-pins` reports work:\n\n```\n{pins_detail}\n```")
     if upstream_moved:
@@ -557,6 +592,8 @@ def main() -> int:
             established.append("every pin is current or allowlisted")
         if upstream_measured:
             established.append("nothing has moved in a harvested path upstream")
+        if self_measured:
+            established.append("skeletor's own tree is on its newest release")
         # Every clause can now be absent, which the first version of this could
         # not express — it seeded the list with the pin claim, on the assumption
         # that one question is always answered. Nothing is: a run with no

@@ -205,6 +205,16 @@ hand over an untagged render, `--ref <some-tag>` pins the stamp and
 `--allow-untagged` records the description anyway; both are deliberate, and
 neither is the normal path.
 
+**Then take the tag here, as the first adopter.** This checkout is a scaffold of
+itself, so the release is not finished until it has upgraded:
+
+```bash
+bin/skeletor-upgrade . --ref vX.Y.Z && ./skel check pre-push
+```
+
+Commit that as one `chore(skeletor):` change. It went undone for five releases
+(v0.68.0 to v0.72.2), so `bin/skeletor-maintain` now reports it as work.
+
 ### The runner label moves under every tree, on purpose
 
 Every scaffold's workflows say `runs-on: ubuntu-latest`, and GitHub moves that
