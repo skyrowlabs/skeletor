@@ -270,6 +270,17 @@ jobs:
       - name: black
         run: black --check --line-length={{LINE_LENGTH}} .
 
+      # The commit hook, run here too: a workflow edited without a commit through
+      # it (a hand-merge, an upgrade) otherwise reached CI unread (sky.boss).
+      # Through pre-commit so the hook's `rev:` stays the one version. This
+      # runner has shellcheck, so `run:` blocks are checked here and may not be
+      # on a machine without it.
+      - name: actionlint
+        run: |
+          if grep -qE '^\s*-\s*id:\s*actionlint\s*$' .pre-commit-config.yaml; then
+            pre-commit run actionlint --all-files
+          fi
+
       # Pyright resolves its interpreter from PATH, so the dependency set it
       # sees decides which errors exist. .github/pyright-deps.txt must stay a
       # SUPERSET of the unit-test job's installs — a leaner environment is not a
