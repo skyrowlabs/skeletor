@@ -98,6 +98,11 @@ Commit after each **independent logical idea**, not after finishing everything:
   reads that as one more commit: a `fix(...)` title is listed beside the fixes it
   merges (sky.boss's 0.2.0). `chore` is a hidden type.
 <!-- /SCAFFOLD-IF -->
+<!-- SCAFFOLD-IF .github/release-please-config.json -->
+- **A release made only of hidden types publishes nothing.** Release Please skips
+  it (`No user facing commits found`). To ship one anyway, add an empty commit
+  whose body is `Release-As: X.Y.Z`.
+<!-- /SCAFFOLD-IF -->
 - **Force-push is permitted on your own unreviewed branch** — amending or squashing your own
   in-flight work is how four CI runs become one — but **never** on `{{BASE_BRANCH}}` or
   `{{RELEASE_BRANCH}}`, and never from an unattended agent.
