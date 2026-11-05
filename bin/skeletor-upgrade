@@ -4513,6 +4513,30 @@ def main() -> int:
                 item(rel)
             detail("Delete them yourself if you agree. This never removes your files.")
 
+        # `--versioning` is the one argument whose switch needs a hand step in either
+        # direction, and both were measured on a tagged tree (the v0.72.0 rehearsal).
+        versioning = set_args_applied.get("--versioning")
+        if versioning and versioning[1] == "release-please":
+            tag = subprocess.run(
+                ["git", "-C", str(target), "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"],
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            seed = (read(head_files.get("VERSION")) or "").strip()
+
+            def numbers(version: str) -> Tuple[int, ...]:
+                return tuple(int(part) for part in re.findall(r"\d+", version.split("-")[0])[:3])
+
+            # Only when the seed is BEHIND a release: equal starts from a released
+            # number, which is what Release Please expects (mind-head, sky-boss).
+            if tag and seed and numbers(seed) < numbers(tag):
+                say("⚠️ ", f"VERSION and the Release Please manifest arrive at {seed}; {tag} is already released")
+                detail(f"Seed both at {tag.lstrip('v')} before the first release PR, or it measures from {seed}.")
+                detail("tests/test_version_follows_the_tag.py is red until you do.")
+        elif versioning and versioning[1] == "tag" and dropped:
+            detail("Those include what makes ci.yml run Release Please: until they are deleted it still")
+            detail("opens release PRs, while the docs this run wrote say the tag is the version.")
+
         # Only when this run actually wrote a test file, and only on a real run.
         # Always-on prose in this output gets skimmed, and this instruction earns
         # attention precisely because it is rare — proto.pilot's point, and the
