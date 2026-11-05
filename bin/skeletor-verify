@@ -5887,239 +5887,202 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
     return results
 
 
-def collect_diff_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
-    """The footer that tells a reader not to verify an upgrade by counting.
+def test_id_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
+    """An applying run reports what it did to the suite, by ID, from the tree's own pytest.
 
-    proto.pilot's v0.3.6 → v0.4.2 run collected 633 tests before and after, and
-    five had changed — five removed, five added, the equality a coincidence. A
-    total is a negative assertion over a set wearing a number's clothes, which
-    is the rule `scanned()` states for enumerations, and nothing in the upgrade
-    output said so.
-
-    Three things are asserted, and the second and third are why this is a gate
-    rather than a line of prose somebody eyeballed once:
-
-    * A real run that wrote under `tests/` prints it, naming the target's HEAD
-      **as it was before the run** — the value of the line is that it is
-      paste-able, and a footer naming the wrong commit is worse than none.
-    * A run that wrote nothing under `tests/` does not. Always-on prose in this
-      output gets skimmed, and this instruction earns attention by being rare.
-    * A dry run does not, for the reason the sidecar rule exists: a dry run must
-      not send anybody to inspect a state it did not produce.
-
-    The skew is `sidecar_gate`'s, one classification over. An `updated` needs the
-    recorded hash to MATCH what is on disk — the user touched nothing — while the
-    head render differs, so the tamper is to edit the file *and* record the edit.
-    Editing without recording is a conflict, which is written nowhere and would
-    reach none of this.
-
-    ## Why the recipe is executed and not read
-
-    The first draft of that footer printed a pipeline that fails silently, which
-    is the joke this gate exists to stop repeating: a wrong interpreter path or a
-    collection error leaves `grep` writing an empty file, `diff` reports no
-    change, and the reader takes a clean bill off two files containing nothing.
-    A negative assertion over an empty set — delivered by the command whose whole
-    purpose is to say that counting is not looking.
-
-    Reading the block would not have caught it and did not. Running it did, on
-    the first try. So the gate extracts the commands the tool actually printed
-    and executes them.
-
-    ## The first fix was `wc -l`, and it was wrong
-
-    That is worth keeping because this gate then made the same mistake, and for
-    the same reason. `wc -l` asks whether the two files are empty; this gate
-    asked `len(collected) > 0`. One question, two homes, and node-zero found the
-    failure neither could see: an unscoped `pytest` descends into the
-    `tmp/pre-upgrade` worktree the recipe just created, collides on every module
-    basename, and Interrupts at exit 2 — **after** writing the right ids. Both
-    files come out correct and non-empty, `diff` reports no change and is
-    telling the truth about them, and `grep :: | sort` has thrown the exit code
-    away. This gate ran that command on every verify and passed.
-
-    That is the repository's own empty-scope rule arriving inside the gate
-    written to enforce it, one level up: the recipe and its guard were written
-    by one hand, so the guard was written against the failure that was imagined
-    rather than the one the recipe causes. A doc-and-check pair agreeing with
-    each other by construction — node-zero's framing, and it is the workspace's
-    two-consumers rule applied to a procedure and its own safety check.
-
-    So the recipe is scoped to `tests/` and announces its own failure, and this
-    gate requires the announcement to be **absent** — then plants the unscoped
-    form and requires it to be **present**. Without that second run the first is
-    a negative assertion over a set nobody proved non-empty, which is precisely
-    the reading that shipped.
-
-    `$PY` is not repointed: `$(pwd)/.venv/bin/python` is a path the recipe names
-    out loud, and a gate that swapped it in could not catch a path pointing at
-    nothing. A verify tree never runs the README's setup, so the venv is
-    symlinked to the shared one and the line executes as printed.
+    A total can hide five removed and five added. The skew is `sidecar_gate`'s: an
+    `updated` needs the recorded hash to match the disk while the head render
+    differs, so each plant edits a test file and records the edit, and the upgrade
+    then restores the render. What the plant added is what the run removes.
     """
     results: List[Result] = []
     manifest_name = load_scaffolder().MANIFEST_NAME
     upgrade_bin = clean_skeletor(workdir) / "bin" / "skeletor-upgrade"
+    upgrade = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade")
 
-    def manufacture(tree: Path, rel: str) -> None:
-        """Make `rel` read as "the template moved it, the user did not"."""
-        path = tree / rel
-        path.write_text(path.read_text(encoding="utf-8") + "\n# theirs, from the base render\n", encoding="utf-8")
+    def record(tree: Path, rel: str, digest: Optional[str] = None) -> None:
         manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
-        manifest["files"][rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+        manifest["files"][rel] = digest or hashlib.sha256((tree / rel).read_bytes()).hexdigest()
         (tree / manifest_name).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
-    def written_marker(output: str) -> bool:
-        return "do not verify by counting" in output
+    def plant(tree: Path, rel: str, text: str) -> None:
+        path = tree / rel
+        path.write_text(path.read_text(encoding="utf-8") + text, encoding="utf-8")
+        record(tree, rel)
 
-    started = time.time()
-    result, tree = scaffold(tier, "python", workdir, name="collect-diff")
-    results.append(Result(f"collect-diff: {result.label}", result.ok, result.seconds, result.output))
-    if not result.ok:
-        return results
-
-    manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
-    test_file = next(r for r in sorted(manifest["files"]) if r.startswith("tests/") and r.endswith(".py"))
-    manufacture(tree, test_file)
-
-    # Dry run first, while the tree is still dirty — a dry run is never refused.
-    code, dry_output = run([sys.executable, str(upgrade_bin), str(tree), "--no-base", "--dry-run"], cwd=tree)
-    reached = test_file in dry_output
-
-    git_in(tree, "add", "-A")
-    git_in(tree, "commit", "-m", "tamper")
-    # The commit the footer must name: the scaffold's first commit is also
-    # sitting right there, so naming *a* sha proves nothing.
-    head = run(["git", "-C", str(tree), "rev-parse", "HEAD"], cwd=tree)[1].strip()
-
-    real_code, real_output = run(
-        [sys.executable, str(upgrade_bin), str(tree), "--no-base", "--allow-untagged"], cwd=tree
-    )
-    results.append(
-        Result(
-            "collect-diff: a real run that touched tests/ names the pre-upgrade commit",
-            reached
-            and written_marker(real_output)
-            and head in real_output
-            and not written_marker(dry_output)
-            and "--allow-dirty" not in real_output,
-            time.time() - started,
-            f"the manufacture reached the tool: {reached}\n"
-            f"real run printed it: {written_marker(real_output)}\n"
-            f"named HEAD {head[:12]}: {head in real_output}\n"
-            f"dry run stayed silent: {not written_marker(dry_output)}\n"
-            f"--- dry ---\n{dry_output}\n--- real ---\n{real_output}",
-        )
-    )
-
-    # The recipe, run. Its lines are the ones the tool printed, with `$PY`
-    # repointed at the shared venv — a verify tree never runs the README's setup.
-    started = time.time()
-    recipe = [
-        line.strip()
-        for line in real_output.splitlines()
-        if line.startswith("     ") and not line.strip().startswith("#") and line.strip()
-    ]
-    # Executed exactly as printed. The recipe makes its own `mktemp -d`, so the
-    # only addition is a copy of its result out to where this gate reads it.
-    scratch = workdir / "collect-diff-run"
-    scratch.mkdir(exist_ok=True)
-
-    # The interpreter is NOT substituted. `$(pwd)/.venv/bin/python` is a path the
-    # recipe names out loud, and a gate that swapped it in would be unable to
-    # catch the one thing that actually went wrong first — a path pointing at
-    # nothing. A verify tree never runs the README's setup, so the venv is
-    # symlinked to the shared one and the line is executed exactly as printed.
-    if not (tree / ".venv").exists():
+    def fresh(name: str) -> Tuple[Optional[Path], List[str], Optional[Result]]:
+        result, tree = scaffold(tier, "python", workdir, name=name)
+        if not result.ok:
+            return None, [], Result(f"test IDs: {result.label}", False, result.seconds, result.output)
         (tree / ".venv").symlink_to(venv_python.parent.parent)
+        manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
+        return tree, sorted(r for r in manifest["files"] if re.fullmatch(r"tests/test_\w+\.py", r)), None
 
-    script = "\n".join(recipe)
-    code, ran = run(["bash", "-c", script + f'\ncp "$D/before.txt" {scratch}/before.txt'], cwd=tree)
-    before = scratch / "before.txt"
-    collected = [ln for ln in before.read_text().splitlines() if "::" in ln] if before.exists() else []
-    # The recipe's own marker, read out of the recipe rather than spelled here:
-    # a second copy would keep passing after somebody reworded the echo.
-    marker = "collection FAILED"
-    assert any(marker in line for line in recipe), "the recipe no longer announces a failed collection"
-    results.append(
-        Result(
-            f"collect-diff: the printed recipe runs and reports no failure ({len(collected)} ids)",
-            code == 0 and len(collected) > 0 and len(recipe) >= 5 and marker not in ran,
-            time.time() - started,
-            f"{len(recipe)} command line(s) extracted, exit {code}, {len(collected)} collected ids\n"
-            f"the recipe's own failure marker fired: {marker in ran}\n"
-            f"--- script ---\n{script}\n--- output ---\n{ran}",
-        )
-    )
-    # Two trees in one round ran this recipe at once and could overwrite each other's IDs.
-    shared = [line for line in recipe if "/tmp/" in line]
-    results.append(
-        Result(
-            "collect-diff: the recipe names no fixed scratch path",
-            not shared and any("mktemp -d" in line for line in recipe),
-            0.0,
-            "these lines name a path every concurrent run shares:\n  " + "\n  ".join(shared),
-        )
-    )
+    def apply(tree: Path, *extra: str) -> Tuple[int, str]:
+        git_in(tree, "add", "-A")
+        git_in(tree, "commit", "-m", "tamper")
+        return run([sys.executable, str(upgrade_bin), str(tree), "--no-base", "--allow-untagged", *extra], cwd=tree)
 
-    # The plant, in the gate, because the assertion above is a negative one and
-    # a negative over a set nobody sized is what shipped here. It reconstructs
-    # the recipe as it was when node-zero reported it and the marker must fire.
-    # If it does not, the assertion above is decoration.
-    #
-    # **Two halves now, and the second one is why.** The plant used to be the
-    # `tests/` scope alone, because the worktree was created at `tmp/pre-upgrade`
-    # — inside the tree, where an unscoped `pytest` finds it. proto.pilot pointed
-    # out that `/tmp` satisfies both of the recipe's constraints at once, so the
-    # worktree moved out of the repository and the collision it caused is gone
-    # with it. Unscoping alone then reproduces nothing, and this gate went red
-    # saying so, which is the correct report: the hazard the plant recreated no
-    # longer exists at that location.
-    #
-    # The rule under test never was *scope to `tests/`* — it is *a failed
-    # collection announces itself rather than writing correct-looking files*, and
-    # `tmp/` is one cause of a collision among several (an adopter's own scratch,
-    # a vendored tree, a second checkout). So the plant puts the worktree back
-    # where it used to be AND unscopes, which is the historical recipe verbatim,
-    # and the exit-code check must still catch it.
+    def last_test(path: Path) -> Optional[int]:
+        """The line a plain trailing test function starts on, so everything from it can be cut."""
+        body = ast.parse(path.read_text(encoding="utf-8")).body
+        last = body[-1]
+        plain = isinstance(last, ast.FunctionDef) and last.name.startswith("test_") and not last.decorator_list
+        return last.lineno if plain and len(body) > 1 else None
+
+    def report_of(tree: Path) -> str:
+        report = tree / "tmp" / "upgrade" / "REPORT.md"
+        return report.read_text(encoding="utf-8") if report.exists() else ""
+
+    # Removed, added, and the report keys, from one real run.
     started = time.time()
-    unscoped = script.replace("$D/pre-upgrade", "tmp/pre-upgrade").replace("-m pytest tests/ ", "-m pytest ")
-    planted = unscoped != script and "tmp/pre-upgrade" in unscoped and "-m pytest tests/ " not in unscoped
-    prune = "rm -rf tmp/pre-upgrade; git worktree prune\n"
-    plant_code, plant_ran = run(["bash", "-c", prune + unscoped], cwd=tree)
+    tree, tests, failure = fresh("test-ids")
+    if failure:
+        return [failure]
+    going = tests[0]
+    coming = next(r for r in tests[1:] if last_test(tree / r))
+    plant(tree, going, "\n\ndef test_planted_going_away():\n    pass\n")
+    lines = (tree / coming).read_text(encoding="utf-8").splitlines(keepends=True)
+    cut = last_test(tree / coming)
+    name = lines[cut - 1].split("def ", 1)[1].split("(", 1)[0]
+    (tree / coming).write_text("".join(lines[: cut - 1]).rstrip() + "\n", encoding="utf-8")
+    record(tree, coming)
+    _, dry = run([sys.executable, str(upgrade_bin), str(tree), "--no-base", "--dry-run"], cwd=tree)
+    code, output = apply(tree)
+    report = report_of(tree)
     results.append(
         Result(
-            "collect-diff: unscoping the recipe makes it say so",
-            planted and marker in plant_ran,
+            "test IDs: a real run names what it removed and added, and REPORT.md counts them",
+            f"- {Path(going).name}::test_planted_going_away" in output
+            and f"+ {Path(coming).name}::{name}" in output
+            and "1 removed and 1 added" in output
+            and "tests-removed: 1" in report
+            and "tests-added: 1" in report
+            and "test IDs:" not in dry
+            and "--collect-only" not in output,
             time.time() - started,
-            f"the plant changed the script: {planted}\n"
-            f"the marker fired: {marker in plant_ran}\n"
-            f"--- output ---\n{plant_ran}",
+            f"exit {code}\n--- dry ---\n{dry[-800:]}\n--- real ---\n{output}\n--- report ---\n{report}",
         )
     )
-    run(["bash", "-c", "rm -rf tmp/pre-upgrade; git worktree prune"], cwd=tree)
 
-    # And the other direction, which is the one an unconditional footer passes.
+    # A plant that changes no ID: the run must say none changed, over a non-empty set.
     started = time.time()
-    result, other = scaffold(tier, "python", workdir, name="collect-diff-none")
-    if not result.ok:
-        results.append(Result(f"collect-diff: {result.label}", False, result.seconds, result.output))
-        return results
+    tree, tests, failure = fresh("test-ids-none")
+    if failure:
+        return results + [failure]
+    plant(tree, tests[0], "\n# theirs, from the base render\n")
+    _, output = apply(tree)
+    results.append(
+        Result(
+            "test IDs: a change that moves no test says none changed, with a count",
+            bool(re.search(r"test IDs: [1-9]\d* before and after, none changed", output))
+            and "tests-removed: 0" in report_of(tree),
+            time.time() - started,
+            output,
+        )
+    )
 
-    manifest = json.loads((other / manifest_name).read_text(encoding="utf-8"))
+    # The collection failing before the write, from a tree the run then repairs.
+    started = time.time()
+    tree, tests, failure = fresh("test-ids-before")
+    if failure:
+        return results + [failure]
+    plant(tree, tests[0], "\ndef broken(:\n")
+    _, output = apply(tree, "--json")
+    envelope = upgrade.envelope_of(output[output.index("{") :])
+    report = report_of(tree)
+    results.append(
+        Result(
+            "test IDs: a collection that failed before the write is said, and leaves the keys absent",
+            "pytest exited" in (envelope.get("test_ids") or {}).get("failed", {}).get("before", "")
+            and "tests-removed" not in report,
+            time.time() - started,
+            f"{output[-1500:]}\n--- report ---\n{report}",
+        )
+    )
+
+    # The collection failing after: an adopter's test imports what the upgrade takes away.
+    started = time.time()
+    tree, tests, failure = fresh("test-ids-after")
+    if failure:
+        return results + [failure]
+    plant(tree, tests[0], "\nPLANTED = 1\n")
+    (tree / "tests" / "test_mine.py").write_text(
+        "import pytest\n\nfrom tests.%s import PLANTED\n\npytestmark = [pytest.mark.unit]\n\n\n"
+        "def test_mine():\n    assert PLANTED\n" % Path(tests[0]).stem,
+        encoding="utf-8",
+    )
+    _, output = apply(tree)
+    results.append(
+        Result(
+            "test IDs: a collection the upgrade itself broke is said",
+            "after this run: pytest exited" in output and "tests-removed" not in report_of(tree),
+            time.time() - started,
+            output,
+        )
+    )
+
+    # A conflicted test file keeps the adopter's version, so its tests were not measured.
+    started = time.time()
+    tree, tests, failure = fresh("test-ids-conflict")
+    if failure:
+        return results + [failure]
+    plant(tree, tests[0], "\n# theirs, from the base render\n")
+    (tree / tests[1]).write_text((tree / tests[1]).read_text(encoding="utf-8") + "\n# an edit\n", encoding="utf-8")
+    record(tree, tests[1], "0" * 64)
+    _, output = apply(tree)
+    results.append(
+        Result(
+            "test IDs: a conflicted test file is listed as not measured",
+            "Not measured" in output and f"· {tests[1]}" in output,
+            time.time() - started,
+            output,
+        )
+    )
+
+    # `--rehearse` reads the same result out of the applying run's envelope.
+    started = time.time()
+    tree, tests, failure = fresh("test-ids-rehearse")
+    if failure:
+        return results + [failure]
+    plant(tree, tests[0], "\n\ndef test_planted_going_away():\n    pass\n")
+    _, output = apply(tree, "--rehearse", "--quick")
+    results.append(
+        Result(
+            "test IDs: a rehearsal shows the applying run's result",
+            f"- {Path(tests[0]).name}::test_planted_going_away" in output and not (tree / "tmp" / "upgrade").exists(),
+            time.time() - started,
+            output[-2500:],
+        )
+    )
+
+    # Nothing written under tests/: no collection and no line.
+    started = time.time()
+    tree, _tests, failure = fresh("test-ids-quiet")
+    if failure:
+        return results + [failure]
+    manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
     doc = next(r for r in sorted(manifest["files"]) if r.endswith(".md") and not r.startswith("tests/"))
-    manufacture(other, doc)
-    git_in(other, "add", "-A")
-    git_in(other, "commit", "-m", "tamper")
-
-    code, output = run([sys.executable, str(upgrade_bin), str(other), "--no-base", "--allow-untagged"], cwd=other)
+    plant(tree, doc, "\n# theirs, from the base render\n")
+    _, output = apply(tree)
     results.append(
         Result(
-            "collect-diff: a run that touched no test file stays quiet",
-            doc in output and not written_marker(output),
+            "test IDs: a run that touched no test file stays quiet",
+            doc in output and "test IDs:" not in output,
             time.time() - started,
-            f"the manufacture reached the tool: {doc in output}\n{output}",
+            output,
         )
     )
+
+    # Pairing is a rule about two sets, so it is a table rather than a run.
+    pairs = {
+        "a moved file pairs by test name": (["tests/a.py::t"], ["tests/b.py::t"], [("tests/a.py::t", "tests/b.py::t")]),
+        "the one change in a file pairs": (["tests/a.py::t"], ["tests/a.py::u"], [("tests/a.py::t", "tests/a.py::u")]),
+        "two candidates pair with neither": (["tests/a.py::t"], ["tests/b.py::t", "tests/c.py::t"], []),
+        "unrelated tests do not pair": (["tests/a.py::t"], ["tests/b.py::u"], []),
+    }
+    wrong = {k: upgrade.pair_renames(g, n) for k, (g, n, want) in pairs.items() if upgrade.pair_renames(g, n) != want}
+    results.append(Result(f"test IDs: {len(pairs)} rename shapes pair as they should", not wrong, 0.0, str(wrong)))
     return results
 
 
@@ -14349,7 +14312,7 @@ def main() -> int:
         for gate in set_arg_gate(workdir):
             results.append(gate)
 
-        for gate in collect_diff_gate(fullest, workdir, venv_python):
+        for gate in test_id_gate(fullest, workdir, venv_python):
             gate.label = f"{fullest}: {gate.label}"
             results.append(gate)
 

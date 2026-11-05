@@ -89,7 +89,7 @@ import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, NoReturn, Optional, Tuple
+from typing import Any, Callable, Dict, List, NoReturn, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -185,6 +185,9 @@ REPORT_SECTIONS: Tuple[Tuple[str, Optional[str]], ...] = (
 #: The METRICS keys, each a `key: integer` line. One this tool cannot count is
 #: `<fill in>`, which a parser reads as unreported rather than as 0.
 REPORT_METRICS = ("conflicts", "gate-failures-on-arrival", "declines", "findings")
+
+#: `key: integer` lines written only by a run that measured them: absent is unmeasured.
+REPORT_MEASURED = ("tests-removed", "tests-added")
 UNFILLED = "<fill in>"
 CONFLICT_ENTRY = re.compile(r"^- `([^`]+)`:")
 
@@ -225,11 +228,14 @@ def write_report(
     tally: str,
     branch: str,
     previous: Dict[str, List[str]],
+    measured: Optional[Dict[str, int]] = None,
 ) -> Path:
     """`tmp/upgrade/REPORT.md`: what this tool can count filled, the rest prompted or carried forward.
 
     `pending` is counted as conflicts; `unpending` is a sidecar left to read and
-    is listed without being counted (sky.boss's owned dependabot.yml).
+    is listed without being counted (sky.boss's owned dependabot.yml). `measured`
+    adds to what an earlier run of the same upgrade measured, since each run's
+    diff covers only what that run wrote.
     """
     conflicts = [f"- `{rel}`: {what}" for rel, what in pending.items()]
     for line in previous.get("CONFLICTS", []):
@@ -244,12 +250,16 @@ def write_report(
     carried = {}
     for line in previous.get("METRICS", []):
         key, _, value = line.partition(":")
-        if key.strip() in REPORT_METRICS and value.strip().isdigit():
+        if key.strip() in REPORT_METRICS + REPORT_MEASURED and value.strip().isdigit():
             carried[key.strip()] = value.strip()
     carried["conflicts"] = str(len(conflicts))
+    for key, count in (measured or {}).items():
+        carried[key] = str(int(carried.get(key, 0)) + count)
     listed = conflicts + [f"- `{rel}`: {what} (not a conflict)" for rel, what in unpending.items()]
     filled = {
-        "METRICS": tallies + [f"{key}: {carried.get(key, UNFILLED)}" for key in REPORT_METRICS],
+        "METRICS": tallies
+        + [f"{key}: {carried.get(key, UNFILLED)}" for key in REPORT_METRICS]
+        + [f"{key}: {carried[key]}" for key in REPORT_MEASURED if key in carried],
         "BRANCH": previous.get("BRANCH") or [branch],
         "CONFLICTS": listed or ["None."],
     }
@@ -2501,7 +2511,8 @@ def gate_table(tree: Path, quick: bool) -> Tuple[Optional[Dict[str, bool]], str]
     for line in output.splitlines()[rules[-2] + 1 : rules[-1]]:
         row = _GATE_ROW.match(line.strip())
         if row:
-            table[row.group(2)] = row.group(1) == "✅"
+            # Only ❌ is red: `summarize` prints ⏸️ for a gate with no subject, which passes.
+            table[row.group(2)] = row.group(1) != "❌"
     return (table or None), output
 
 
@@ -2663,7 +2674,10 @@ def rehearse(args: argparse.Namespace) -> int:
     (logs / "after.log").write_text(after_out, encoding="utf-8")
     (logs / "hooks-before.log").write_text(hooks_before_out, encoding="utf-8")
     (logs / "hooks-after.log").write_text(hooks_after_out, encoding="utf-8")
-    held_back(applied.stdout)
+    envelope = envelope_of(applied.stdout)
+    held_back(envelope)
+    if envelope.get("test_ids"):
+        report_test_ids(envelope["test_ids"])
     added = sorted(failing_after - failing_before)
     gates = report_rehearsal(before, after, after_out, logs, added)
     hooks = report_hooks(hooks_before, hooks_after, hook_blocks, logs)
@@ -2686,12 +2700,131 @@ def failing_tests(tree: Path) -> set:
     return found
 
 
-def held_back(envelope: str) -> None:
-    """Say when the rehearsed apply left conflicts, so the base never advanced (mind.head)."""
+#: Past this a suite's collection is not worth blocking an upgrade on.
+COLLECT_TIMEOUT = 300
+
+
+def collect_test_ids(tree: Path) -> Tuple[Optional[List[str]], str]:
+    """`(test IDs, "")` from the tree's own interpreter, or `(None, why)`; this writes no cache.
+
+    Nothing else is trusted to read them: pytest's exit code is the verdict, since a
+    collection that was interrupted can still have printed every ID. A clean exit
+    that printed none is an unknown output shape rather than an empty suite, which
+    pytest reports as exit 5.
+    """
+    python = tree / ".venv" / "bin" / "python"
+    if not python.exists():
+        return None, "no .venv/bin/python here, so the tree's own interpreter cannot be asked"
+    command = [str(python), "-m", "pytest", "tests/", "--collect-only", "-q", "-p", "no:cacheprovider"]
     try:
-        payload = json.JSONDecoder().raw_decode(envelope[envelope.index("{") :])[0]
+        done = subprocess.run(
+            command,
+            cwd=tree,
+            capture_output=True,
+            text=True,
+            timeout=COLLECT_TIMEOUT,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"pytest --collect-only ran past {COLLECT_TIMEOUT}s"
+    ids = sorted(line.strip() for line in done.stdout.splitlines() if ".py::" in line)
+    if done.returncode not in (0, 5):
+        tail = (done.stdout + done.stderr).strip().splitlines()[-3:]
+        return None, f"pytest exited {done.returncode}: " + " / ".join(tail)
+    if done.returncode == 0 and not ids:
+        return None, "pytest exited 0 and printed no test IDs"
+    return ids, ""
+
+
+def pair_renames(removed: List[str], added: List[str]) -> List[Tuple[str, str]]:
+    """Removed and added IDs that read as one test renamed: moved file, or the only change in one."""
+    pairs: List[Tuple[str, str]] = []
+
+    def match(key: Callable[[str], str]) -> None:
+        gone: Dict[str, List[str]] = {}
+        new: Dict[str, List[str]] = {}
+        for ids, side in ((removed, gone), (added, new)):
+            for test in ids:
+                if not any(test in pair for pair in pairs):
+                    side.setdefault(key(test), []).append(test)
+        pairs.extend((gone[k][0], new[k][0]) for k in gone if len(gone[k]) == 1 and len(new.get(k, [])) == 1)
+
+    match(lambda test: test.split("::", 1)[1])  # same test name, another file
+    match(lambda test: test.split("::", 1)[0])  # the one change in this file
+    return sorted(pairs)
+
+
+def test_id_diff(
+    before: Tuple[Optional[List[str]], str], after: Tuple[Optional[List[str]], str], conflicted: List[str]
+) -> Dict[str, Any]:
+    """What this run did to the suite, for `report_test_ids`, `--json` and `REPORT.md`."""
+    result: Dict[str, Any] = {
+        "before": None if before[0] is None else len(before[0]),
+        "after": None if after[0] is None else len(after[0]),
+        "failed": {side: why for side, (_, why) in (("before", before), ("after", after)) if why},
+        "not_measured": conflicted,
+    }
+    if before[0] is not None and after[0] is not None:
+        removed = sorted(set(before[0]) - set(after[0]))
+        added = sorted(set(after[0]) - set(before[0]))
+        pairs = pair_renames(removed, added)
+        paired = {test for pair in pairs for test in pair}
+        result["removed"] = [test for test in removed if test not in paired]
+        result["added"] = [test for test in added if test not in paired]
+        result["renamed"] = [list(pair) for pair in pairs]
+    return result
+
+
+def test_id_counts(result: Optional[Dict[str, Any]]) -> Dict[str, int]:
+    """`REPORT.md`'s two keys, where a rename is one removal plus one addition; empty if unmeasured."""
+    if not result or "removed" not in result:
+        return {}
+    renamed = len(result["renamed"])
+    return {
+        "tests-removed": len(result["removed"]) + renamed,
+        "tests-added": len(result["added"]) + renamed,
+    }
+
+
+def report_test_ids(result: Dict[str, Any]) -> None:
+    """Say what the run did to the suite; a total alone can hide five removed and five added."""
+    failed = result["failed"]
+    if failed:
+        say("⚠️ ", "test IDs: not compared, because a side could not be collected")
+        for side, why in failed.items():
+            detail(f"{side} this run: {why}")
+    elif result["removed"] or result["added"] or result["renamed"]:
+        counts = test_id_counts(result)
+        say(
+            "ℹ️ ",
+            f"test IDs: {result['before']} before, {result['after']} after; {counts['tests-removed']} removed and"
+            f" {counts['tests-added']} added, {len(result['renamed'])} of them a rename",
+        )
+        for test in result["removed"]:
+            detail(f"- {test}")
+        for test in result["added"]:
+            detail(f"+ {test}")
+        for old, new in result["renamed"]:
+            detail(f"~ {old} → {new}")
+        detail("Read the list, not its length: a guard moving into a wrapper removes its companion test.")
+    else:
+        say("✅", f"test IDs: {result['after']} before and after, none changed")
+    if result["not_measured"]:
+        detail("Not measured, because each is conflicted and keeps your version:")
+        for rel in result["not_measured"]:
+            item(rel)
+
+
+def envelope_of(output: str) -> Dict[str, Any]:
+    """The `--json` object an applying run printed, or `{}` when none can be read."""
+    try:
+        return json.JSONDecoder().raw_decode(output[output.index("{") :])[0]
     except ValueError:
-        return
+        return {}
+
+
+def held_back(payload: Dict[str, Any]) -> None:
+    """Say when the rehearsed apply left conflicts, so the base never advanced (mind.head)."""
     pending = payload.get("conflicted", []) + payload.get("collided", [])
     if pending and not payload.get("base_advanced"):
         say("⚠️ ", f"the rehearsed apply left {len(pending)} file(s) conflicted, so the base did not advance")
@@ -2870,7 +3003,6 @@ def main() -> int:
     pre_upgrade = head_commit(target)
     # This one before a single byte is written, or it answers about the upgrade's
     # own output rather than about work that was already here.
-    interleaved = bool(args.allow_dirty and uncommitted(target))
 
     manifest = read_manifest(target)
     recorded = manifest.get("args") or []
@@ -3354,6 +3486,13 @@ def main() -> int:
         # whose plan it is; the real run makes the directory true by clearing it.
         stale = sidecars(patches) if args.dry_run else []
         cleared = 0 if args.dry_run else clear_sidecars(patches)
+        # Before any write, so this is the suite the run found. Asked only when the
+        # template moved a test file, which over-approximates what this run will write.
+        ids_before = None
+        if not args.dry_run and any(
+            rel.startswith("tests/") and sha256(path) != hashes.get(rel) for rel, path in head_files.items()
+        ):
+            ids_before = collect_test_ids(target)
 
         # **Measured against the base that will be in force when this is read.**
         #
@@ -3876,6 +4015,11 @@ def main() -> int:
             conflicted + collided + dropped, added + updated + merged, base_files, head_files, target
         )
 
+        test_ids = None
+        if ids_before and any(rel.startswith("tests/") for rel in added + updated + merged):
+            not_measured = sorted(rel for rel in pending if rel.startswith("tests/"))
+            test_ids = test_id_diff(ids_before, collect_test_ids(target), not_measured)
+
         report = None
         if not args.dry_run:
             title = f"{ref} → {head_ref}"
@@ -3914,6 +4058,7 @@ def main() -> int:
                 f"{branch or 'detached HEAD'} from base {slug}@{(pre_upgrade or 'no commit')[:12]};"
                 f" commit: {UNFILLED}",
                 previous,
+                test_id_counts(test_ids),
             )
             kept = " (what you filled in is kept)" if previous else ""
             say("📝", f"{report.relative_to(target)}: the counted sections are filled; the rest are yours{kept}")
@@ -3965,6 +4110,8 @@ def main() -> int:
                         # Whether this run moved the recorded base. A rehearsal reads it:
                         # gates that only fire on the new base cannot have run otherwise.
                         "base_advanced": advanced,
+                        # What this run did to the suite. Null when it wrote nothing under tests/.
+                        "test_ids": test_ids,
                         # Of `conflicted`, the files where none of the lines around
                         # any of the template's changes are in the adopter's file —
                         # a section they removed, or one rewritten past recognition.
@@ -4587,86 +4734,8 @@ def main() -> int:
             say("⚠️ ", f"the base branch is now {base_switch[1]}; in every clone of this repository, run:")
             detail("  git remote set-head origin -a")
 
-        # Only when this run actually wrote a test file, and only on a real run.
-        # Always-on prose in this output gets skimmed, and this instruction earns
-        # attention precisely because it is rare — proto.pilot's point, and the
-        # reason it is conditional rather than a standing line in the footer.
-        touched_tests = sorted(r for r in added + updated + merged if r.startswith("tests/"))
-        if touched_tests and not args.dry_run:
-            say("ℹ️ ", f"{len(touched_tests)} file(s) under tests/ changed — do not verify by counting")
-            detail()
-            detail("A collected-test total is a negative assertion over a set wearing a number's")
-            detail("clothes. One measured upgrade came back 633 before and 633 after with five")
-            detail("tests removed and five added; another went 642 to 641 while coverage rose,")
-            detail("two hand-written guards having become registry-driven ones. A reader")
-            detail("watching the number drew no conclusion from the first and would have drawn")
-            detail("the wrong one from the second. Diff the collected IDs instead:")
-            detail()
-            commit = pre_upgrade or "<the commit you were on before this run>"
-            detail("  PY=$(pwd)/.venv/bin/python          # the worktree gets none of its own")
-            detail("  D=$(mktemp -d)                      # one per run: trees upgraded at once must not share it")
-            detail(f"  git worktree add $D/pre-upgrade {commit}")
-            detail("  $PY -m pytest tests/ --collect-only -q > $D/after.raw || echo '!! after: collection FAILED'")
-            detail("  (cd $D/pre-upgrade && $PY -m pytest tests/ --collect-only -q) > $D/before.raw \\")
-            detail("     || echo '!! before: collection FAILED'")
-            detail("  git worktree remove $D/pre-upgrade")
-            detail("  grep :: $D/before.raw | sort > $D/before.txt")
-            detail("  grep :: $D/after.raw | sort > $D/after.txt")
-            detail("  diff $D/before.txt $D/after.txt")
-            detail()
-            detail("Outside the repository, and not `../` — stash.flow followed an earlier")
-            detail("version of this into a workspace root holding every repo as a sibling, where")
-            detail("a leftover `pre-upgrade/` reads as one more project. A `mktemp -d` is neither:")
-            detail("the machine clears it, and `git worktree prune` collects the registration if the")
-            detail("removal line gets skipped. Fixed `/tmp` names let two trees upgraded together")
-            detail("overwrite each other's IDs and diff the wrong set with no error (the workspace).")
-            detail()
-            detail("It was `tmp/` for two releases, on the argument that a gitignored directory")
-            detail("inside the tree names itself. It does — and it is inside the tree, which is")
-            detail("what the next two paragraphs are about: a recipe whose own scratch is a")
-            detail("member of the population it asks you to diff. proto.pilot's point, and the")
-            detail("reason they are now history rather than instructions. Both hazards below")
-            detail("were caused by the location and are closed by moving it; the *lessons* stay,")
-            detail("because a suite that walks the filesystem is still unstable under any other")
-            detail("scratch that lands in the tree.")
-            detail()
-            detail("The `tests/` scope and the exit-code check are one fix, not two. An unscoped")
-            detail("`pytest` descended into `tmp/pre-upgrade` while the worktree was there, found every")
-            detail("module basename twice, and Interrupts — after writing the right IDs. `grep |")
-            detail("sort` then discards the exit code, so both files are correct, non-empty, and")
-            detail("one of them came out of a run that failed. `diff` reports no change and is")
-            detail("telling the truth about them. A length check cannot see that; the exit code")
-            detail("sees it AND the empty case a length check was written for.")
-            detail()
-            detail("And the same collision one layer up, which `tests/` scoping does NOT prevent:")
-            detail("if any suite here PARAMETRISES over a filesystem walk — a `check every file")
-            detail("for X` gate, which is an ordinary way to write one — its skip set must exclude")
-            detail("whatever scratch is on disk before this comparison means anything. sky.boss")
-            detail("ran the `tmp/` version and got 210")
-            detail("additions of which 205 were spurious: their walk had `.git`, `.venv`, `vendor`,")
-            detail("`node_modules`, `__pycache__` and `dist`, so it collected `tmp/pre-upgrade/**`")
-            detail("— the worktree THIS RECIPE creates — plus `.pytest_cache/README.md`, read for")
-            detail("prose about a product pytest has never heard of. Nothing was ever red. What")
-            detail("was wrong is the population: a parametrised set that moves with whatever")
-            detail("scratch is on disk changes run to run, so the comparison measures the")
-            detail("filesystem rather than the tree. A gate whose subject set is unstable cannot")
-            detail("be diffed, and diffing it is what this recipe asks you to do.")
-            detail()
-            detail("This paragraph used to check the length, and the recipe above used to cause")
-            detail("the failure it could not see — a recipe and its own guard written by one")
-            detail("hand, so the guard was written against the failure that was imagined rather")
-            detail("than the one the recipe produces. Reported by node-zero, who ran it.")
-            detail()
-            detail("EXPECT REMOVALS, and read the list rather than its length. A guard moving")
-            detail("into a wrapper deletes the companion test that used to stand beside it, and")
-            detail("that is this upgrade working correctly — in the measured case three of five")
-            detail("removals were exactly that and a fourth was a relocation. Somebody running")
-            detail("this expecting a clean bill either panics or decides the check is noisy, and")
-            detail("the second one costs more.")
-            if interleaved:
-                detail()
-                detail("--allow-dirty: the commit above is the last COMMIT, not the tree this run")
-                detail("started from. Your own uncommitted edits are in that diff too.")
+        if test_ids:
+            report_test_ids(test_ids)
 
         # **Standing state is not work, and this test is about work.** `declined`
         # and `dropped` are both permanent by construction — a file you deleted
