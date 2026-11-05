@@ -722,8 +722,12 @@ def check_adopter_regions_stay_empty(tree: Path) -> List[Result]:
     return results
 
 
-def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
-    """The tree's own checks, run the way its user would run them."""
+def gates(tree: Path, venv_python: Path, pyright_ok: bool, adopted: bool = False) -> List[Result]:
+    """The tree's own checks, run the way its user would run them.
+
+    `adopted` says the caller planted code of the adopter's that the suite
+    measures, which the fresh-tree baseline refusal must not be asked about.
+    """
     results = []
 
     started = time.time()
@@ -767,7 +771,8 @@ def gates(tree: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
     # on. It puts them back, and running it after everything else means a
     # cleanup that ever fails is a failure of this gate rather than a puzzle in
     # the next one.
-    results += check_the_baseline_is_refused_on_a_fresh_tree(tree, venv_python)
+    if not adopted:
+        results += check_the_baseline_is_refused_on_a_fresh_tree(tree, venv_python)
     return results
 
 
@@ -13933,6 +13938,190 @@ def round_v0722_gates(workdir: Path, venv_python: Path, fullest: str) -> List[Re
     return results
 
 
+#: An adopter's own command group, script and workflow: the files a real tree
+#: adds and skeletor never wrote. `check` reads the corpus's history, as
+#: breeze-brain's `corpus check` does.
+ADOPTER_FILES = {
+    "@SHELL@/corpus.py": '''"""The adopter's own command group, planted by skeletor-verify."""
+
+from __future__ import annotations
+
+import click
+
+from .helpers import ok, script
+
+#: tests/test_cli_smoke.py runs this module's argument-less commands for real.
+SMOKE_EXECUTES = True
+
+
+@click.group()
+def corpus() -> None:
+    """The product's corpus."""
+
+
+@corpus.command()
+def status() -> None:
+    """Say the corpus is here."""
+    ok("corpus present")
+
+
+@corpus.command()
+def check() -> None:
+    """Count the corpus's history."""
+    raise SystemExit(script("scripts/corpus_history.py"))
+''',
+    "scripts/corpus_history.py": '''"""How many commits the corpus has, planted by skeletor-verify."""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.output import ok  # noqa: E402
+from scripts.paths import PROJECT_ROOT  # noqa: E402
+
+
+def main() -> int:
+    count = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    ok(f"{count} commit(s) in the corpus")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+''',
+    ".github/workflows/corpus.yml": """name: Corpus
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r scripts/requirements.txt
+      - run: ./@CLI@ corpus check
+""",
+}
+
+#: The adopter's gate, appended inside `scripts/gates.py`'s space.
+ADOPTER_GATE = 'DOCS_GATES += [Gate("corpus history", "scripts/corpus_history.py")]'
+
+
+def _plant_swap(path: Path, old: str, new: str) -> str:
+    """Replace `old` in `path`, asserting it was there; returns the original text."""
+    original = path.read_text(encoding="utf-8")
+    if old not in original:
+        raise AssertionError(f"plant target {old!r} is not in {path}")
+    path.write_text(original.replace(old, new, 1), encoding="utf-8")
+    return original
+
+
+def adopter_tree_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: bool) -> List[Result]:
+    """A tree holding the adopter's own command, script, workflow and gate passes, and is SEEN.
+
+    Every other fixture holds only skeletor's files, so a release that changes
+    how adopter files are treated is green here and silent there: v0.73.0's smoke
+    opt-in dropped adopters' own commands to `--help` and every gate passed. So
+    `gates()` must pass, and then each of the tree's own checks must be shown to
+    reach the adopter's file: a plant on that file turns it red.
+    """
+    started = time.time()
+    target = workdir / "adopter-tree"
+    code, output = run(
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--name",
+            "Adopter",
+            "--slug",
+            "adopter",
+            "--tagline",
+            "t",
+            "--cli",
+            CLI_NAME,
+            "--tier",
+            tier,
+            "--language",
+            "python",
+        ],
+        cwd=workdir,
+    )
+    if code != 0:
+        return [Result("adopter tree: scaffold", False, time.time() - started, output)]
+    package = shell_package(target).name
+    for rel, text in ADOPTER_FILES.items():
+        path = target / rel.replace("@SHELL@", package)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text.replace("@CLI@", CLI_NAME), encoding="utf-8")
+    gates_py = target / "scripts" / "gates.py"
+    closer = "\n\n\n# ── Skeletor's again"
+    _plant_swap(gates_py, closer, f"\n\n{ADOPTER_GATE}{closer}")
+    # Amended, as product_package_gate does: one commit is what the tree asserts.
+    run(["git", "add", "-A"], cwd=target)
+    run(["git", "commit", "--amend", "--no-edit"], cwd=target)
+    (target / ".venv").symlink_to(venv_python.parents[1])
+
+    results: List[Result] = []
+    for gate in gates(target, venv_python, pyright_ok, adopted=True):
+        gate.label = f"adopter tree: {gate.label}"
+        results.append(gate)
+
+    workflow = target / ".github" / "workflows" / "corpus.yml"
+    command = target / package / "corpus.py"
+    history = target / "scripts" / "corpus_history.py"
+    plants = (
+        (
+            "history check names the adopter's shallow job",
+            workflow,
+            "          fetch-depth: 0\n",
+            "",
+            ("tests/test_ci_job_settings.py",),
+            "corpus.yml:corpus",
+        ),
+        (
+            "smoke test names the adopter's undeclared module",
+            command,
+            "\nSMOKE_EXECUTES = True\n",
+            "\n",
+            ("tests/test_cli_smoke.py",),
+            "corpus",
+        ),
+        ("check docs runs the adopter's gate", history, "    return 0\n", "    return 1\n", None, "corpus history"),
+    )
+    for label, path, old, new, tests, needle in plants:
+        began = time.time()
+        original = _plant_swap(path, old, new)
+        try:
+            if tests is None:
+                code, output = run([f"./{CLI_NAME}", "check", "docs"], cwd=target)
+            else:
+                code, output = _tree_pytest(target, venv_python, *tests)
+        finally:
+            path.write_text(original, encoding="utf-8")
+        results.append(
+            Result(f"adopter tree: {label}", code != 0 and needle in output, time.time() - began, output[-1500:])
+        )
+    return results
+
+
 def main() -> int:
     scaffolder = load_scaffolder()
     all_tiers = sorted(scaffolder.TIERS)
@@ -14177,6 +14366,11 @@ def main() -> int:
 
         for gate in round_v0722_gates(workdir, venv_python, fullest):
             gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
+
+        # Every fixture above holds only skeletor's files; this one holds the
+        # adopter's too, and asks whether each check still reaches them.
+        for gate in adopter_tree_gate(fullest, workdir, venv_python, pyright_ok):
             results.append(gate)
 
         for gate in long_path_gate(fullest, workdir, venv_python):
