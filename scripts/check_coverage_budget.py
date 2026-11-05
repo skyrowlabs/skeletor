@@ -9,8 +9,8 @@ The tolerance absorbs honest run-to-run variance (an env-gated branch, a
 skipped optional dependency) without absorbing a real regression.
 
 Usage:
-    pytest --cov --cov-report=xml:tmp/coverage.xml && python scripts/check_coverage_budget.py --suite unit
-    python scripts/check_coverage_budget.py --suite unit --json
+    pytest --cov --cov-report=xml:tmp/coverage.xml && python scripts/check_coverage_budget.py --suite scheduled
+    python scripts/check_coverage_budget.py --suite scheduled --json
 
 `--json` reports on **every** path, including the ones that pass. A ratchet a
 dashboard can only read when it is red tells you nothing about the direction it
@@ -123,6 +123,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -133,8 +134,9 @@ from typing import NamedTuple
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import manifest  # noqa: E402
-from scripts.output import detail, emit, fail, ok  # noqa: E402
-from scripts.paths import PROJECT_ROOT, SCAFFOLD_MANIFEST, TESTS_DIR, TMP_DIR  # noqa: E402
+from scripts.output import detail, emit, fail, ok, warn  # noqa: E402
+from scripts.paths import GITHUB_DIR, PROJECT_ROOT, SCAFFOLD_MANIFEST, TESTS_DIR, TMP_DIR  # noqa: E402
+from scripts.yaml_text import read_uncommented  # noqa: E402
 
 BUDGET = TESTS_DIR / "coverage_budget.json"
 DEFAULT_XML = TMP_DIR / "coverage.xml"
@@ -335,6 +337,38 @@ def compare(suite: str, entry: dict, tolerance: float, reading: Reading) -> tupl
     return {"state": "within", **measured}, 0
 
 
+#: What a workflow runs to reach this check: the script, or the CLI command
+#: wrapping it, which is the one the warning below recommends (sky.vault).
+INVOCATION = re.compile(rf"{re.escape(Path(__file__).name)}|\btest\s+coverage\b")
+
+
+def runners() -> list[str]:
+    """The workflows that name this check, comments masked: a TODO naming it runs nothing.
+
+    Named is all a file can say. Whether GitHub runs that workflow (a disabled
+    one is still on disk) is `skel doctor`'s question (stash.flow).
+    """
+    workflows = sorted((GITHUB_DIR / "workflows").glob("*.y*ml"))
+    return [path.name for path in workflows if INVOCATION.search(read_uncommented(path))]
+
+
+def floor_of(suite: str) -> float:
+    """The floor stored for `suite`, either basis; 0 for none."""
+    entry = json.loads(BUDGET.read_text(encoding="utf-8"))["suites"].get(suite) or {}
+    return max(float(entry.get("baseline_pct") or 0), float(entry.get("own_baseline_pct") or 0))
+
+
+def unnamed(named_by: list[str], floor: float) -> None:
+    """Say so when a floor above 0 is named by no workflow: it bites only by hand.
+
+    Quiet at 0, where there is nothing to enforce yet (node-zero).
+    """
+    if named_by or floor <= 0:
+        return
+    warn(f"no workflow under .github/workflows runs this check, so the {floor:.2f}% floor holds only by hand")
+    detail("Add a scheduled workflow step that runs `skel test coverage`.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     # Repeatable, joined as `test coverage` joins it: a second `--suite` silently
@@ -344,12 +378,16 @@ def main() -> int:
     parser.add_argument("--update", action="store_true", help="record the observed percentage as the new baseline")
     parser.add_argument("--json", action="store_true", help="the machine-readable result on stdout")
     args = parser.parse_args()
-    args.suite = "+".join(args.suite or ["unit"])
+    args.suite = "+".join(args.suite or ["scheduled"])
+
+    named_by = runners()
 
     def done(payload: dict, status: int) -> int:
         """One exit, one payload. Emitting per-branch is how a path loses its."""
+        if BUDGET.exists():
+            unnamed(named_by, floor_of(args.suite))
         if args.json:
-            emit({"suite": args.suite, **payload})
+            emit({"suite": args.suite, **payload, "named_by": named_by})
         return status
 
     if not args.xml.exists():
@@ -377,7 +415,7 @@ def main() -> int:
     unrecorded = entry is None
     if unrecorded:
         # **No entry is the floor a new suite starts at, 0.00%**, the same value the
-        # shipped `unit` entry holds. Failing here made `test coverage --suite unit
+        # shipped `scheduled` entry holds. Failing here made `test coverage --suite unit
         # --suite ui` red in every fresh tree, where `--update` rightly refuses to
         # record anything (dream-doll, sky.boss). Nothing is written by a check.
         entry = {"baseline_pct": 0.0}

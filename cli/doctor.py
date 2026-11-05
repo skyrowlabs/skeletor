@@ -408,6 +408,66 @@ def dependabot_alerts(repo: dict | None = None) -> Fact:
     return Fact(name, OK, f"on — {repo_settings.ALERTS_WHY}")
 
 
+def security_updates(repo: dict | None = None) -> Fact:
+    """On or off, from `automated-security-fixes`, judged only by a token that can see it.
+
+    Version updates never bump a transitive dependency, so without these a known
+    vulnerability there is reported and never fixed (sky.boss's undici).
+    """
+    name = "Dependabot security updates"
+    try:
+        admin = bool(_repo(repo).get("permissions", {}).get("admin"))
+    except Unreadable:
+        admin = False
+    try:
+        answer = gh_api("repos/{owner}/{repo}/automated-security-fixes")
+    except Unreadable as error:
+        if error.status != 404:
+            return Fact(name, UNKNOWN, str(error))
+        if not admin:
+            return Fact(name, UNKNOWN, "GitHub answers 404 to a token that is not an admin, on or off")
+        answer = {}
+    if not (answer or {}).get("enabled"):
+        return Fact(name, PROBLEM, f"off; should be on — {repo_settings.SECURITY_UPDATES_WHY}. {APPLY} turns them on")
+    return Fact(name, OK, f"on — {repo_settings.SECURITY_UPDATES_WHY}")
+
+
+def coverage_runners_enabled() -> Fact:
+    """Every workflow naming the coverage check is enabled, or held off on purpose (stash.flow).
+
+    A disabled workflow is still on disk, so only GitHub can say it is off, and
+    only `HELD_WORKFLOWS` can say somebody meant it.
+    """
+    from scripts import allowlist
+    from scripts.check_coverage_budget import runners
+
+    name = "the workflows that run the coverage floor are enabled"
+    named = runners()
+    if not named:
+        return Fact(name, NOT_APPLICABLE, "no workflow names the coverage check")
+    held = allowlist.read(repo_settings.HELD_WORKFLOWS)
+    off: list[str] = []
+    kept: list[str] = []
+    stale: list[str] = []
+    for workflow in named:
+        try:
+            state = (gh_api("repos/{owner}/{repo}/actions/workflows/" + workflow) or {}).get("state")
+        except Unreadable as error:
+            return Fact(name, UNKNOWN, str(error))
+        if state == "active" and workflow in held:
+            stale.append(f"{workflow}: held in {repo_settings.HELD_WORKFLOWS.name}, but GitHub runs it")
+        elif state != "active":
+            (kept if workflow in held else off).append(f"{workflow} ({state})")
+    if off or stale:
+        said = [f"{', '.join(off)}: GitHub runs none of it, so nothing holds the floor"] if off else []
+        tail = f" {allowlist.STALE_ADVICE}" if stale else ""
+        return Fact(name, PROBLEM, "; ".join(said + stale) + tail)
+    if kept:
+        reasons = "; ".join(f"{entry}: {held[entry.split(' ')[0]]}" for entry in kept)
+        return Fact(name, NOT_APPLICABLE, f"disabled on purpose, so the floor holds only by hand — {reasons}")
+    return Fact(name, OK, ", ".join(named))
+
+
 def labels_exist() -> Fact:
     """Every label dependabot.yml or a workflow applies exists; Dependabot drops one that does not."""
     name = "labels Dependabot and the workflows apply exist"
@@ -438,6 +498,8 @@ def gather() -> list[Fact]:
         codeowners(),
         *repository_settings(repo),
         dependabot_alerts(repo),
+        security_updates(repo),
+        coverage_runners_enabled(),
         labels_exist(),
     ]
 

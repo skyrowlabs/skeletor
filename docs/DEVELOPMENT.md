@@ -88,7 +88,7 @@ pytestmark = [pytest.mark.unit]
 ./skel test all              # everything except `manual`
 ./skel test unit --ci        # reproduce CI's skip semantics locally
 ./skel test coverage -w 20   # the worst-covered modules — where a test buys most
-./skel test coverage --suite unit --suite ui   # measure suites together, budgeted as unit+ui
+./skel test coverage --suite unit --suite ui   # only these suites, budgeted as unit+ui
 ```
 
 `--ci` sets `SKEL_CI=1`, under which an env-gate skip becomes a **failure**.
@@ -206,6 +206,15 @@ SKEL_PYTHON=.venv-ci/bin/python ./skel check pre-push   # 3. CI's exact interpre
 Step 3 matters more than it looks. A local venv that has drifted from CI's
 pinned interpreter produces failures that exist in one environment and not the
 other, and the tool names are identical, so the version never occurs to anyone.
+
+### After an upgrade
+
+An upgrade that writes leaves `tmp/upgrade/REPORT.md` behind: the conflict
+count, the base it started from and each pending file are filled in, and every
+other section says in a comment what belongs there. Fill those in, whoever ran
+it, so every upgrade of this tree is reported the same way. A second run of the
+same upgrade, such as `--ported`, keeps what you wrote and marks a conflict you
+resolved; an upgrade to a different version starts the file again.
 
 ### A scheduled workflow
 
