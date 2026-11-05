@@ -306,10 +306,19 @@ def substitutions(args) -> Dict[str, str]:
             if args.language in ("node", "both")
             else ""
         ),
-        # A node tree's package.json carries the version too; Release Please bumps it
-        # only where `$.version` exists, so a package.json without one is untouched.
+        # A node tree's package.json and its lockfile carry the version too (dream-doll);
+        # Release Please bumps a path only where it exists, so a file without one is untouched.
         "RELEASE_EXTRA_FILES": (
-            '[{ "type": "json", "path": "package.json", "jsonpath": "$.version" }]'
+            "[\n"
+            + ",\n".join(
+                f'        {{ "type": "json", "path": "{path}", "jsonpath": "{where}" }}'
+                for path, where in (
+                    ("package.json", "$.version"),
+                    ("package-lock.json", "$.version"),
+                    ("package-lock.json", "$.packages[''].version"),
+                )
+            )
+            + "\n      ]"
             if args.language in ("node", "both")
             else "[]"
         ),
