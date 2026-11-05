@@ -13,12 +13,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.paths import PROJECT_ROOT  # noqa: E402
 from scripts.prose import BARE, COMMAND, MASKS, offences  # noqa: E402
-from tests.repo_files import present  # noqa: E402
+from tests.repo_files import changelogs, present  # noqa: E402
 from tests.scanning import scanned  # noqa: E402
 
 
 def test_the_command_is_never_the_project_in_prose():
-    files = scanned([p for suffix in MASKS for p in present(f"*{suffix}")], "prose-bearing files", least=20)
+    generated = changelogs()
+    candidates = [p for suffix in MASKS for p in present(f"*{suffix}")]
+    prose = [p for p in candidates if p.relative_to(PROJECT_ROOT).as_posix() not in generated]
+    files = scanned(prose, "prose-bearing files", least=20)
     found = [hit for path in files for hit in offences(path, PROJECT_ROOT)]
     assert not found, (
         f"`{COMMAND}` used in prose, where {{PROJECT_NAME}} is meant — write the name, "
