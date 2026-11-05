@@ -608,6 +608,13 @@ failing gate) and the check that should reach it must go red naming it. The
 workspace named the class: *safe for the template's files, silent about the
 adopter's.*
 
+`test_id_gate` drives the applying run's test-ID diff through the real tool. An
+applying run that wrote under `tests/` collects with the tree's own interpreter
+before and after, and reports IDs rather than totals, because one measured upgrade
+went 633 to 633 with five removed and five added. pytest's exit code is the
+verdict, since an interrupted collection can still print every ID. A rehearsal
+reads the same result out of the applying run's `--json`.
+
 The lint gates exist because their absence shipped: a scaffold once carried 19
 files `black` would rewrite, 20 imports `flake8` rejects, and markdown
 `prettier` re-pads. `pre-commit run --all-files` — the first command the README
@@ -1583,6 +1590,21 @@ interlock, and which you cannot understand from one file:
   looked at nothing. It asserts the clone is not shallow rather than trusting it,
   which turns that silent pass into a loud failure; the fetch depth is what makes
   it pass honestly instead.
+
+- **The exit contract.** `scripts/output.py` names four codes, per command: 0
+  green with a count, 1 red, 2 refused because the instrument could not measure,
+  3 no subject. `summarize` passes a 3 and names the gate. `check scheduled` is
+  the one command that exits 3, and a stop on a step the rehearsal cannot stand
+  in for counts, because the sweep would otherwise make 3 unreachable. One line
+  can say `no subject` while the command exits 0: `check_doc_links.py` read its
+  documents, and a fresh tree holds no fragment links. So does
+  `check_commit_subjects.py` over an empty range, because CI runs it directly and
+  any non-zero code is red there.
+- **Revert subjects.** `git revert` runs no commit-msg hook, so the hook and
+  `check_commit_subjects.py` strip `Revert "..."` and `Reapply "..."` and judge
+  the subject inside. Release Please's parser drops both forms (measured on
+  17.11.2, the `^17.6.0` range action v5 pins), so the gate counts them apart
+  from what it calls readable and `docs/rules/commits.md` says what that costs.
 
 ---
 
