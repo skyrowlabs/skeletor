@@ -2334,6 +2334,14 @@ def absent_hunks(base: str, theirs: str, ours: str) -> Tuple[int, int]:
     return absent, hunks
 
 
+def only_adds(base: str, ours: str) -> bool:
+    """Whether the template's change from `base` to `ours` inserts lines and removes none."""
+    import difflib
+
+    tags = {tag for tag, *_ in difflib.SequenceMatcher(None, base.splitlines(), ours.splitlines()).get_opcodes()}
+    return "insert" in tags and not tags & {"delete", "replace"}
+
+
 def unified(base: str, ours: str, rel: str) -> str:
     import difflib
 
@@ -3398,6 +3406,7 @@ def main() -> int:
         #: `{conflicted path: hunks}` where none of the lines around any hunk are
         #: in the adopter's file. See `absent_hunks`.
         orphaned: Dict[str, int] = {}
+        additions: set = set()
 
         for rel in sorted(set(base_files) | set(head_files)):
             if rel in GENERATED or rel == MANIFEST_NAME:
@@ -3597,6 +3606,8 @@ def main() -> int:
                 gone, hunks = absent_hunks(base, theirs, ours)
                 if hunks and gone == hunks:
                     orphaned[rel] = hunks
+                    if only_adds(base, ours):
+                        additions.add(rel)
                 if normaliser.applies(rel) and not touches_code(base, ours):
                     comment_only.append(rel)
                 # The counterfactual, computed only for a file that already
@@ -3958,6 +3969,8 @@ def main() -> int:
                         # any of the template's changes are in the adopter's file —
                         # a section they removed, or one rewritten past recognition.
                         "conflicts_without_anchor": sorted(orphaned),
+                        # Of those, the ones whose change only adds lines: not "nothing to port".
+                        "conflicts_only_adding": sorted(additions),
                         # A subset of `conflicted`, so a machine consumer can
                         # tell a decision to port from a formatter's opinion
                         # without re-running the merge to find out.
@@ -4065,6 +4078,14 @@ def main() -> int:
             """The note a conflict carries when its change has nowhere to land."""
             if rel not in orphaned:
                 return ""
+            if rel in additions:
+                # A pure addition is not about the lines around it, so a missing
+                # anchor says nothing about wanting it: v0.73.0's actionlint step
+                # sat beside a `black` step two trees did not have (mind-head).
+                return (
+                    f"  — the context around its {orphaned[rel]} patch hunk(s) is not in your file, but"
+                    " the change only ADDS lines: place them where they belong in yours"
+                )
             return (
                 f"  — none of the lines in its {orphaned[rel]} patch hunk(s) are in your file:"
                 " if you removed that part, there is nothing to port"

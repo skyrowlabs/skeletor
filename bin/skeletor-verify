@@ -11933,6 +11933,15 @@ def absent_region_gate() -> Result:
         gone, hunks = upgrader.absent_hunks(base, theirs, ours)
         if gone:
             problems.append(f"{label}: {gone} of {hunks} hunks called absent — expected none")
+    # A pure addition is told apart, since "nothing to port" would drop it: v0.73.0's
+    # actionlint step, beside a `black` step two trees did not have (mind-head).
+    added = [run(["git", "show", f"{tag}:{rel}"], cwd=SKELETOR) for tag in ("v0.72.2", "v0.73.0")]
+    if any(code != 0 for code, _ in added):
+        problems.append("the v0.72.2/v0.73.0 fixture is not in this checkout's tags")
+    elif not upgrader.only_adds(added[0][1], added[1][1]):
+        problems.append("v0.73.0's ci.yml change (one added step) does not read as only adding")
+    if upgrader.only_adds(base, base.replace("name: CI\n", "name: CI2\n", 1)):
+        problems.append("a reworded line reads as only adding")
     return Result(
         "absent region: a removed section is told apart from an edited one",
         not problems,
@@ -13547,7 +13556,7 @@ def release_extra_files_gate(node_tree: Path, python_tree: Path, venv_python: Pa
     started = time.time()
     results: List[Result] = []
     config = ".github/release-please-config.json"
-    for tree, wanted in ((node_tree, ["package.json"]), (python_tree, [])):
+    for tree, wanted in ((node_tree, ["package.json", "package-lock.json", "package-lock.json"]), (python_tree, [])):
         data = json.loads((tree / config).read_text(encoding="utf-8"))
         named = [entry.get("path") for package in data["packages"].values() for entry in package.get("extra-files", [])]
         results.append(
@@ -13565,11 +13574,29 @@ def release_extra_files_gate(node_tree: Path, python_tree: Path, venv_python: Pa
             verdicts[planted] = _tree_pytest(node_tree, venv_python, "tests/test_version_follows_the_tag.py")
     finally:
         package.write_text(original, encoding="utf-8")
+    lock = node_tree / "package-lock.json"
+    lock.write_text(
+        json.dumps({"version": version, "packages": {"": {"version": "9.9.9"}}}, indent=2) + "\n", encoding="utf-8"
+    )
+    try:
+        verdicts["lock"] = _tree_pytest(node_tree, venv_python, "tests/test_version_follows_the_tag.py")
+    finally:
+        lock.unlink()
+    results.append(
+        Result(
+            "package-lock.json's packages[''] version is held to VERSION (dream-doll)",
+            verdicts["lock"][0] != 0
+            and "package-lock.json at $.packages[''].version says 9.9.9" in verdicts["lock"][1],
+            0.0,
+            verdicts["lock"][1][-800:],
+        )
+    )
+    del verdicts["lock"]
     results.append(
         Result(
             "package.json's version is held to VERSION: red when it differs, green when equal",
             verdicts["9.9.9"][0] != 0
-            and "package.json says 9.9.9" in verdicts["9.9.9"][1]
+            and "package.json at $.version says 9.9.9" in verdicts["9.9.9"][1]
             and verdicts[version][0] == 0,
             time.time() - started,
             "\n".join(output[-800:] for _, output in verdicts.values()),
@@ -13610,18 +13637,31 @@ def smoke_opt_in_gate(tree: Path, venv_python: Path) -> List[Result]:
     plant, ran = package / "planted_op.py", tree / "tmp" / "smoke-ran"
     try:
         verdicts = {}
-        for label, opt_in in (("opted out", ""), ("opted in", "\nSMOKE_EXECUTES = True\n")):
+        for label, opt_in in (
+            ("undeclared", ""),
+            ("opted out", '\nSMOKE_EXECUTES = "planted: touches a host"\n'),
+            ("opted in", "\nSMOKE_EXECUTES = True\n"),
+        ):
             ran.unlink(missing_ok=True)
             plant.write_text(SMOKE_PLANT.format(opt_in=opt_in), encoding="utf-8")
-            code, output = _tree_pytest(tree, venv_python, "tests/test_cli_smoke.py", "-k", "read_only or help")
+            code, output = _tree_pytest(tree, venv_python, "tests/test_cli_smoke.py")
             verdicts[label] = (code, ran.exists(), output)
         _, listed = run([f"./{CLI_NAME}", "--help"], cwd=tree)
     finally:
         plant.unlink(missing_ok=True)
         ran.unlink(missing_ok=True)
+    code, executed, output = verdicts["undeclared"]
+    results.append(
+        Result(
+            "smoke: a module that says nothing fails, named, and is not executed",
+            code != 0 and "planted_op" in output and not executed,
+            0.0,
+            output[-1500:],
+        )
+    )
     code, executed, output = verdicts["opted out"]
     results.append(
-        Result("smoke: an un-opted adopter command is not executed", code == 0 and not executed, 0.0, output[-1500:])
+        Result("smoke: a module giving a reason is not executed", code == 0 and not executed, 0.0, output[-1500:])
     )
     code, executed, output = verdicts["opted in"]
     results.append(Result("smoke: SMOKE_EXECUTES = True makes it run", code == 0 and executed, 0.0, output[-1500:]))
