@@ -236,6 +236,57 @@ def long_lived_branches(base: str, release: str) -> List[str]:
     return [base] if base == release else [base, release]
 
 
+def black_stable_string(value: str, column: int, width: int) -> str:
+    """`value` as a python literal starting at `column`, in the form black leaves alone.
+
+    One line when it fits; else parenthesised; else split at spaces into implicit
+    concatenation, one piece per line. A long `--tagline` was black-red on day one
+    (breeze-brain). `column` is the width of the one assignment that uses it.
+    """
+
+    def quoted(text: str) -> str:
+        # Black keeps double quotes unless single ones need fewer escapes.
+        dumped = json.dumps(text, ensure_ascii=False)
+        if text.count("'") < text.count('"'):
+            return "'" + dumped[1:-1].replace('\\"', '"').replace("'", "\\'") + "'"
+        return dumped
+
+    literal = quoted(value)
+    if column + len(literal) <= width:
+        return literal
+    if 4 + len(literal) <= width:
+        return f"(\n    {literal}\n)"
+    pieces: List[str] = []
+    for word in re.findall(r"\S+\s*", value) or [value]:
+        if pieces and 4 + len(quoted(pieces[-1] + word)) <= width:
+            pieces[-1] += word
+        else:
+            pieces.append(word)
+    return "(\n" + "".join(f"    {quoted(piece)}\n" for piece in pieces) + ")"
+
+
+#: Files whose lines are independent rules, so an adopter's copy appended below
+#: skeletor's loses nothing; overwriting `.gitignore` dropped breeze-brain's
+#: `logs/` and `models/`. The manifest still records the render, so the next
+#: upgrade reads the file as edited and merges it.
+KEPT_BELOW = {".gitignore": "# ── Kept from this repository's .gitignore before skeletor ──"}
+
+
+def keep_theirs_below(target: Path, before_text: Dict[str, str], collided: Set[str]) -> List[str]:
+    """Append the adopter's own copy of each `KEPT_BELOW` file under its header."""
+    merged = []
+    for rel, header in KEPT_BELOW.items():
+        theirs = before_text.get(rel)
+        if rel not in collided or theirs is None:
+            continue
+        path = target / rel
+        ours = path.read_text(encoding="utf-8")
+        if theirs.strip() and theirs != ours:
+            path.write_text(ours.rstrip("\n") + f"\n\n{header}\n" + theirs, encoding="utf-8")
+        merged.append(rel)
+    return merged
+
+
 def substitutions(args) -> Dict[str, str]:
     slug = args.slug or Path(args.target).resolve().name
     cli = args.cli or re.sub(r"[^a-z0-9]", "", slug.lower())[:8] or "run"
@@ -255,9 +306,16 @@ def substitutions(args) -> Dict[str, str]:
             if args.language in ("node", "both")
             else ""
         ),
+        # A node tree's package.json carries the version too; Release Please bumps it
+        # only where `$.version` exists, so a package.json without one is untouched.
+        "RELEASE_EXTRA_FILES": (
+            '[{ "type": "json", "path": "package.json", "jsonpath": "$.version" }]'
+            if args.language in ("node", "both")
+            else "[]"
+        ),
         "CODEOWNER_PREFIX": "" if args.owner else "# ",
         # The tagline as a python string literal, for the one file that holds it as data.
-        "TAGLINE_PY": json.dumps(args.tagline, ensure_ascii=False),
+        "TAGLINE_PY": black_stable_string(args.tagline, len("DESCRIPTION = "), args.line_length),
         "BADGES": badges(args, slug),
         "CLI": cli,
         "CLI_ENV_PREFIX": prefix,
@@ -1285,6 +1343,10 @@ def report_a_dry_run(target: Path, pre_existing: Set[str], overlays: List[str], 
         # is worth most: here nothing has been lost yet. A dry run that named
         # only the filenames would be the weaker half of a pair whose whole
         # purpose is to be read BEFORE the destructive one.
+        for rel in [rel for rel in collides if rel in KEPT_BELOW]:
+            print(f"ℹ️  {rel} already exists here: yours would be kept whole, below skeletor's")
+        collides = [rel for rel in collides if rel not in KEPT_BELOW]
+    if collides:
         print(f"⚠️  {len(collides)} of them already exist here and WOULD BE OVERWRITTEN:")
         for rel in collides:
             print(f"   · {rel}")
@@ -1598,7 +1660,10 @@ def main() -> int:
     # complete. Found by building `--dry-run` and comparing its prediction
     # against this list; they are the same set by construction now, which is
     # what makes the prediction worth anything.
-    overwritten = sorted(pre_existing.intersection(produced))
+    merged = keep_theirs_below(target, before_text, pre_existing.intersection(produced))
+    for rel in merged:
+        print(f"ℹ️  {rel}: yours is kept whole, below skeletor's, under a marked header")
+    overwritten = sorted(pre_existing.intersection(produced) - set(merged))
     if overwritten:
         # Loudly, and by name. `--force` writes over whatever is in its way and
         # the losses are silent by construction: a file that is gone raises
