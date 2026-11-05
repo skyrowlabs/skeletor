@@ -15,6 +15,9 @@ The `conventional-commit-check` hook (commit-msg stage) **rejects any message wi
 one subject line**. That is deliberate: a message with three `feat:` lines in it is three
 commits wearing one hat, and the changelog generator will take only the first.
 
+**`git revert` runs no commit-msg hook**, so its `Revert "<subject>"`, and `Reapply "<subject>"`
+for a revert of a revert, are accepted here and in CI when the subject inside is valid.
+
 ## Rules
 
 1. **ONE subject line** for the entire commit — never repeat the type prefix per file.
