@@ -597,6 +597,17 @@ declined for the same reason it would have been wrong: it has no producer here,
 and **a view whose label nothing can create is empty forever, which is exactly
 what a drained queue looks like.**
 
+The **adopter tree** gate holds the adopter's files as well as skeletor's: a
+command group of its own in the shell, a script that command runs, a workflow
+job calling it, and a gate appended to `scripts/gates.py`. Every other fixture
+holds only what skeletor wrote, so a release that changes how *adopter* files
+are treated is green here and silent there — v0.73.0's smoke opt-in dropped
+adopters' commands to `--help` and every gate passed. `gates()` runs on it, and
+then each adopter file is planted (a shallow checkout, an undeclared module, a
+failing gate) and the check that should reach it must go red naming it. The
+workspace named the class: *safe for the template's files, silent about the
+adopter's.*
+
 The lint gates exist because their absence shipped: a scaffold once carried 19
 files `black` would rewrite, 20 imports `flake8` rejects, and markdown
 `prettier` re-pads. `pre-commit run --all-files` — the first command the README
