@@ -47,9 +47,9 @@ def test_the_manifest_agrees_with_version():
     if not VERSION.exists():
         return  # versioned by tag alone
     recorded = json.loads(MANIFEST.read_text(encoding="utf-8")).get(".")
-    assert (
-        recorded == VERSION.read_text(encoding="utf-8").strip()
-    ), f"{MANIFEST.name} says {recorded!r} and VERSION says otherwise; Release Please reads the manifest"
+    version = VERSION.read_text(encoding="utf-8").strip()
+    disagree = f"{MANIFEST.name} says {recorded!r} and VERSION {version!r}"
+    assert recorded == version, f"{disagree}; Release Please reads the manifest"
 
 
 def test_version_is_not_behind_the_newest_tag():
@@ -57,10 +57,11 @@ def test_version_is_not_behind_the_newest_tag():
     if not VERSION.exists() or tag is None:
         return  # versioned by tag alone, or nothing released yet
     version = VERSION.read_text(encoding="utf-8").strip()
+    released = tag.lstrip("v")
     assert numbers(version) >= numbers(tag), (
-        f"VERSION is {version} but {tag} is already released here, so the next release PR would "
-        f"measure from {version}. Seed both: printf '%s\\n' {tag.lstrip('v')} > VERSION, and set "
-        f'"." to "{tag.lstrip("v")}" in {MANIFEST.relative_to(PROJECT_ROOT)}.'
+        f"VERSION is {version} but {tag} is already released here, so the next release "
+        f"PR would measure from {version}. Seed both: printf '%s\\n' {released} > VERSION, "
+        f'and set "." to "{released}" in {MANIFEST.relative_to(PROJECT_ROOT)}.'
     )
 
 

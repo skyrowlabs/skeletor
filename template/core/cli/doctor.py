@@ -446,7 +446,9 @@ def coverage_runners_enabled() -> Fact:
     if not named:
         return Fact(name, NOT_APPLICABLE, "no workflow names the coverage check")
     held = allowlist.read(repo_settings.HELD_WORKFLOWS)
-    off, kept, stale = [], [], []
+    off: list[str] = []
+    kept: list[str] = []
+    stale: list[str] = []
     for workflow in named:
         try:
             state = (gh_api("repos/{owner}/{repo}/actions/workflows/" + workflow) or {}).get("state")
