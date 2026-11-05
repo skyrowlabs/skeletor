@@ -124,6 +124,8 @@ jobs:
                 # 41 existing annotations to have been written differently.
                 SUBJECT=$(git tag -l --format='%(contents:subject)' "$t" \
                           | sed -E 's/^v[0-9]+\.[0-9]+\.[0-9]+ (—|–|-) //')
+                # The backticks are markdown for the notes, not an expansion.
+                # shellcheck disable=SC2016
                 printf -- '- `%s` — %s\n' "$t" "$SUBJECT"
               done
             fi
