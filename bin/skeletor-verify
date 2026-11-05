@@ -306,7 +306,7 @@ def expected_command_names(tree: Path) -> List[str]:
         stem = module.stem
         if stem.startswith("_") or stem == "helpers":
             continue
-        names.append(aliases.get(stem, stem))
+        names.append(aliases.get(stem, stem.replace("_", "-")))
     return names
 
 
@@ -4915,13 +4915,31 @@ def leak_scan_gate(workdir: Path, venv_python: Path) -> List[Result]:
     git_in(tree, "add", "planted_leak.py")
     git_in(tree, "commit", "--quiet", "--no-verify", "-m", "chore: plant")
     code, output = run([str(venv_python), "scripts/leak_scan.py", "--range", "-1"], cwd=tree, env_extra=path)
-    git_in(tree, "reset", "--quiet", "--hard", "HEAD~1")
     results.append(
         Result(
             f"{tree.name}: leak scan catches a planted token",
             code == 1 and "planted_leak.py" in output,
             time.time() - started,
             output,
+        )
+    )
+    # The advice for a commit already made: its printed fingerprint, as a line in
+    # `.gitleaksignore`, clears it (stash.flow#280). An inline allow cannot reach it.
+    started = time.time()
+    printed = re.findall(r"fingerprint: (\S+)", output)
+    if printed:
+        (tree / ".gitleaksignore").write_text("\n".join(printed) + "\n", encoding="utf-8")
+        cleared, after = run([str(venv_python), "scripts/leak_scan.py", "--range", "-1"], cwd=tree, env_extra=path)
+        (tree / ".gitleaksignore").unlink()
+    else:
+        cleared, after = 1, "no fingerprint printed:\n" + output
+    git_in(tree, "reset", "--quiet", "--hard", "HEAD~1")
+    results.append(
+        Result(
+            f"{tree.name}: the printed fingerprint in .gitleaksignore clears a committed finding",
+            cleared == 0,
+            time.time() - started,
+            after,
         )
     )
     return results
@@ -11990,6 +12008,15 @@ def already_applied_gate() -> Result:
         problems.append("a reflowed prose port does not read as applied")
     if upgrader.already_applied(prose_base, prose_ours, reflowed, prose=False):
         problems.append("outside prose, a reflow reads as applied — whitespace is meaning in code")
+    # The same port inside a blockquote, reflowed: every wrapped line gains a `> `
+    # (mind.head's AGENTS.md). The quote markers are layout, like the newlines.
+    quoted_base = "> Intro.\n"
+    quoted_ours = "> Intro. Run the checks before you push, and read what they say.\n"
+    quoted_port = "> Intro. Run the checks before\n> you push, and read what they say.\n"
+    if not upgrader.already_applied(quoted_base, quoted_ours, quoted_port, prose=True):
+        problems.append("a reflowed port inside a blockquote does not read as applied")
+    if upgrader.already_applied(quoted_base, quoted_ours, quoted_base, prose=True):
+        problems.append("a blockquote that lacks the change reads as applied")
     # A template change that IS a reflow is invisible once whitespace collapses,
     # so it must be merged rather than read as present everywhere (v0.61.0's AGENTS.md).
     if upgrader.already_applied(prose_ours, reflowed, prose_ours, prose=True):
@@ -13479,6 +13506,393 @@ def shell_package_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: 
     return results
 
 
+def _tree_pytest(tree: Path, venv_python: Path, *tests: str) -> Tuple[int, str]:
+    """The tree's own pytest over `tests`, with the tree importable."""
+    return run(
+        [str(venv_python), "-m", "pytest", *tests, "-q", "-p", "no:cacheprovider"],
+        cwd=tree,
+        env_extra={"PYTHONPATH": str(tree)},
+    )
+
+
+def held_workflow_gate(tree: Path, venv_python: Path) -> Result:
+    """A valid hold keeps the doctor tests green (stash.flow, v0.72.2 round).
+
+    `allowlist_gate` plants a meaningless entry and wants red; this plants a
+    meaningful one and wants green, since a feature shipped empty passed its own
+    suite while the tree that used it went red.
+    """
+    started = time.time()
+    held = tree / "scripts" / "disabled_workflows_allowlist.yaml"
+    if not held.exists() or not (tree / ".github" / "workflows" / "ci.yml").exists():
+        return Result("a valid workflow hold: the allowlist or ci.yml is gone", False, 0.0, str(tree))
+    original = held.read_text(encoding="utf-8")
+    try:
+        # Every workflow, because only the coverage runners are asked about holds and
+        # a hold on `ci.yml` alone left the test green against the bug.
+        names = sorted(path.name for path in (tree / ".github" / "workflows").glob("*.y*ml"))
+        held.write_text(
+            original + "".join(f'\n{name}: "planted: a real workflow, held"' for name in names) + "\n", encoding="utf-8"
+        )
+        code, output = _tree_pytest(tree, venv_python, "tests/test_doctor.py")
+    finally:
+        held.write_text(original, encoding="utf-8")
+    return Result(
+        "a valid workflow hold keeps the doctor tests green", code == 0, time.time() - started, output[-2000:]
+    )
+
+
+def release_extra_files_gate(node_tree: Path, python_tree: Path, venv_python: Path) -> List[Result]:
+    """A node tree's package.json follows VERSION, and its test notices when it does not (dream-doll)."""
+    started = time.time()
+    results: List[Result] = []
+    config = ".github/release-please-config.json"
+    for tree, wanted in ((node_tree, ["package.json"]), (python_tree, [])):
+        data = json.loads((tree / config).read_text(encoding="utf-8"))
+        named = [entry.get("path") for package in data["packages"].values() for entry in package.get("extra-files", [])]
+        results.append(
+            Result(f"{tree.name}: Release Please extra-files are {wanted}", named == wanted, 0.0, str(named))
+        )
+    package = node_tree / "package.json"
+    original = package.read_text(encoding="utf-8")
+    version = (node_tree / "VERSION").read_text(encoding="utf-8").strip()
+    verdicts = {}
+    try:
+        for planted in ("9.9.9", version):
+            body = json.loads(original)
+            body["version"] = planted
+            package.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
+            verdicts[planted] = _tree_pytest(node_tree, venv_python, "tests/test_version_follows_the_tag.py")
+    finally:
+        package.write_text(original, encoding="utf-8")
+    results.append(
+        Result(
+            "package.json's version is held to VERSION: red when it differs, green when equal",
+            verdicts["9.9.9"][0] != 0
+            and "package.json says 9.9.9" in verdicts["9.9.9"][1]
+            and verdicts[version][0] == 0,
+            time.time() - started,
+            "\n".join(output[-800:] for _, output in verdicts.values()),
+        )
+    )
+    return results
+
+
+SMOKE_PLANT = '''"""Planted by skeletor-verify: an operator command with a side effect."""
+
+from pathlib import Path
+
+import click
+{opt_in}
+
+@click.group()
+def planted_op() -> None:
+    """Planted."""
+
+
+@planted_op.command()
+def touch() -> None:
+    """Writes a file, as a deploy would touch a host."""
+    Path(__file__).resolve().parents[1].joinpath("tmp", "smoke-ran").write_text("ran", encoding="utf-8")
+'''
+
+
+def smoke_opt_in_gate(tree: Path, venv_python: Path) -> List[Result]:
+    """An adopter's command is not executed until its module opts in (breeze-brain).
+
+    Two plants of the same module, without and with `SMOKE_EXECUTES`, and the
+    second is what shows the first landed: the command does run once allowed.
+    The module is `planted_op.py`, so `--help` must list it as `planted-op`.
+    """
+    started = time.time()
+    results: List[Result] = []
+    package = shell_package(tree)
+    plant, ran = package / "planted_op.py", tree / "tmp" / "smoke-ran"
+    try:
+        verdicts = {}
+        for label, opt_in in (("opted out", ""), ("opted in", "\nSMOKE_EXECUTES = True\n")):
+            ran.unlink(missing_ok=True)
+            plant.write_text(SMOKE_PLANT.format(opt_in=opt_in), encoding="utf-8")
+            code, output = _tree_pytest(tree, venv_python, "tests/test_cli_smoke.py", "-k", "read_only or help")
+            verdicts[label] = (code, ran.exists(), output)
+        _, listed = run([f"./{CLI_NAME}", "--help"], cwd=tree)
+    finally:
+        plant.unlink(missing_ok=True)
+        ran.unlink(missing_ok=True)
+    code, executed, output = verdicts["opted out"]
+    results.append(
+        Result("smoke: an un-opted adopter command is not executed", code == 0 and not executed, 0.0, output[-1500:])
+    )
+    code, executed, output = verdicts["opted in"]
+    results.append(Result("smoke: SMOKE_EXECUTES = True makes it run", code == 0 and executed, 0.0, output[-1500:]))
+    results.append(
+        Result(
+            "discovery: planted_op.py registers as planted-op",
+            re.search(r"^\s+planted-op\b", listed, re.M) is not None,
+            0.0,
+            listed,
+        )
+    )
+    probe = (
+        "import sys, click\n"
+        "from tests.shell import SHELL_PACKAGE, group\n"
+        "root = group()\n"
+        "mods = [m for n, m in list(sys.modules.items()) if n.startswith(SHELL_PACKAGE + '.')]\n"
+        "for name, cmd in root.commands.items():\n"
+        "    home = [m for m in mods if any(v is cmd for v in vars(m).values())]\n"
+        "    if not home or getattr(home[0], 'SMOKE_EXECUTES', False) is not True:\n"
+        "        print('NOT OPTED IN:', name)\n"
+        "print('checked', len(root.commands))\n"
+    )
+    code, output = run([str(venv_python), "-c", probe], cwd=tree, env_extra={"PYTHONPATH": str(tree)})
+    results.append(
+        Result(
+            "smoke: every command skeletor ships opts in to execution",
+            code == 0 and "NOT OPTED IN" not in output and "checked" in output,
+            time.time() - started,
+            output,
+        )
+    )
+    return results
+
+
+def git_visible_paths_gate(tree: Path, venv_python: Path) -> List[Result]:
+    """A path only the disk can see fails both path checks (breeze-brain#6).
+
+    A cited file under the ignored `tmp/`, and a source comment naming a doc that
+    exists but is excluded: both resolve on this machine and in no clone.
+    """
+    started = time.time()
+    results: List[Result] = []
+    doc = tree / "docs" / "DEVELOPMENT.md"
+    cited = tree / "tmp" / "planted_cite.py"
+    ref_source, ref_doc = tree / "scripts" / "planted_ref.py", tree / "docs" / "planted-ignored.md"
+    exclude = tree / ".git" / "info" / "exclude"
+    original_doc = doc.read_text(encoding="utf-8")
+    original_exclude = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+    try:
+        cited.parent.mkdir(exist_ok=True)
+        cited.write_text("x = 1\n", encoding="utf-8")
+        doc.write_text(original_doc + "\nSee `tmp/planted_cite.py`.\n", encoding="utf-8")
+        code, output = _tree_pytest(tree, venv_python, "tests/test_docs_name_real_paths.py")
+        results.append(
+            Result(
+                "cited paths: a file git ignores does not count as present",
+                code != 0 and "tmp/planted_cite.py" in output,
+                0.0,
+                output[-1500:],
+            )
+        )
+        doc.write_text(original_doc, encoding="utf-8")
+        ref_doc.write_text("planted\n", encoding="utf-8")
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        exclude.write_text(original_exclude + "\n/docs/planted-ignored.md\n", encoding="utf-8")
+        ref_source.write_text("# see docs/planted-ignored.md\n", encoding="utf-8")
+        code, output = run([str(venv_python), "scripts/check_source_doc_refs.py"], cwd=tree)
+        results.append(
+            Result(
+                "doc refs: a doc git ignores does not resolve a reference",
+                code != 0 and "planted-ignored.md" in output,
+                time.time() - started,
+                output[-1500:],
+            )
+        )
+    finally:
+        doc.write_text(original_doc, encoding="utf-8")
+        exclude.write_text(original_exclude, encoding="utf-8")
+        for path in (cited, ref_source, ref_doc):
+            path.unlink(missing_ok=True)
+    return results
+
+
+def tagline_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """Every tagline length renders `DESCRIPTION` the way black would leave it (breeze-brain)."""
+    started = time.time()
+    render = load_scaffolder().black_stable_string
+    sweep = workdir / "tagline-sweep"
+    shutil.rmtree(sweep, ignore_errors=True)
+    words = ["a", "renewable", "GPU", "facility,", "its", "ops", 'stack "quoted"', "it's", "ünïcode"]
+    failed: List[str] = []
+    for width in (100, 120):
+        folder = sweep / str(width)
+        folder.mkdir(parents=True)
+        for length in range(1, 301):
+            text = " ".join(words[i % len(words)] for i in range(length))[:length].strip() or "t"
+            source = f"DESCRIPTION = {render(text, len('DESCRIPTION = '), width)}\n"
+            if ast.literal_eval(ast.parse(source).body[0].value) != text:  # type: ignore[attr-defined]
+                failed.append(f"width {width}, length {length}: the literal does not round-trip")
+            (folder / f"t{length}.py").write_text(source, encoding="utf-8")
+        code, output = run([str(venv_python), "-m", "black", "--check", f"--line-length={width}", "."], cwd=folder)
+        if code != 0:
+            failed.append(f"width {width}: {output.strip()[-600:]}")
+    target = workdir / "tagline-long"
+    tagline = " ".join(words * 12)
+    code, output = run(
+        [
+            sys.executable,
+            str(SCAFFOLDER),
+            str(target),
+            "--allow-dirty",
+            "--tagline",
+            tagline,
+            "--tier",
+            "core",
+            "--no-git",
+        ],
+        cwd=workdir,
+    )
+    if code != 0:
+        failed.append(f"scaffold with a {len(tagline)}-character tagline refused:\n{output[-400:]}")
+    else:
+        code, output = run(
+            [str(venv_python), "-m", "black", *hook_args(target, "black"), "--check", "scripts/repo_settings.py"],
+            cwd=target,
+        )
+        if code != 0:
+            failed.append(f"scripts/repo_settings.py: {output.strip()[-400:]}")
+    return [
+        Result("taglines of 1-300 characters are black-stable", not failed, time.time() - started, "\n".join(failed))
+    ]
+
+
+def gitignore_kept_gate(workdir: Path) -> List[Result]:
+    """`--force` keeps an adopter's `.gitignore`, says so in the dry run, and records the render."""
+    started = time.time()
+    target = workdir / "gitignore-kept"
+    shutil.rmtree(target, ignore_errors=True)
+    target.mkdir()
+    theirs = "logs/\nmodels/\n"
+    (target / ".gitignore").write_text(theirs, encoding="utf-8")
+    (target / "product.txt").write_text("theirs\n", encoding="utf-8")
+    base = [
+        sys.executable,
+        str(SCAFFOLDER),
+        str(target),
+        "--allow-dirty",
+        "--tier",
+        "core",
+        "--tagline",
+        "t",
+        "--force",
+    ]
+    _, dry = run([*base, "--dry-run"], cwd=workdir)
+    code, output = run(base, cwd=workdir)
+    kept = (target / ".gitignore").read_text(encoding="utf-8") if code == 0 else ""
+    head = load_scaffolder().KEPT_BELOW[".gitignore"]
+    problems = []
+    if code != 0:
+        problems.append(f"scaffold refused:\n{output[-600:]}")
+    if not kept.endswith(f"{head}\n{theirs}"):
+        problems.append(f"the adopter's lines are not kept below the header:\n{kept[-400:]}")
+    if "yours would be kept whole" not in dry or re.search(r"·\s+\.gitignore", dry):
+        problems.append(f"the dry run does not say .gitignore is kept:\n{dry[-800:]}")
+    manifest = json.loads((target / ".skeletor.json").read_text(encoding="utf-8")) if code == 0 else {"files": {}}
+    if ".gitignore" not in manifest.get("files", {}):
+        problems.append(".gitignore is not recorded as skeletor's")
+    upgraded, said = run(
+        [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(target), "--dry-run", "--no-base"],
+        cwd=SKELETOR,
+    )
+    if upgraded != 0:
+        problems.append(f"an upgrade dry run refuses the tree:\n{said[-600:]}")
+    return [
+        Result(
+            "--force keeps an adopter's .gitignore below skeletor's",
+            not problems,
+            time.time() - started,
+            "\n".join(problems),
+        )
+    ]
+
+
+def foreign_file_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """A single vendored file can be FOREIGN, and the lint probe plants at its path (breeze-brain's `install`)."""
+    started = time.time()
+    result, tree = scaffold("core", "python", workdir, name="foreign-file")
+    if not result.ok:
+        return [Result(f"foreign file: {result.label}", False, result.seconds, result.output)]
+    vendored = "#!/usr/bin/env python3\nimport sys\nimport os\n\nprint(os, sys)\n"
+    (tree / "install").write_text(vendored, encoding="utf-8")
+    paths = tree / "scripts" / "paths.py"
+    text = paths.read_text(encoding="utf-8")
+    at = text.index("# ── Skeletor's again below this line", text.index("FOREIGN: tuple = ()"))
+    paths.write_text(text[:at] + 'FOREIGN += ("install",)\n\n\n' + text[at:], encoding="utf-8")
+    git_in(tree, "add", "-A")
+    tests = ("tests/test_scratch_is_not_linted.py", "tests/test_foreign_subtrees.py")
+    code, before = _tree_pytest(tree, venv_python, *tests)
+    pyproject = tree / "pyproject.toml"
+    pyproject.write_text(
+        re.sub(
+            r'(^skip = \[.*?)"tmp"\]',
+            r'\1"tmp", "install"]',
+            pyproject.read_text(encoding="utf-8"),
+            count=1,
+            flags=re.M,
+        ),
+        encoding="utf-8",
+    )
+    fixed, after = _tree_pytest(tree, venv_python, *tests)
+    restored = (tree / "install").read_text(encoding="utf-8") == vendored
+    return [
+        Result(
+            "foreign file: declared but not skipped, the probe names isort",
+            code != 0 and "FOREIGN names `install`, and these linters still read it" in before and "isort" in before,
+            0.0,
+            before[-1500:],
+        ),
+        Result(
+            "foreign file: skipped by isort too, the probes are green and the file is restored",
+            fixed == 0 and restored,
+            time.time() - started,
+            after[-1500:],
+        ),
+    ]
+
+
+def changelog_prose_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """A generated changelog quoting a bare command is not prose about the tree; NOTES.md is (sky.boss)."""
+    started = time.time()
+    tree = workdir / "prose-zq"
+    if not (tree / "tests" / "test_naming.py").exists():
+        return [Result("changelog prose: no tree that ships test_naming.py", False, 0.0, str(tree))]
+    line = "- fix: zq check now runs zq docs\n"
+    verdicts = {}
+    for name in ("CHANGELOG.md", "NOTES-planted.md"):
+        planted = tree / name
+        planted.write_text(f"# Changelog\n\n{line}", encoding="utf-8")
+        try:
+            verdicts[name] = _tree_pytest(
+                tree, venv_python, "tests/test_naming.py", "tests/test_docs_name_real_paths.py"
+            )
+        finally:
+            planted.unlink()
+    return [
+        Result(
+            "changelog prose: CHANGELOG.md is skipped and the same line elsewhere is caught",
+            verdicts["CHANGELOG.md"][0] == 0 and verdicts["NOTES-planted.md"][0] != 0,
+            time.time() - started,
+            "\n".join(output[-800:] for _, output in verdicts.values()),
+        )
+    ]
+
+
+def round_v0722_gates(workdir: Path, venv_python: Path, fullest: str) -> List[Result]:
+    """The plants for the v0.72.2 round's findings, each on the tree it needs."""
+    results: List[Result] = []
+    python_tree, node_tree = workdir / f"{fullest}-python", workdir / f"{fullest}-both"
+    if python_tree.exists():
+        results.append(held_workflow_gate(python_tree, venv_python))
+        results += smoke_opt_in_gate(python_tree, venv_python)
+        results += git_visible_paths_gate(python_tree, venv_python)
+        if node_tree.exists():
+            results += release_extra_files_gate(node_tree, python_tree, venv_python)
+    results += tagline_gate(workdir, venv_python)
+    results += gitignore_kept_gate(workdir)
+    results += foreign_file_gate(workdir, venv_python)
+    results += changelog_prose_gate(workdir, venv_python)
+    return results
+
+
 def main() -> int:
     scaffolder = load_scaffolder()
     all_tiers = sorted(scaffolder.TIERS)
@@ -13720,6 +14134,10 @@ def main() -> int:
         # landed in. Both are the generator's to ask, because both compare
         # configurations and a tree only ever holds one.
         results += lane_views_gate(workdir)
+
+        for gate in round_v0722_gates(workdir, venv_python, fullest):
+            gate.label = f"{fullest}: {gate.label}"
+            results.append(gate)
 
         for gate in long_path_gate(fullest, workdir, venv_python):
             gate.label = f"{fullest}: {gate.label}"
