@@ -2347,6 +2347,18 @@ def unified(base: str, ours: str, rel: str) -> str:
     )
 
 
+def released_on_github(target: Path, tag: str) -> Optional[bool]:
+    """Whether GitHub holds a Release for `tag`; None when `gh` cannot say."""
+    if not shutil.which("gh"):
+        return None
+    found = subprocess.run(
+        ["gh", "release", "view", tag, "--json", "tagName"], cwd=str(target), capture_output=True, text=True
+    )
+    if found.returncode == 0:
+        return True
+    return False if "release not found" in found.stderr.lower() else None
+
+
 def already_applied(base: str, ours: str, theirs: str, prose: bool = False) -> bool:
     """Whether `theirs` already carries the template's change from `base` to `ours`.
 
@@ -2385,8 +2397,10 @@ def already_applied(base: str, ours: str, theirs: str, prose: bool = False) -> b
     # AGENTS.md sentence into theirs, ran --ported, and was told the file still
     # LACKS the change. In code, whitespace is meaning (indentation), so it stays
     # exact.
+    # A reflowed blockquote re-prefixes every wrapped line with `> `, so the markers
+    # go before the whitespace does (mind.head, a port inside AGENTS.md's quote).
     def flat(text: str) -> str:
-        return " ".join(text.split())
+        return " ".join(re.sub(r"(?m)^[ \t]*(?:>[ \t]?)+", "", text).split())
 
     if prose:
         # A change that is only a reflow vanishes under that collapse, so every
@@ -4533,9 +4547,24 @@ def main() -> int:
                 say("⚠️ ", f"VERSION and the Release Please manifest arrive at {seed}; {tag} is already released")
                 detail(f"Seed both at {tag.lstrip('v')} before the first release PR, or it measures from {seed}.")
                 detail("tests/test_version_follows_the_tag.py is red until you do.")
+            # Release Please starts its changelog at the last GitHub *Release*; a bare
+            # tag is not one, so the first changelog covers all history (mind-head,
+            # sky-boss, breeze-brain). It also needs the three-part `vX.Y.Z` form.
+            if tag and not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+                detail(f"{tag} is not vX.Y.Z, which Release Please needs: tag that commit in that form too.")
+            if tag and released_on_github(target, tag) is not True:
+                detail(f"Release Please measures from the last GitHub Release, not a tag. If {tag} has none:")
+                detail(f"  gh release create {tag} --title {tag} --notes 'Baseline before Release Please'")
         elif versioning and versioning[1] == "tag" and dropped:
             detail("Those include what makes ci.yml run Release Please: until they are deleted it still")
             detail("opens release PRs, while the docs this run wrote say the tag is the version.")
+
+        # `origin/HEAD` is clone-local and nothing moves it, so every existing clone
+        # fails test_origin_head_is_the_base_branch until it is reset (breeze-brain).
+        base_switch = set_args_applied.get("--base-branch")
+        if base_switch:
+            say("⚠️ ", f"the base branch is now {base_switch[1]}; in every clone of this repository, run:")
+            detail("  git remote set-head origin -a")
 
         # Only when this run actually wrote a test file, and only on a real run.
         # Always-on prose in this output gets skimmed, and this instruction earns
