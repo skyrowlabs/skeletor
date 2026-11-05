@@ -61,7 +61,7 @@ from pathlib import Path
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.output import detail, emit, fail, item, ok, skip, warn  # noqa: E402
+from scripts.output import EXIT_REFUSED, detail, emit, fail, item, no_subject, ok, skip, warn  # noqa: E402
 from scripts.paths import GITHUB_DIR, PROJECT_ROOT, SCRIPTS_DIR  # noqa: E402
 
 #: SCAFFOLD-OPTIONAL .github/release-please-config.json
@@ -336,7 +336,7 @@ def main() -> int:
         detail("    reach — check HEAD alone, or name a range that exists.")
         detail("An unresolvable range is an error and never a pass: reporting it as zero")
         detail("subjects is a green tick over nothing.")
-        return 1
+        return EXIT_REFUSED
 
     findings = unreadable(inspected, types) if types else []
 
@@ -361,7 +361,7 @@ def main() -> int:
         if not RELEASE_CONFIG.exists():
             fail(f"no {RELEASE_CONFIG.name}, and the commit hook's FALLBACK_TYPES could not be read")
             detail(f"The contract under tag versioning is {HOOK.relative_to(PROJECT_ROOT)}'s own type list.")
-            return 1
+            return EXIT_REFUSED
         warn(f"no changelog-sections in {RELEASE_CONFIG.relative_to(PROJECT_ROOT)} — nothing to check against")
         detail("Release Please is configured here and gives no commit type a changelog")
         detail("section, so every subject is silently ignored by the release automation.")
@@ -393,7 +393,7 @@ def main() -> int:
     # merge commits contains no subject this asks about. That is a different
     # fact from an unresolvable range above, and the two must not print alike.
     if not inspected:
-        ok(f"no non-merge commits in {described(commit_range, chosen)} — nothing to check")
+        no_subject(f"no non-merge commits in {described(commit_range, chosen)}")
         return 0
     if RELEASE_CONFIG.exists():
         reverts = sum(1 for _, subject in inspected if reverted(subject) != subject)
