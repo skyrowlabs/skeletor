@@ -6,10 +6,9 @@ name: Announce a release
 # 2026-09-01. This closes the gap: the tag push tells the site, and the site
 # decides what to do about it.
 #
-# It posts an event, not a command. `project-released` is the site's published
-# type and every project repo sends the same one; which workflows respond, and
-# what they rewrite, stays the site's business. Nothing here knows what a badge
-# is.
+# It starts the site's badges.yml, the one name this file knows there; what that
+# workflow rewrites stays the site's business. Why workflow_dispatch and not
+# repository_dispatch: skyrowlabs.com's CLAUDE.md.
 on:
   push:
     tags: ['v*']
@@ -162,7 +161,7 @@ jobs:
       # This must not fail the tag. A stale bar on a marketing page is not a
       # reason to redden a release, and the site's own cron picks the tag up
       # within the day regardless — so the step reports and moves on.
-      - name: Post project-released to skyrowlabs.com
+      - name: Start the site's badge refresh
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
@@ -171,8 +170,7 @@ jobs:
             echo "SITE_DISPATCH_TOKEN is not set — the site will catch up on its cron."
             exit 0
           fi
-          gh api repos/skyrowlabs/skyrowlabs.com/dispatches \
-            -f event_type=project-released \
-            -f 'client_payload[project]=skeletor' \
-            -f "client_payload[version]=${GITHUB_REF_NAME}" \
+          gh api repos/skyrowlabs/skyrowlabs.com/actions/workflows/badges.yml/dispatches \
+            -f ref=main \
+            -f 'inputs[project]=skeletor' \
             && echo "asked the site to refresh for ${GITHUB_REF_NAME}"
