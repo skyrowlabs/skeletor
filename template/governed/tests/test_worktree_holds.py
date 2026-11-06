@@ -144,4 +144,3 @@ def test_node_modules_is_borrowed_only_while_the_lockfiles_agree(tmp_path, monke
     monkeypatch.setattr(worktree, "PROJECT_ROOT", primary)
     worktree._link_node_modules(target)
     assert (target / "node_modules").is_symlink() is linked
-
