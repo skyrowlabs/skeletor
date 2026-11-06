@@ -186,6 +186,9 @@ REPORT_SECTIONS: Tuple[Tuple[str, Optional[str]], ...] = (
 #: `<fill in>`, which a parser reads as unreported rather than as 0.
 REPORT_METRICS = ("conflicts", "gate-failures-on-arrival", "declines", "findings")
 
+#: The claim sweep's lines, in a section of their own that a report without any omits.
+CLAIMS_SECTION = "ARG-CLAIMS"
+
 #: `key: integer` lines written only by a run that measured them: absent is unmeasured.
 REPORT_MEASURED = ("tests-removed", "tests-added")
 UNFILLED = "<fill in>"
@@ -229,6 +232,7 @@ def write_report(
     branch: str,
     previous: Dict[str, List[str]],
     measured: Optional[Dict[str, int]] = None,
+    claims: Optional[List[str]] = None,
 ) -> Path:
     """`tmp/upgrade/REPORT.md`: what this tool can count filled, the rest prompted or carried forward.
 
@@ -271,6 +275,10 @@ def write_report(
     for heading, prompt in REPORT_SECTIONS:
         body = filled[heading] if prompt is None else previous.get(heading) or [f"<!-- {prompt} -->"]
         lines += ["", f"### {heading}", "", *body]
+    # Only when there is something to say, so a report's sections stay the round's contract.
+    found = claims or previous.get(CLAIMS_SECTION)
+    if found:
+        lines += ["", f"### {CLAIMS_SECTION}", "", *[hit if hit.startswith("- ") else f"- {hit}" for hit in found]]
     patches.mkdir(parents=True, exist_ok=True)
     report = patches / REPORT_NAME
     report.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -2700,6 +2708,101 @@ def failing_tests(tree: Path) -> set:
     return found
 
 
+#: Past this a file is data rather than prose, so the claim sweep counts it unread.
+CLAIM_SWEEP_LIMIT = 1 << 20
+
+#: Lines printed in the run; `REPORT.md` holds them all.
+CLAIMS_SHOWN = 20
+
+#: Generated or historical, so a line naming an old value there is no claim about today.
+CLAIM_SWEEP_SKIPS = {MANIFEST_NAME, "CHANGELOG.md"}
+
+
+def claim_pattern(flag: str, value: str) -> "re.Pattern[str]":
+    """The old value as a whole word; a branch name only in branch-shaped context.
+
+    `main` is an ordinary word: breeze.brain measured 84 bare hits in `main()` and
+    "main battery bank", and a branch-shaped pattern kept all 3 real lines.
+    """
+    word = rf"(?<![\w.-]){re.escape(value)}(?![\w-]|\.\w)"
+    if "branch" not in flag:
+        return re.compile(word)
+    quote = "[\"'`]?"
+    before = r"(?:origin/|refs/heads/|--branch[ =]|\bbranch(?:es)?:?\s+|\bon\s+|\binto\s+|\bbase:\s*)"
+    listed = r"\bbranches:\s*\[[^\]]*"
+    return re.compile(rf"{before}{quote}{word}|{listed}{word}|{word}{quote}\s+(?i:branch)")
+
+
+def yaml_branch_item(flag: str, value: str, line: str, in_branches: bool) -> bool:
+    """A `- main` item of a `branches:` block, which no single-line pattern can see."""
+    return "branch" in flag and in_branches and line.strip().strip("-").strip(" \"'") == value
+
+
+def tree_listed(target: Path) -> List[str]:
+    """Every file git would commit here, tracked or new, ignored ones aside."""
+    done = subprocess.run(
+        ["git", "-C", str(target), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        capture_output=True,
+        text=True,
+    )
+    return sorted({rel for rel in done.stdout.split("\0") if rel})
+
+
+def lines_this_tree_wrote(path: Path, recorded: Optional[str], base: Optional[Path]) -> List[Tuple[int, str]]:
+    """`(line number, text)` the render did not produce: all of an unrecorded file, the rest of an edited one."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    if recorded is None:
+        return list(enumerate(lines, 1))
+    if base is None or sha256(path) == recorded:
+        return []
+    rendered = set((read(base) or "").splitlines())
+    return [(number, line) for number, line in enumerate(lines, 1) if line not in rendered]
+
+
+def sweep_claims(
+    target: Path, changes: Dict[str, Tuple[str, str]], hashes: Dict[str, str], base_files: Dict[str, Path]
+) -> Tuple[List[str], int]:
+    """Lines this tree wrote that still name an old arg value, and how many files were too big to read."""
+    wanted = [(flag, was, claim_pattern(flag, was)) for flag, (was, _) in sorted(changes.items()) if was]
+    hits: List[str] = []
+    unread = 0
+    for rel in tree_listed(target):
+        path = target / rel
+        if rel in CLAIM_SWEEP_SKIPS or rel.startswith(SKIP_PREFIXES) or path.is_symlink() or not path.is_file():
+            continue
+        if path.stat().st_size > CLAIM_SWEEP_LIMIT:
+            unread += 1
+            continue
+        in_branches = False
+        for number, line in lines_this_tree_wrote(path, hashes.get(rel), base_files.get(rel)):
+            for flag, was, pattern in wanted:
+                if pattern.search(line) or yaml_branch_item(flag, was, line, in_branches):
+                    hits.append(f"`{rel}:{number}` ({flag} was {was}): {line.strip()[:120]}")
+            if not line.strip().startswith("-"):
+                in_branches = re.fullmatch(r"\s*branches(-ignore)?:\s*", line) is not None
+    return hits, unread
+
+
+def report_claims(hits: List[str], unread: int, offline: bool) -> None:
+    """Say what the sweep found: a literal net that edits nothing, and misses a sentence that paraphrases."""
+    if hits:
+        say("🔎", f"{len(hits)} line(s) this tree wrote still name a value this run changes; none was edited")
+        for hit in hits[:CLAIMS_SHOWN]:
+            item(hit)
+        if len(hits) > CLAIMS_SHOWN:
+            detail(f"… and {len(hits) - CLAIMS_SHOWN} more, all in {REPORT_NAME} on a real run")
+    else:
+        say("✅", "claim sweep: no line this tree wrote names a value this run changes")
+    detail("Literal values only, so a sentence that assumes the old value without naming it is not found.")
+    if unread:
+        detail(f"{unread} file(s) over {CLAIM_SWEEP_LIMIT >> 20} MiB were not read.")
+    if offline:
+        detail("--no-base has no render to compare, so only files the manifest does not record were read.")
+
+
 #: Past this a suite's collection is not worth blocking an upgrade on.
 COLLECT_TIMEOUT = 300
 
@@ -3493,6 +3596,11 @@ def main() -> int:
             rel.startswith("tests/") and sha256(path) != hashes.get(rel) for rel, path in head_files.items()
         ):
             ids_before = collect_test_ids(target)
+        # Also before any write: an applied file then differs from its recorded hash.
+        arg_claims: List[str] = []
+        if set_args_applied:
+            arg_claims, unread_claims = sweep_claims(target, set_args_applied, hashes, base_files)
+            report_claims(arg_claims, unread_claims, not base_files)
 
         # **Measured against the base that will be in force when this is read.**
         #
@@ -4059,6 +4167,7 @@ def main() -> int:
                 f" commit: {UNFILLED}",
                 previous,
                 test_id_counts(test_ids),
+                arg_claims,
             )
             kept = " (what you filled in is kept)" if previous else ""
             say("📝", f"{report.relative_to(target)}: the counted sections are filled; the rest are yours{kept}")
@@ -4112,6 +4221,8 @@ def main() -> int:
                         "base_advanced": advanced,
                         # What this run did to the suite. Null when it wrote nothing under tests/.
                         "test_ids": test_ids,
+                        # Lines this tree wrote that name a value `--set-arg` changed.
+                        "arg_claims": arg_claims,
                         # Of `conflicted`, the files where none of the lines around
                         # any of the template's changes are in the adopter's file —
                         # a section they removed, or one rewritten past recognition.

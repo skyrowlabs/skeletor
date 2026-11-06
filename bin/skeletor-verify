@@ -7911,6 +7911,81 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
     ]
 
 
+def claim_sweep_gate(workdir: Path) -> List[Result]:
+    """A run that changes a recorded arg reports the tree's own lines naming the old value, and edits none.
+
+    The lines the render wrote are the decoys: a fresh tree names its branch in
+    dozens of places and none may be reported, which is the filter the sweep is for.
+    """
+    started = time.time()
+    clean = clean_skeletor(workdir)
+    upgrade_bin = clean / "bin" / "skeletor-upgrade"
+    upgrade = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade")
+    tree = workdir / "claim-sweep"
+    command = [sys.executable, str(clean / "bin" / "skeletor-new"), str(tree), "--name", "Probe", "--cli", CLI_NAME]
+    code, output = run(command + ["--tagline", "t", "--tier", "core", "--language", "python"], cwd=SKELETOR)
+    if code != 0:
+        return [Result("claim sweep: scaffold core/python from a clean clone", False, time.time() - started, output)]
+
+    planted = {
+        "README.md": "\nEverything lands on the develop branch first.\n",
+        "pyproject.toml": "\n# scaffolded --tier core, so the reporting package is not here\n",
+    }
+    for rel, text in planted.items():
+        (tree / rel).write_text((tree / rel).read_text(encoding="utf-8") + text, encoding="utf-8")
+    (tree / "docs" / "mine.md").write_text("Ship from origin/develop.\nWe develop features slowly.\n", encoding="utf-8")
+    workflow = tree / ".github" / "workflows" / "mine.yml"
+    workflow.write_text("on:\n  push:\n    branches:\n      - develop\n", encoding="utf-8")
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "-m", "the adopter writes about its arguments")
+
+    def plan(*extra: str) -> Tuple[List[str], str]:
+        _, said = run([sys.executable, str(upgrade_bin), str(tree), "--json", "--dry-run", *extra], cwd=tree)
+        return upgrade.envelope_of(said[said.rfind("\n{") + 1 :]).get("arg_claims", []), said
+
+    claims, said = plan("--set-arg", "--base-branch=trunk")
+    named = sorted(hit.split(":", 1)[0].strip("`") for hit in claims)
+    want = [".github/workflows/mine.yml", "README.md", "docs/mine.md"]
+    tier_claims, tier_said = plan("--set-arg", "--tier=governed")
+    quiet, quiet_said = plan()
+    before = {rel: (tree / rel).read_text(encoding="utf-8") for rel in ("README.md", "docs/mine.md")}
+    _, real = run(
+        [sys.executable, str(upgrade_bin), str(tree), "--set-arg", "--base-branch=trunk", "--allow-untagged"], cwd=tree
+    )
+    report = tree / "tmp" / "upgrade" / "REPORT.md"
+    text = report.read_text(encoding="utf-8") if report.exists() else ""
+    kept = all(
+        all(line in (tree / rel).read_text(encoding="utf-8") for line in body.splitlines() if "develop" in line)
+        for rel, body in before.items()
+    )
+    return [
+        Result(
+            "claim sweep: a branch arg finds branch-shaped lines the tree wrote, and nothing the render wrote",
+            named == want and not any("features slowly" in hit for hit in claims),
+            time.time() - started,
+            f"want {want}\ngot {claims}\n{said[-1200:]}",
+        ),
+        Result(
+            "claim sweep: any other arg matches the literal value",
+            [hit.split(":", 1)[0].strip("`") for hit in tier_claims] == ["pyproject.toml"],
+            0.0,
+            f"{tier_claims}\n{tier_said[-800:]}",
+        ),
+        Result(
+            "claim sweep: a run that changes no arg does not sweep",
+            not quiet and "claim sweep" not in quiet_said and "still name a value" not in quiet_said,
+            0.0,
+            quiet_said[-600:],
+        ),
+        Result(
+            "claim sweep: a real run writes them to REPORT.md and edits none of them",
+            "### ARG-CLAIMS" in text and "docs/mine.md:1" in text and kept,
+            0.0,
+            f"lines kept: {kept}\n{text[-800:]}\n{real[-800:]}",
+        ),
+    ]
+
+
 def dirty_ref_gate(workdir: Path) -> List[Result]:
     """A `-dirty` scaffold ref clears on the first upgrade that applies anything.
 
@@ -14309,6 +14384,7 @@ def main() -> int:
 
         results += required_contexts_gate(workdir)
 
+        results += claim_sweep_gate(workdir)
         for gate in set_arg_gate(workdir):
             results.append(gate)
 
