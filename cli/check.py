@@ -14,10 +14,11 @@ import sys
 import click
 
 from scripts.gates import DOCS_GATES, PRE_PUSH_GATES, Gate
+from scripts.output import EXIT_NO_SUBJECT
 from scripts.paths import TMP_DIR
 from scripts.yaml_text import read_uncommented
 
-from .helpers import PROJECT_ROOT, Declared, detail, fail, module, ok, run, script, summarize, warn
+from .helpers import PROJECT_ROOT, Declared, detail, fail, module, no_subject, run, script, summarize, warn
 
 #: tests/test_cli_smoke.py runs this module's argument-less commands for real.
 SMOKE_EXECUTES = True
@@ -352,4 +353,5 @@ def _say_if_interpreter_differs() -> None:
 def health() -> None:
     """Is the local stack up and answering?"""
     # SCAFFOLD: replace with this project's real health probes.
-    ok("nothing to probe yet — wire this to the project's services")
+    no_subject("nothing to probe yet — wire this to the project's services")
+    sys.exit(EXIT_NO_SUBJECT)

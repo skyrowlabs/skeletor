@@ -27,3 +27,6 @@ notes.md
 # watches and where they are. Per-machine, and it names a PRIVATE repository
 # while this one is public — see `declared_upstreams()` in bin/skeletor-maintain.
 upstream.local.json
+
+# A worktree links this, and `worktree new` needs the link ignored.
+node_modules
