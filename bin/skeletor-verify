@@ -6080,6 +6080,26 @@ def test_id_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
         "the one change in a file pairs": (["tests/a.py::t"], ["tests/a.py::u"], [("tests/a.py::t", "tests/a.py::u")]),
         "two candidates pair with neither": (["tests/a.py::t"], ["tests/b.py::t", "tests/c.py::t"], []),
         "unrelated tests do not pair": (["tests/a.py::t"], ["tests/b.py::u"], []),
+        "a parametrised rename pairs beside other new tests": (
+            ["tests/a.py::t[x]", "tests/a.py::t[y]"],
+            ["tests/a.py::u[x]", "tests/a.py::u[y]", "tests/a.py::v", "tests/a.py::w"],
+            [("tests/a.py::t[x]", "tests/a.py::u[x]"), ("tests/a.py::t[y]", "tests/a.py::u[y]")],
+        ),
+        "one parameter is too little to go on": (
+            ["tests/a.py::t[x]"],
+            ["tests/a.py::u[x]", "tests/a.py::v"],
+            [],
+        ),
+        "another parameter set does not pair": (
+            ["tests/a.py::t[x]", "tests/a.py::t[y]"],
+            ["tests/a.py::u[x]", "tests/a.py::u[z]", "tests/a.py::v"],
+            [],
+        ),
+        "two tests with the same parameters pair with neither": (
+            ["tests/a.py::t[x]", "tests/a.py::t[y]"],
+            ["tests/a.py::u[x]", "tests/a.py::u[y]", "tests/a.py::v[x]", "tests/a.py::v[y]"],
+            [],
+        ),
     }
     wrong = {k: upgrade.pair_renames(g, n) for k, (g, n, want) in pairs.items() if upgrade.pair_renames(g, n) != want}
     results.append(Result(f"test IDs: {len(pairs)} rename shapes pair as they should", not wrong, 0.0, str(wrong)))
@@ -7814,6 +7834,18 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
                 cwd=target,
             )
             ported_ref = json.loads(manifest.read_text(encoding="utf-8"))["skeletor_ref"]
+            # A later run with nothing to do must not replace the finished report (mind.head).
+            report_file = target / "tmp" / "upgrade" / "REPORT.md"
+            report_text = report_file.read_text(encoding="utf-8")
+            report_file.write_text(
+                report_text.replace("### VERDICT\n\n", "### VERDICT\n\nfilled by hand\n\n", 1), "utf-8"
+            )
+            run(["git", "-C", str(target), "add", "-A"], cwd=target)
+            run(["git", "-C", str(target), "commit", "-q", "-m", "the upgrade"], cwd=target)
+            _, idle = run(
+                [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--allow-untagged"], cwd=target
+            )
+            kept = report_file.read_text(encoding="utf-8")
         finally:
             run(["git", "-C", str(SKELETOR), "worktree", "remove", "--force", str(old_checkout)], cwd=SKELETOR)
 
@@ -7920,6 +7952,12 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
                 named_ref != before and f"--ported-path {rel}: no longer pending" in named,
                 0.0,
                 f"ref {before} → {named_ref}\n{named[-1500:]}",
+            ),
+            Result(
+                "pending ref: a re-run with nothing to do leaves the finished report alone",
+                "already current" in idle and "filled by hand" in kept and f"{before} →" in kept,
+                0.0,
+                f"{idle[-600:]}\n{kept[:600]}",
             ),
         ]
 

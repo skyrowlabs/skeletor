@@ -89,7 +89,7 @@ import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, NoReturn, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -2856,8 +2856,28 @@ def collect_test_ids(tree: Path) -> Tuple[Optional[List[str]], str]:
     return ids, ""
 
 
+def same_parameters(removed: List[str], added: List[str]) -> List[Tuple[str, str]]:
+    """IDs of a test renamed in its file with at least two parameters unchanged, paired one by one."""
+
+    def by_parameters(ids: List[str]) -> Dict[Tuple[str, FrozenSet[str]], List[Dict[str, str]]]:
+        tests: Dict[str, Dict[str, str]] = {}
+        for test in ids:
+            name, bracket, parameter = test.partition("[")
+            if bracket:
+                tests.setdefault(name, {})[parameter] = test
+        found: Dict[Tuple[str, FrozenSet[str]], List[Dict[str, str]]] = {}
+        for name, cases in tests.items():
+            if len(cases) >= 2:
+                found.setdefault((name.split("::", 1)[0], frozenset(cases)), []).append(cases)
+        return found
+
+    gone, new = by_parameters(removed), by_parameters(added)
+    matched = [key for key in gone if len(gone[key]) == 1 and len(new.get(key, [])) == 1]
+    return [(gone[key][0][case], new[key][0][case]) for key in matched for case in key[1]]
+
+
 def pair_renames(removed: List[str], added: List[str]) -> List[Tuple[str, str]]:
-    """Removed and added IDs that read as one test renamed: moved file, or the only change in one."""
+    """Removed and added IDs that read as one test renamed: moved, parameters kept, or a file's only change."""
     pairs: List[Tuple[str, str]] = []
 
     def match(key: Callable[[str], str]) -> None:
@@ -2870,6 +2890,8 @@ def pair_renames(removed: List[str], added: List[str]) -> List[Tuple[str, str]]:
         pairs.extend((gone[k][0], new[k][0]) for k in gone if len(gone[k]) == 1 and len(new.get(k, [])) == 1)
 
     match(lambda test: test.split("::", 1)[1])  # same test name, another file
+    taken = {test for pair in pairs for test in pair}
+    pairs.extend(same_parameters([t for t in removed if t not in taken], [t for t in added if t not in taken]))
     match(lambda test: test.split("::", 1)[0])  # the one change in this file
     return sorted(pairs)
 
@@ -3080,7 +3102,8 @@ def main() -> int:
         default=[],
         metavar="PATH",
         help="--ported for one named file, repeatable: advance the base only if every pending "
-        "file is named, so a new conflict cannot ride in behind the ones you resolved.",
+        "file is named, so a new conflict cannot ride in behind the ones you resolved. A "
+        "hand-port that makes a file merge clean takes it off the pending list.",
     )
     parser.add_argument(
         "--ported",
@@ -4041,8 +4064,8 @@ def main() -> int:
                 detail("Port them from tmp/upgrade/, then re-run with --ported to advance the base,")
                 detail("or --ported-path <path> per file, which holds it if a pending file goes unnamed.")
                 detail("Not a plain re-run: a three-way merge cannot tell an applied hunk from an")
-                detail("unapplied one, so a hand-ported file conflicts again and the base never")
-                detail("moves. The dirty tree the porting leaves is expected and not refused.")
+                detail("unapplied one, so a hand-ported file can conflict again and the base never")
+                detail("move. The dirty tree the porting leaves is expected and not refused.")
                 if added or updated or merged:
                     # Conditional because this block is now reached with nothing
                     # applied — which is the case that carried the bug above —
@@ -4159,7 +4182,10 @@ def main() -> int:
             test_ids = test_id_diff(ids_before, collect_test_ids(target), not_measured)
 
         report = None
-        if not args.dry_run:
+        # A run with base and head equal and nothing to do has no upgrade to describe, and its
+        # title matches nothing, so writing would replace the last real report with an empty one.
+        idle = ref == head_ref and not (set_args_applied or added or updated or merged or pending)
+        if not args.dry_run and not idle:
             title = f"{ref} → {head_ref}"
             # Read before clearing nothing: `clear_sidecars` spares REPORT.md by suffix.
             previous = previous_report(patches, title)
