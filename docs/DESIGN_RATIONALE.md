@@ -5725,3 +5725,50 @@ reach one names the conflict in its release. There is no gate: the stub changed 
 because moving it is one more edit of the same hunk, in the two trees it would serve.
 
 The import line above it is not frozen, so a tree that trimmed it can still conflict there.
+
+## A record of why a file differs, and what it may not do
+
+An upgrade's standing list named every file that differed from the render, and five
+trees asked for the same thing under five names: somewhere to say why. A list with
+no reasons gets re-read every round, and the reader cannot tell a decision from a
+template change a file never took.
+
+`scripts/template_divergence_allowlist.yaml` is that record, and the standing list
+now prints in four parts: **decided** (a reason), **state** (release version files
+and `tests/coverage_budget.json`), **appended** (a render is an exact prefix of the
+disk) and **undecided**, which alone is the headline count.
+
+**It reports and decides nothing.** A hold never changes a classification, a merge
+or an exit code, and `divergence_record_gate` runs one upgrade with entries and one
+without and compares the bytes. A reason beside a conflict is recorded for the
+file, so it prints with the hunk's template lines and those words: a hold written
+for one hunk must not read as covering the next one.
+
+**The record stays off the list by structure.** Entries sit between a frozen seam
+pair, and `_same_but_exempt` already sets aside what sits between one, so no path
+is special-cased. An entry outside the rules makes the record read as a fork.
+
+**It is a YAML seam in a python seam system.** `scripts/seams.py`, the tree's seam
+test and `append_seam_gate` all enumerate `*.py` and parse what they find, and a
+YAML file cannot join that population: there is no AST to walk and no example to
+execute. So it stays outside it, carries no invitation sentence, and
+`tests/test_template_divergence_allowlist.py` holds the rules and the entries'
+placement. The record needs no prose digest either, because what lands outside the
+rules shows up on the standing list by itself.
+
+**The state set comes from the tree's release config, `version-file` and the
+manifest, never `extra-files`**, which also names files a person edits.
+`scripts/requirements.txt` is not state: a reason there can say something a machine
+cannot, such as keeping a floor while taking the template's new lines.
+
+**The tool reads the record with the head render's `scripts/allowlist.py`.** The
+tree's copy may be older or edited, and a parser here would be a second reader of a
+format the template owns. Loading it runs template code from the render this tool
+just made, and nothing from the tree.
+
+**Stale has two sides, and each can see one thing.** The tree asks whether the file
+equals its manifest hash, or the path is in neither the tree nor the manifest; a
+file deleted but recorded keeps its entry. That is the second question a tree asks
+of `.skeletor.json`, through `scripts/manifest.py`. The tool asks whether the disk
+equals a render with seam content counted, so an entry on a seam-only file is not
+stale, and a reformat retires an entry only on a `--normalise` run.

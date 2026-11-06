@@ -89,7 +89,7 @@ import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
-from typing import Any, Callable, Dict, FrozenSet, List, NoReturn, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, NoReturn, Optional, Set, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -189,6 +189,9 @@ REPORT_METRICS = ("conflicts", "gate-failures-on-arrival", "declines", "findings
 #: The claim sweep's lines, in a section of their own that a report without any omits.
 CLAIMS_SECTION = "ARG-CLAIMS"
 
+#: Held files this run reached, with their reasons, omitted the same way.
+HELD_SECTION = "HELD"
+
 #: `key: integer` lines written only by a run that measured them: absent is unmeasured.
 REPORT_MEASURED = ("tests-removed", "tests-added")
 UNFILLED = "<fill in>"
@@ -233,6 +236,7 @@ def write_report(
     previous: Dict[str, List[str]],
     measured: Optional[Dict[str, int]] = None,
     claims: Optional[List[str]] = None,
+    held: Optional[List[str]] = None,
 ) -> Path:
     """`tmp/upgrade/REPORT.md`: what this tool can count filled, the rest prompted or carried forward.
 
@@ -276,9 +280,10 @@ def write_report(
         body = filled[heading] if prompt is None else previous.get(heading) or [f"<!-- {prompt} -->"]
         lines += ["", f"### {heading}", "", *body]
     # Only when there is something to say, so a report's sections stay the round's contract.
-    found = claims or previous.get(CLAIMS_SECTION)
-    if found:
-        lines += ["", f"### {CLAIMS_SECTION}", "", *[hit if hit.startswith("- ") else f"- {hit}" for hit in found]]
+    for section, fresh in ((CLAIMS_SECTION, claims), (HELD_SECTION, held)):
+        found = fresh or previous.get(section)
+        if found:
+            lines += ["", f"### {section}", "", *[hit if hit.startswith("- ") else f"- {hit}" for hit in found]]
     patches.mkdir(parents=True, exist_ok=True)
     report = patches / REPORT_NAME
     report.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1055,6 +1060,160 @@ def standing_divergence(
             continue
         out.append(rel)
     return out
+
+
+#: The tree's record of why files differ from the template.
+DIVERGENCE_RECORD = "scripts/template_divergence_allowlist.yaml"
+#: Read with the head render's copy: the tree's may be older, or edited, and this
+#: tool holds no parser of its own for a format the template owns.
+ALLOWLIST_READER = "scripts/allowlist.py"
+#: A ratchet's number: no reason could say more than that the ratchet moved.
+COVERAGE_BUDGET = "tests/coverage_budget.json"
+RELEASE_CONFIG = ".github/release-please-config.json"
+RELEASE_MANIFEST = ".github/.release-please-manifest.json"
+HELD_CAVEAT = "recorded for the file, not this hunk"
+
+
+def divergence_holds(target: Path, head_files: Dict[str, Path]) -> Tuple[Dict[str, Dict[str, str]], Optional[str]]:
+    """`{path: {entry key: reason}}` from the tree's record, and why it could not be read, if so.
+
+    An unreadable record costs the reasons and nothing else, because no outcome
+    here depends on them.
+    """
+    record = target / DIVERGENCE_RECORD
+    if not record.exists():
+        return {}, None
+    reader = head_files.get(ALLOWLIST_READER)
+    if reader is None:
+        return {}, f"the head render ships no {ALLOWLIST_READER}"
+    loader = importlib.machinery.SourceFileLoader("_head_allowlist", str(reader))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    try:
+        loader.exec_module(module)
+        entries = module.read(record)
+    except (OSError, ValueError) as error:
+        return {}, str(error)
+    holds: Dict[str, Dict[str, str]] = {}
+    for key, reason in entries.items():
+        holds.setdefault(key.partition(":")[0], {})[key] = reason
+    return holds, None
+
+
+def state_files(target: Path) -> Set[str]:
+    """Files a release or a ratchet writes, read from the tree's own release config.
+
+    `version-file` and the manifest only. `extra-files` also names files a person
+    edits, such as `package.json`, so it is no evidence a file is state.
+    """
+    found = {COVERAGE_BUDGET}
+    config = target / RELEASE_CONFIG
+    try:
+        packages = json.loads(config.read_text(encoding="utf-8")).get("packages", {})
+    except (OSError, ValueError, AttributeError):
+        return found
+    found.add(RELEASE_MANIFEST)
+    for root, package in packages.items():
+        version_file = package.get("version-file") if isinstance(package, dict) else None
+        if version_file:
+            found.add(version_file if root == "." else f"{root}/{version_file}")
+    return found
+
+
+def as_rendered(mine: str, theirs: str, rel: str, normaliser: Optional["Normaliser"]) -> Tuple[str, str]:
+    """Both sides as this run compares them: through the formatters when it was asked to."""
+    if normaliser and normaliser.applies(rel):
+        return normaliser(mine, rel), normaliser(theirs, rel)
+    return mine, theirs
+
+
+def split_standing(
+    diverged: List[str],
+    holds: Dict[str, Dict[str, str]],
+    target: Path,
+    renders: List[Dict[str, Path]],
+    normaliser: Optional["Normaliser"],
+) -> Dict[str, Any]:
+    """The standing list in four parts. It reports; nothing downstream reads it to decide.
+
+    Appended means a render is an exact prefix of the disk, so the template's text
+    is intact. That says nothing about whether the addition was sanctioned.
+    """
+    state = state_files(target)
+
+    def appended(rel: str) -> bool:
+        mine = read(target / rel)
+        for render in renders:
+            theirs = read(render.get(rel))
+            if mine is not None and theirs and theirs.strip():
+                ours, template = as_rendered(mine, theirs, rel, normaliser)
+                if ours != template and ours.startswith(template):
+                    return True
+        return False
+
+    parts: Dict[str, Any] = {"decided": {}, "state": [], "appended": [], "undecided": []}
+    for rel in diverged:
+        if rel in holds:
+            parts["decided"][rel] = holds[rel]
+        elif rel in state:
+            parts["state"].append(rel)
+        elif appended(rel):
+            parts["appended"].append(rel)
+        else:
+            parts["undecided"].append(rel)
+    return parts
+
+
+def retired_holds(
+    holds: Dict[str, Dict[str, str]],
+    target: Path,
+    renders: List[Dict[str, Path]],
+    normaliser: Optional["Normaliser"],
+) -> List[str]:
+    """Entries for a file that equals a render, seam content counted.
+
+    Counted, because a file differing only inside a seam still holds what its entry
+    recorded. A reformat retires an entry only on a `--normalise` run.
+    """
+    found = []
+    for rel, entries in sorted(holds.items()):
+        mine = read(target / rel) if (target / rel).exists() else None
+        theirs = [text for text in (read(render.get(rel)) for render in renders) if text is not None]
+        compared = [as_rendered(mine, text, rel, normaliser) for text in theirs] if mine is not None else []
+        if any(left == right for left, right in compared):
+            found += sorted(entries)
+    return found
+
+
+def template_lines(base: str, ours: str) -> str:
+    """The lines of the template's current text that changed, as `3-5, 40`."""
+    import difflib
+
+    matcher = difflib.SequenceMatcher(a=base.splitlines(), b=ours.splitlines(), autojunk=False)
+    spans = [(low + 1, max(high, low + 1)) for tag, _, _, low, high in matcher.get_opcodes() if tag != "equal"]
+    return ", ".join(str(low) if low == high else f"{low}-{high}" for low, high in spans)
+
+
+def held_note(lines: str) -> str:
+    """The caveat under a held file's reason, with the hunk's template lines when known."""
+    return f"{HELD_CAVEAT}; template lines {lines}" if lines else HELD_CAVEAT
+
+
+def report_divergence_parts(parts: Dict[str, Any]) -> None:
+    """The three standing parts that are not the headline."""
+    if parts["decided"]:
+        say("📌", f"{len(parts['decided'])} file(s) decided — differ from the template, with a recorded reason")
+        for rel, entries in parts["decided"].items():
+            item(rel)
+            for key, reason in entries.items():
+                detail(f"    {key}: {reason}" if ":" in key else f"    {reason}")
+    if parts["state"]:
+        say("🧾", f"{len(parts['state'])} state file(s) — written by a release or a ratchet, not an edit to decide")
+        for rel in parts["state"]:
+            item(rel)
+    if parts["appended"]:
+        say("➕", f"{len(parts['appended'])} file(s) appended — the template's text is intact, yours follows it")
+        for rel in parts["appended"]:
+            item(rel)
 
 
 def importers_of(needs_review: List[str], written: List[str], head_files: Dict[str, Path]) -> Dict[str, List[str]]:
@@ -3590,6 +3749,9 @@ def main() -> int:
                     detail("no file this scaffold ships. Nothing below is an artefact of them.")
 
         added, updated, merged, conflicted, collided, declined, dropped = [], [], [], [], [], [], []
+        # Read once, before anything is written, so a dry run and a real run agree.
+        holds, holds_unread = divergence_holds(target, head_files)
+        hunk_lines: Dict[str, str] = {}
         owned_files: List[str] = []
         #: Conflicts that a run of the tree's own formatters over both rendered
         #: sides would have resolved. Reported, never acted on without the flag.
@@ -3896,6 +4058,8 @@ def main() -> int:
             resolved = merge_file(rel, base, theirs, ours, workdir)
             if resolved is None:
                 conflicted.append(rel)
+                if rel in holds:
+                    hunk_lines[rel] = template_lines(base, ours)
                 # All or nothing. A partial count cannot tell a region the adopter
                 # deleted from one they reformatted — mind.head's test file showed
                 # "1 of 4" for lines ruff had merely rewrapped — so only the case
@@ -4162,6 +4326,16 @@ def main() -> int:
                     rel for rel in standing_divergence(target, *divergence_inputs, normalising) if rel not in owned
                 ]
 
+        renders = [files for files in (base_files, head_files) if files]
+        divergence = split_standing(diverged, holds, target, renders, normalising)
+        retired = retired_holds(holds, target, renders, normalising)
+        held_reached = [
+            f"`{rel}` ({what}): {reason} ({held_note(hunk_lines.get(rel, ''))})"
+            for what, group in (("conflict", conflicted), ("clean merge", merged))
+            for rel in group
+            for reason in holds.get(rel, {}).values()
+        ]
+
         # One call, two renderings. It was computed separately for the JSON and
         # for the human report — two call sites for one answer, which is the
         # duplication this repository refuses everywhere else, and it hid a
@@ -4224,6 +4398,7 @@ def main() -> int:
                 previous,
                 test_id_counts(test_ids),
                 arg_claims,
+                held_reached,
             )
             kept = " (what you filled in is kept)" if previous else ""
             say("📝", f"{report.relative_to(target)}: the counted sections are filled; the rest are yours{kept}")
@@ -4318,6 +4493,10 @@ def main() -> int:
                         # it differently, and this one is measured against a base
                         # that depends on whether the run advanced.
                         "diverged": diverged,
+                        # The same list in its four parts, and the entries that no
+                        # longer hold anything. Reported only: no outcome reads them.
+                        "divergence": divergence,
+                        "divergence_stale": retired,
                         "dropped": dropped,
                         # Both halves of `stale_against_head`, for the reason
                         # `diverged` and `head_ref` are here: a consumer that has
@@ -4349,6 +4528,15 @@ def main() -> int:
                     item(rel)
                 if len(group) > 20:
                     detail(f"… and {len(group) - 20} more")
+
+        held_merges = [rel for rel in merged if rel in holds]
+        if held_merges:
+            took = "would take" if args.dry_run else "took"
+            say("📌", f"{len(held_merges)} held file(s) {took} a template change on a clean merge")
+            for rel in held_merges:
+                item(rel)
+                for reason in holds[rel].values():
+                    detail(f"    {reason}")
 
         # One line on every run that writes Python, found or not. v0.41.0 printed
         # only findings, so a clean forecast and one that never ran read the same
@@ -4405,6 +4593,12 @@ def main() -> int:
                 " if you removed that part, there is nothing to port"
             )
 
+        def report_held_conflict(rel: str) -> None:
+            for reason in holds.get(rel, {}).values():
+                detail(f"    held: {reason}")
+            if rel in holds:
+                detail(f"    {held_note(hunk_lines.get(rel, ''))}")
+
         if conflicted and advanced:
             # **The run that records a port reports it once, in its own voice.** It
             # re-merged against a base it had not yet replaced, so a correctly
@@ -4418,6 +4612,7 @@ def main() -> int:
             say("⚠️ ", f"{len(conflicted)} conflicted file(s) recorded as resolved — the base advanced past them")
             for rel in conflicted:
                 item(rel + where_it_was(rel))
+                report_held_conflict(rel)
             detail()
             detail("Taken on trust, as --ported asserts. In each, this run could not find the template's")
             detail("change — reflowed prose is looked past, other rewording is not — so the change is")
@@ -4428,6 +4623,7 @@ def main() -> int:
             say("❌", f"{len(conflicted)} file(s) that differ from the template — merge conflicts, LEFT ALONE")
             for rel in conflicted:
                 item(rel + where_it_was(rel))
+                report_held_conflict(rel)
             detail()
             detail("Nothing was written to these.")
             if args.dry_run:
@@ -4672,6 +4868,13 @@ def main() -> int:
                     detail(f"This release also adds {len(added)} file(s), which may rely on what changed in")
                     detail("those. Read the change before declining it again: " + ", ".join(fresh))
 
+        if holds_unread:
+            say("⚠️ ", f"{DIVERGENCE_RECORD} could not be read, so no reason prints: {holds_unread}")
+        if retired:
+            say("⚠️ ", f"{len(retired)} entry(ies) in {DIVERGENCE_RECORD} hold nothing: the file equals a render")
+            for key in retired:
+                item(key)
+            detail("Delete them. The file no longer differs from the template, so the reason is out of date.")
         if diverged:
             # The symmetric half of the block above, and it took an adopter to
             # notice the asymmetry. A deletion was standing state — reported
@@ -4694,7 +4897,8 @@ def main() -> int:
             # A count and a list rather than a count alone, because unlike a
             # decline there is nothing further to say about each one: no sidecar,
             # no second look, no action. The names ARE the report.
-            say("📝", f"{len(diverged)} file(s) skeletor wrote and you have edited — standing state")
+            undecided = divergence["undecided"]
+            say("📝", f"{len(undecided)} file(s) skeletor wrote and you have edited — standing state")
             # **"Yours by decision" asserted something nothing checked.** It is true
             # of a file somebody edited on purpose and false of one that simply
             # never received a template change — the ordinary state of a tree
@@ -4711,8 +4915,9 @@ def main() -> int:
             detail("which. `--show <path>` prints the template's current version to compare.")
             detail("An upgrade merges into these rather than replacing them, and `--ported`")
             detail("advances the base without erasing that.")
-            for rel in diverged:
+            for rel in undecided:
                 item(rel)
+            report_divergence_parts(divergence)
             # ## How many of those "decisions" are a formatter's, counted here
             #
             # This block hashes raw bytes while the merge honours `--normalise`, so a

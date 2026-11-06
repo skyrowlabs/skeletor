@@ -1,0 +1,36 @@
+# Why a file in this tree differs from what skeletor renders, one decision per
+# entry. An upgrade prints the reason beside the file, so whoever reads the next
+# conflict knows it was decided, and by which words.
+#
+# `path: reason`, or `path:label: reason` for several holds on one file, each of
+# which prints alone and can be deleted alone. A reason is required:
+# `scripts/allowlist.py` drops an entry without one.
+#
+# An entry records. It never changes a merge, a classification or an exit code,
+# and a reason that reads like a recipe is still only read by a person: a hunk
+# that conflicts stays yours to resolve. It is recorded for the file, so it says
+# nothing about any one hunk.
+#
+# Three kinds of file need no entry, because an upgrade already sorts them: the
+# release version files and `tests/coverage_budget.json` are state, a file whose
+# whole template text survives with yours after it is appended, and a change
+# between a seam's two rules is not listed at all. A file that differs and has
+# neither an entry nor one of those shapes is undecided, and undecided is the
+# count an upgrade leads with.
+#
+# An entry for a file that no longer differs from what skeletor wrote, or for a
+# path that is neither here nor recorded, is stale and fails
+# `tests/test_template_divergence_allowlist.py`. A file you deleted keeps its
+# entry, since a recorded deletion is a decision too.
+
+# ── Nothing below this line is skeletor's ────────────────────────────────────
+#
+# Everything of yours goes between this rule and the closing one below: appends,
+# and any prose you write about them. Both rules are frozen — skeletor does not
+# rewrite either block and renders nothing between them, so your insertion point
+# is never adjacent to a template line that a release might edit. The
+# explanation above IS ordinary prose and does get rewritten, which is why the
+# rule sits at the bottom of it rather than at the top.
+
+
+# ── Skeletor's again below this line ─────────────────────────────────────────

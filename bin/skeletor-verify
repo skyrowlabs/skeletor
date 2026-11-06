@@ -39,7 +39,7 @@ import time
 import types
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 SKELETOR = Path(__file__).resolve().parents[1]
 SCAFFOLDER = SKELETOR / "bin" / "skeletor-new"
@@ -9301,6 +9301,21 @@ def normalise_gate(workdir: Path, venv_python: Path) -> List[Result]:
             f"path printed in both columns. Listed: {standing_names(normalised)}"
         )
 
+    # A reformat retires a record's entry, and only a `--normalise` run can see it.
+    held_record = (
+        tree / load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade_for_normalise").DIVERGENCE_RECORD
+    )
+    held_text = held_record.read_text(encoding="utf-8")
+    closing = "# ── Skeletor's again below this line"
+    held_record.write_text(held_text.replace(closing, f"{rel}: only the formatter's\n{closing}"), encoding="utf-8")
+    stale_by_run = {}
+    for flags in ((), ("--normalise",)):
+        ran = subprocess.run([*upgrade, "--json", *flags], cwd=tree, capture_output=True, text=True)
+        stale_by_run[flags] = json.loads(ran.stdout).get("divergence_stale") if ran.stdout.startswith("{") else None
+    held_record.write_text(held_text, encoding="utf-8")
+    if stale_by_run != {(): [], ("--normalise",): [rel]}:
+        problems.append(f"a formatter-only hold is stale under --normalise alone; got {stale_by_run}")
+
     # ## A formatter at the wrong version is refused, and says both numbers
     #
     # `--normalise` resolves each declared formatter from the tree's `.venv` and
@@ -11157,6 +11172,307 @@ def components_gate(workdir: Path) -> List[Result]:
             time.time() - started,
             f"fresh: {fresh}\nfalsified: {falsified}\nboth: {both}",
         )
+    )
+    return results
+
+
+def divergence_record_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """The standing list splits in four, and the record never changes an outcome.
+
+    A real version gap, because a conflict and a clean merge need base text: a
+    second clone carries a template commit, and a control tree without entries takes
+    the same run. Equal outcomes across the two are the claim; the rest is the report.
+    """
+    started = time.time()
+    clean = clean_skeletor(workdir)
+    gap = workdir / "divergence-skeletor"
+    run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(gap)], cwd=workdir)
+    tree = workdir / "divergence-tree" / "probe"
+    code, output = run(
+        [
+            sys.executable,
+            str(clean / "bin" / "skeletor-new"),
+            str(tree),
+            "--name",
+            "Probe",
+            "--cli",
+            CLI_NAME,
+            "--tagline",
+            "t",
+            "--tier",
+            "core",
+            "--language",
+            "python",
+            "--force",
+        ],
+        cwd=SKELETOR,
+    )
+    if code != 0:
+        return [Result("divergence record: scaffold the tree", False, time.time() - started, output)]
+    (tree / ".venv").symlink_to(venv_python.parent.parent)
+
+    upgrade_tool = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade_for_divergence")
+    record_rel = upgrade_tool.DIVERGENCE_RECORD
+    record = tree / record_rel
+    shipped = record.read_text(encoding="utf-8")
+    seam_rule = upgrade_tool.SEAM_CLOSING
+
+    def unique_line(rel: str, fraction: float) -> str:
+        """A prose line near `fraction` of the file, the same and alone in both the render and the template."""
+        lines = (tree / rel).read_text(encoding="utf-8").splitlines()
+        source = (gap / "template" / "core" / rel).read_text(encoding="utf-8").splitlines()
+        wanted = int(len(lines) * fraction)
+        order = sorted(range(len(lines)), key=lambda index: abs(index - wanted))
+        return next(
+            lines[i]
+            for i in order
+            if len(lines[i]) > 30
+            and lines.count(lines[i]) == 1
+            and source.count(lines[i]) == 1
+            and "{{" not in lines[i]
+        )
+
+    def edit(path: Path, line: str, suffix: str) -> None:
+        text = path.read_text(encoding="utf-8")
+        assert line in text, f"the plant did not land in {path}"
+        path.write_text(text.replace(line, line + suffix), encoding="utf-8")
+
+    conflict, merges = "docs/rules/commits.md", "docs/rules/testing.md"
+    undecided, decided, tail, untouched = (
+        "docs/rules/output.md",
+        "docs/rules/workflows.md",
+        "docs/rules/docs.md",
+        ".flake8",
+    )
+    version, budget, config = "VERSION", upgrade_tool.COVERAGE_BUDGET, upgrade_tool.RELEASE_CONFIG
+
+    # The template moves: one line both sides change, one line only it changes.
+    conflict_line = unique_line(conflict, 0.5)
+    template_edit = unique_line(merges, 0.25)
+    theirs_edit = unique_line(merges, 0.75)
+    edit(gap / "template" / "core" / conflict, conflict_line, " (the template's)")
+    edit(gap / "template" / "core" / merges, template_edit, " (the template's)")
+    git_in(gap, "commit", "--quiet", "-am", "scratch: move two rule files")
+
+    # The tree moves.
+    edit(tree / conflict, conflict_line, " (mine)")
+    edit(tree / merges, theirs_edit, " (mine)")
+    edit(tree / undecided, unique_line(undecided, 0.5), " (mine)")
+    edit(tree / decided, unique_line(decided, 0.5), " (mine)")
+    (tree / tail).write_text(
+        (tree / tail).read_text(encoding="utf-8") + "\nmine, after the template\n", encoding="utf-8"
+    )
+    (tree / version).write_text("9.9.9\n", encoding="utf-8")
+    (tree / budget).write_text((tree / budget).read_text(encoding="utf-8").rstrip() + "\n\n", encoding="utf-8")
+    # `extra-files` is no evidence of state, so a file named there stays undecided.
+    release = json.loads((tree / config).read_text(encoding="utf-8"))
+    release["packages"]["."]["extra-files"] = [undecided]
+    (tree / config).write_text(json.dumps(release, indent=2) + "\n", encoding="utf-8")
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "--quiet", "-m", "adopter: edits")
+
+    control = workdir / "divergence-control" / "probe"
+    control.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(tree, control, symlinks=True)
+
+    entries = {
+        conflict: "the commit rules are our own",
+        merges: "the suite here is ordered differently",
+        f"{decided}:one": "first hold on this file",
+        f"{decided}:two": "second hold on this file",
+        untouched: "held and no longer different",
+    }
+    body = "".join(f"{key}: {reason}\n" for key, reason in entries.items())
+
+    def with_entries(text: str) -> str:
+        assert seam_rule in shipped, "the plant did not land: the record ships no closing rule"
+        return shipped.replace(seam_rule, text + "\n" + seam_rule)
+
+    record.write_text(with_entries(body), encoding="utf-8")
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "--quiet", "-m", "adopter: record the decisions")
+
+    def up(where: Path, *extra: str) -> Tuple[int, Dict[str, Any], str]:
+        ran = subprocess.run(
+            [sys.executable, str(gap / "bin" / "skeletor-upgrade"), str(where), "--allow-untagged", "--json", *extra],
+            cwd=where,
+            capture_output=True,
+            text=True,
+            env=subprocess_env(None),
+        )
+        try:
+            return ran.returncode, json.loads(ran.stdout), ran.stderr
+        except ValueError:
+            return ran.returncode, {}, ran.stderr + ran.stdout
+
+    outcomes = ("added", "updated", "merged", "conflicted", "collided", "declined", "carried", "dropped", "diverged")
+    results: List[Result] = []
+
+    # The four parts, and the headline.
+    started = time.time()
+    code, dry, text = up(tree, "--dry-run")
+    parts = dry.get("divergence", {})
+    problems = []
+    if code not in (0, 1) or not parts:
+        problems.append(f"the dry run produced no divergence block (exit {code})")
+    if set(parts.get("decided", {})) != {conflict, merges, decided}:
+        problems.append(f"decided is {sorted(parts.get('decided', {}))}")
+    if sorted(parts.get("decided", {}).get(decided, {})) != [f"{decided}:one", f"{decided}:two"]:
+        problems.append("the two labelled holds did not survive as two")
+    if set(parts.get("state", [])) != {version, budget}:
+        problems.append(f"state is {parts.get('state')}")
+    if parts.get("appended") != [tail]:
+        problems.append(f"appended is {parts.get('appended')}")
+    if set(parts.get("undecided", [])) != {undecided, config}:
+        problems.append(f"undecided is {parts.get('undecided')}: a file in `extra-files` is not state")
+    if "2 file(s) skeletor wrote and you have edited" not in text:
+        problems.append("the headline does not count undecided alone")
+    if record_rel in dry.get("diverged", []):
+        problems.append(f"{record_rel} holds entries between its rules and is on the standing list")
+    results.append(
+        Result(
+            "divergence record: the standing list splits in four",
+            not problems,
+            time.time() - started,
+            f"{problems}\n{text}"[:3000],
+        )
+    )
+
+    # Reasons where the template reaches a held file, on a dry run.
+    started = time.time()
+    # The render's numbering, not the template source's, which carries scaffold-time blocks.
+    lines_now = (tree / conflict).read_text(encoding="utf-8").splitlines()
+    changed_at = next(i for i, line in enumerate(lines_now, start=1) if line.startswith(conflict_line))
+    problems = []
+    if conflict not in dry.get("conflicted", []) or merges not in dry.get("merged", []):
+        problems.append(f"the fixture missed: conflicted {dry.get('conflicted')}, merged {dry.get('merged')}")
+    for wanted in (
+        f"held: {entries[conflict]}",
+        f"{upgrade_tool.HELD_CAVEAT}; template lines {changed_at}",
+        "a template change on a clean merge",
+        entries[merges],
+        f"{decided}:one: {entries[f'{decided}:one']}",
+        f"{decided}:two: {entries[f'{decided}:two']}",
+    ):
+        if wanted not in text:
+            problems.append(f"not printed: {wanted}")
+    if dry.get("divergence_stale") != [untouched]:
+        problems.append(f"tool-side stale is {dry.get('divergence_stale')}, not the one entry on an untouched file")
+    results.append(
+        Result(
+            "divergence record: a reason prints where the template reaches it",
+            not problems,
+            time.time() - started,
+            f"{problems}\n{text}"[:3000],
+        )
+    )
+
+    # The reader is the head render's: neither the tree's copy nor one inside this tool.
+    started = time.time()
+    problems = []
+    reader_rel = upgrade_tool.ALLOWLIST_READER
+    tree_reader, head_reader = tree / reader_rel, gap / "template" / "core" / reader_rel
+    tree_text, head_text = tree_reader.read_text(encoding="utf-8"), head_reader.read_text(encoding="utf-8")
+    tree_reader.write_text("raise SystemExit('the tree reader ran')\n", encoding="utf-8")
+    _, broken, _ = up(tree, "--dry-run")
+    tree_reader.write_text(tree_text, encoding="utf-8")
+    if conflict not in broken.get("divergence", {}).get("decided", {}):
+        problems.append("a broken reader in the tree took the reasons with it, so the tree's copy is what ran")
+    needle = "    return out\n"
+    if needle not in head_text:
+        problems.append("the plant did not land: the head reader has no `return out`")
+    head_reader.write_text(
+        head_text.replace(needle, "    return {k: v.upper() for k, v in out.items()}\n"), encoding="utf-8"
+    )
+    _, shouted, _ = up(tree, "--dry-run")
+    head_reader.write_text(head_text, encoding="utf-8")
+    seen = shouted.get("divergence", {}).get("decided", {}).get(conflict, {}).get(conflict)
+    if seen != entries[conflict].upper():
+        problems.append(f"a changed head reader changed nothing ({seen!r}), so it is not what ran")
+    results.append(
+        Result(
+            "divergence record: read with the head render's reader", not problems, time.time() - started, str(problems)
+        )
+    )
+
+    # The record is structural: outside its rules it is a fork; unreadable, it costs reasons only.
+    started = time.time()
+    problems = []
+    record.write_text(with_entries(body) + "stray.md: outside the rules\n", encoding="utf-8")
+    _, stray, _ = up(tree, "--dry-run")
+    if record_rel not in stray.get("divergence", {}).get("undecided", []):
+        problems.append(f"an entry outside the rules did not put {record_rel} on the undecided list")
+    record.write_text(with_entries(body + f"{conflict}: written twice\n"), encoding="utf-8")
+    code_twice, twice, text_twice = up(tree, "--dry-run")
+    if "could not be read" not in text_twice or twice.get("divergence", {}).get("decided"):
+        problems.append(f"a record the reader refuses did not say so:\n{text_twice[-600:]}")
+    if [twice.get(key) for key in outcomes[:8]] != [dry.get(key) for key in outcomes[:8]] or code_twice != code:
+        problems.append("a record the reader refuses changed an outcome")
+    record.write_text(with_entries(body), encoding="utf-8")
+    results.append(
+        Result(
+            "divergence record: structural, and unreadable costs only reasons",
+            not problems,
+            time.time() - started,
+            str(problems),
+        )
+    )
+
+    # The tree's own test: stale and misplaced entries are red, a true record is green.
+    started = time.time()
+    problems = []
+    suite = [
+        str(venv_python),
+        "-m",
+        "pytest",
+        "tests/test_template_divergence_allowlist.py",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+    ]
+    held_true = "".join(f"{key}: {reason}\n" for key, reason in entries.items() if key != untouched)
+    code_stale, output_stale = run(suite, cwd=tree)
+    if code_stale == 0 or untouched not in output_stale:
+        problems.append(f"an entry on an untouched file passed the tree's test:\n{output_stale[-600:]}")
+    record.write_text(with_entries(held_true), encoding="utf-8")
+    code_true, output_true = run(suite, cwd=tree)
+    if code_true != 0:
+        problems.append(f"a true record is red in the tree:\n{output_true[-600:]}")
+    record.write_text(with_entries(held_true) + "\nstray.md: outside the rules\n", encoding="utf-8")
+    code_out, output_out = run(suite, cwd=tree)
+    if code_out == 0:
+        problems.append("an entry outside the rules passed the tree's test")
+    record.write_text(with_entries(body), encoding="utf-8")
+    results.append(
+        Result("divergence record: the tree holds its own record", not problems, time.time() - started, str(problems))
+    )
+
+    # The same real run, with and without entries, lands the same bytes.
+    started = time.time()
+    code_held, held, _ = up(tree)
+    code_bare, bare, _ = up(control)
+    problems = []
+    if code_held != code_bare:
+        problems.append(f"exit {code_held} with entries, {code_bare} without")
+    for key in outcomes:
+        if [rel for rel in held.get(key, []) if rel != record_rel] != [
+            rel for rel in bare.get(key, []) if rel != record_rel
+        ]:
+            problems.append(f"`{key}` differs: {held.get(key)} against {bare.get(key)}")
+    for rel in (conflict, merges, decided, undecided, tail):
+        if (tree / rel).read_bytes() != (control / rel).read_bytes():
+            problems.append(f"{rel} landed differently with an entry on it")
+    report_path = tree / "tmp" / "upgrade" / "REPORT.md"
+    report = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
+    bare_report_path = control / "tmp" / "upgrade" / "REPORT.md"
+    bare_report = bare_report_path.read_text(encoding="utf-8") if bare_report_path.exists() else ""
+    heading = f"### {upgrade_tool.HELD_SECTION}"
+    if heading not in report or entries[conflict] not in report or entries[merges] not in report:
+        problems.append(f"REPORT.md does not carry the reasons:\n{report}")
+    if heading in bare_report:
+        problems.append("a report with nothing held still has the section")
+    results.append(
+        Result("divergence record: entries change no outcome", not problems, time.time() - started, str(problems))
     )
     return results
 
@@ -14519,6 +14835,9 @@ def main() -> int:
             results.append(gate)
 
         for gate in pending_ref_gate(workdir):
+            results.append(gate)
+
+        for gate in divergence_record_gate(workdir, venv_python):
             results.append(gate)
 
         for gate in pinned_ref_gate(workdir):
