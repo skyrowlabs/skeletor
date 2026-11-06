@@ -1626,6 +1626,9 @@ def main() -> int:
 
     after_copy = hash_tree(target)
     pristine = pristine_post_copy(target, written, values) if populated else {}
+    # After the pristine copy, which must hold the render alone, and before the steps:
+    # one asks git what is ignored here, and the adopter's rules are part of that answer.
+    merged = keep_theirs_below(target, before_text, pre_existing.intersection(written))
     post_copy_steps(target, values, written)
 
     # Last, and after the two steps above: both write files, and a manifest
@@ -1669,7 +1672,6 @@ def main() -> int:
     # complete. Found by building `--dry-run` and comparing its prediction
     # against this list; they are the same set by construction now, which is
     # what makes the prediction worth anything.
-    merged = keep_theirs_below(target, before_text, pre_existing.intersection(produced))
     for rel in merged:
         print(f"ℹ️  {rel}: yours is kept whole, below skeletor's, under a marked header")
     overwritten = sorted(pre_existing.intersection(produced) - set(merged))

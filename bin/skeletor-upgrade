@@ -584,7 +584,7 @@ def ported_paths_cover(named: List[str], pending: List[str]) -> bool:
     """
     paths = {Path(rel).as_posix() for rel in named}
     for rel in sorted(paths - set(pending)):
-        say("ℹ️ ", f"--ported-path {rel}: no longer pending, so this names nothing to advance past")
+        say("ℹ️ ", f"--ported-path {rel}: not pending, so this names nothing to advance past")
     unnamed = sorted(set(pending) - paths)
     if unnamed:
         say("⏸️ ", f"--ported-path named {len(paths)} file(s) and left {len(unnamed)} pending unnamed:")
@@ -1067,7 +1067,8 @@ DIVERGENCE_RECORD = "scripts/template_divergence_allowlist.yaml"
 #: Read with the head render's copy: the tree's may be older, or edited, and this
 #: tool holds no parser of its own for a format the template owns.
 ALLOWLIST_READER = "scripts/allowlist.py"
-#: A ratchet's number: no reason could say more than that the ratchet moved.
+#: Its number moves with the suite, and no reason could say more than that it moved.
+#: `tests/skip_budget.json` is not state: raising it is a decision, so it takes a reason.
 COVERAGE_BUDGET = "tests/coverage_budget.json"
 RELEASE_CONFIG = ".github/release-please-config.json"
 RELEASE_MANIFEST = ".github/.release-please-manifest.json"
@@ -1207,7 +1208,10 @@ def report_divergence_parts(parts: Dict[str, Any]) -> None:
             for key, reason in entries.items():
                 detail(f"    {key}: {reason}" if ":" in key else f"    {reason}")
     if parts["state"]:
-        say("🧾", f"{len(parts['state'])} state file(s) — written by a release or a ratchet, not an edit to decide")
+        say(
+            "🧾",
+            f"{len(parts['state'])} state file(s) — written by a release or the coverage ratchet, not an edit to decide",
+        )
         for rel in parts["state"]:
             item(rel)
     if parts["appended"]:

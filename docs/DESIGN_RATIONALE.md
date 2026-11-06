@@ -5759,7 +5759,10 @@ rules shows up on the standing list by itself.
 **The state set comes from the tree's release config, `version-file` and the
 manifest, never `extra-files`**, which also names files a person edits.
 `scripts/requirements.txt` is not state: a reason there can say something a machine
-cannot, such as keeping a floor while taking the template's new lines.
+cannot, such as keeping a floor while taking the template's new lines. Nor is
+`tests/skip_budget.json`, though it is a ratchet too. A coverage floor moves with the
+suite; a skip ceiling is raised by somebody accepting that a test stopped running,
+and that sentence is exactly what an entry is for.
 
 **The tool reads the record with the head render's `scripts/allowlist.py`.** The
 tree's copy may be older or edited, and a parser here would be a second reader of a
