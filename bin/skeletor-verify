@@ -7976,7 +7976,14 @@ def foreign_exit_gate(workdir: Path, venv_python: Path) -> List[Result]:
     declared, declared_out = with_gate(", no_subject=True")
     undeclared, undeclared_out = with_gate("")
     gates.write_text(kept)
+    health, health_out = run([wrapper, "check", "health"], cwd=tree, env_extra=env)
     return [
+        Result(
+            "foreign exit: the scaffold's health stub exits 3 and says no subject",
+            health == 3 and "no subject" in health_out,
+            0.0,
+            f"exit {health}\n{health_out[-400:]}",
+        ),
         Result(
             "foreign exit: a pytest that crashed with exit 3 turns check pre-push red",
             bare == 3 and crashed == 1 and "❌  unit tests" in crash_out,
