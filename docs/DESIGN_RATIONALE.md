@@ -5711,3 +5711,17 @@ so the dead-callable check read live functions as removed and the history scan
 could not explain `verify.yml`'s full clone. Skeletor's own prose named template
 paths as though they were this tree's, and quoted this machine's home directory
 in identity fixtures. A commit subject of mine broke the tree's commit rule.
+
+## A placeholder in code is frozen once the template invites its replacement
+
+`check health`'s stub says `SCAFFOLD: replace with this project's real health probes`,
+and v0.76.1 edited it for the exit contract. Two of eight trees had done as the comment
+asks and conflicted on it, and proto.pilot declined the hunk. The edit was the template
+changing a line it had told trees to replace.
+
+So a `SCAFFOLD:` block in code stays as it is, comment included. A change that has to
+reach one names the conflict in its release. There is no gate: the stub changed once in
+141 tags. Moving the body behind a seam was proto.pilot's first offer and is declined,
+because moving it is one more edit of the same hunk, in the two trees it would serve.
+
+The import line above it is not frozen, so a tree that trimmed it can still conflict there.
