@@ -4,7 +4,9 @@
 #
 # `path: reason`, or `path:label: reason` for several holds on one file, each of
 # which prints alone and can be deleted alone. A reason is required:
-# `scripts/allowlist.py` drops an entry without one.
+# `scripts/allowlist.py` drops an entry without one. The commit hook also parses
+# this file as YAML, so put double quotes round a reason that opens with a
+# backtick or holds a colon and a space; the reader takes them off.
 #
 # An entry records. It never changes a merge, a classification or an exit code,
 # and a reason that reads like a recipe is still only read by a person: a hunk
@@ -14,7 +16,8 @@
 # Three kinds of file need no entry, because an upgrade already sorts them: the
 # release version files and `tests/coverage_budget.json` are state, a file whose
 # whole template text survives with yours after it is appended, and a change
-# between a seam's two rules is not listed at all. A file that differs and has
+# between a seam's two rules is not listed at all. `tests/skip_budget.json` is not
+# state: raising it is a decision, so it takes a reason. A file that differs and has
 # neither an entry nor one of those shapes is undecided, and undecided is the
 # count an upgrade leads with.
 #
