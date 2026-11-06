@@ -71,7 +71,12 @@ def test_holders_reads_the_tree_it_is_given(tmp_path):
 
 def test_a_dead_holder_does_not_wedge_the_tree(tmp_path):
     """A pid that is gone holds nothing, however recently it said otherwise."""
-    _write_hold(tmp_path, pid=999_999, owner="crashed-job", age_s=7200)
+    import subprocess
+
+    # A reaped child rather than a literal: any fixed number can be a live pid here.
+    child = subprocess.Popen([sys.executable, "-c", ""])
+    child.wait()
+    _write_hold(tmp_path, pid=child.pid, owner="crashed-job", age_s=7200)
 
     assert tree_lock.holders(root=tmp_path) == []
 
