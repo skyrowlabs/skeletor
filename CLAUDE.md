@@ -89,6 +89,7 @@ bin/skeletor-components report ../target            # what moved upstream since 
 bin/skeletor-upgrade ../target --dry-run
 bin/skeletor-upgrade ../target
 bin/skeletor-upgrade ../target --ported   # I resolved the conflicts; advance the base
+bin/skeletor-upgrade ../target --ported-path a --ported-path b   # the same, holding if one is unnamed
 bin/skeletor-upgrade ../target --ref v0.24.0   # pin the head render to a released tag
 bin/skeletor-upgrade ../target --rehearse      # dry run, then the tree's own gates and hooks before/after, in a worktree
 ```
@@ -614,6 +615,12 @@ before and after, and reports IDs rather than totals, because one measured upgra
 went 633 to 633 with five removed and five added. pytest's exit code is the
 verdict, since an interrupted collection can still print every ID. A rehearsal
 reads the same result out of the applying run's `--json`.
+
+`claim_sweep_gate` holds the sweep a `--set-arg` run makes: lines the tree wrote
+that still name the old value are reported and never edited. The render's own
+lines are out of scope by construction, which is the filter that took mind.head
+from 20 hits to the 1 true one. It runs before any write, because an applied file
+differs from its recorded hash and would read as the tree's own.
 
 The lint gates exist because their absence shipped: a scaffold once carried 19
 files `black` would rewrite, 20 imports `flake8` rejects, and markdown
