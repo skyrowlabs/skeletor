@@ -7784,6 +7784,22 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
             _, second = run(
                 [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--dry-run"], cwd=target
             )
+            # A correct hand port leaves `pending` for `carried`, so naming it must still advance.
+            port = workdir / f"pending-port-{index}" / "probe"
+            shutil.copytree(target, port, symlinks=True)
+            (port / planted[0]).write_bytes((head_tree / planted[0]).read_bytes())
+            _, named = run(
+                [
+                    sys.executable,
+                    str(clean / "bin" / "skeletor-upgrade"),
+                    str(port),
+                    "--ported-path",
+                    planted[0],
+                    "--allow-untagged",
+                ],
+                cwd=port,
+            )
+            named_ref = json.loads((port / scaffolder.MANIFEST_NAME).read_text(encoding="utf-8"))["skeletor_ref"]
             # `--ported` is warranted in exactly this state and no other — and
             # this state is dirty, because the run above wrote every file it
             # could apply. Nothing is committed between the two runs on
@@ -7898,7 +7914,13 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
                 not problems,
                 time.time() - started,
                 "\n".join(problems) or f"tried: {'; '.join(attempts)}",
-            )
+            ),
+            Result(
+                "pending ref: --ported-path naming a correctly ported file advances and says it left pending",
+                named_ref != before and f"--ported-path {rel}: no longer pending" in named,
+                0.0,
+                f"ref {before} → {named_ref}\n{named[-1500:]}",
+            ),
         ]
 
     return [
@@ -7908,6 +7930,59 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
             time.time() - started,
             "\n".join(attempts),
         )
+    ]
+
+
+def ported_path_gate(tier: str, workdir: Path) -> List[Result]:
+    """`--ported-path` advances only when every pending file is named.
+
+    The skew is `sidecar_gate`'s: a tampered hash reads as a conflict under
+    `--no-base`, so two conflicts need no version gap. A correct port is
+    `pending_ref_gate`'s question, since it needs a real base.
+    """
+    manifest_name = load_scaffolder().MANIFEST_NAME
+    upgrade_bin = clean_skeletor(workdir) / "bin" / "skeletor-upgrade"
+    upgrade = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade")
+    started = time.time()
+    result, tree = scaffold(tier, "python", workdir, name="ported-path")
+    if not result.ok:
+        return [Result(f"ported path: {result.label}", False, result.seconds, result.output)]
+    manifest = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
+    first, second = sorted(rel for rel in manifest["files"] if rel.endswith(".md"))[:2]
+    for rel in (first, second):
+        manifest["files"][rel] = "0" * 64
+        (tree / rel).write_text("theirs, edited\n", encoding="utf-8")
+    (tree / manifest_name).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "-m", "tamper")
+
+    def apply(*extra: str) -> Tuple[int, str, dict]:
+        command = [sys.executable, str(upgrade_bin), str(tree), "--no-base", "--allow-untagged", "--json", *extra]
+        code, output = run(command, cwd=tree)
+        return code, output, upgrade.envelope_of(output[output.rfind("\n{") + 1 :])
+
+    mixed, refused, _ = apply("--ported", "--ported-path", first)
+    _, partial, held = apply("--ported-path", first)
+    _, whole, moved = apply("--ported-path", first, "--ported-path", f"./{second}", "--ported-path", "docs/typo.md")
+    return [
+        Result(
+            "ported path: --ported beside it is refused, because it would check nothing",
+            mixed != 0 and "pick one" in refused,
+            0.0,
+            refused[-600:],
+        ),
+        Result(
+            "ported path: an unnamed pending file holds the base and is named",
+            held.get("base_advanced") is False and "left 1 pending unnamed" in partial and second in partial,
+            time.time() - started,
+            partial[-1500:],
+        ),
+        Result(
+            "ported path: every pending file named advances, and a stray name is said",
+            moved.get("base_advanced") is True and "--ported-path docs/typo.md: no longer pending" in whole,
+            time.time() - started,
+            whole[-1500:],
+        ),
     ]
 
 
@@ -14384,6 +14459,7 @@ def main() -> int:
 
         results += required_contexts_gate(workdir)
 
+        results += ported_path_gate(fullest, workdir)
         results += claim_sweep_gate(workdir)
         for gate in set_arg_gate(workdir):
             results.append(gate)

@@ -571,6 +571,23 @@ def refuse_a_dirty_base(base: Path, writing: str, role: str) -> None:
     raise SystemExit(1)
 
 
+def ported_paths_cover(named: List[str], pending: List[str]) -> bool:
+    """Whether `--ported-path` named every pending file, saying what it did not match.
+
+    A named path that is not pending is printed and never refused: a correct port
+    leaves pending by being carried, and a typo looks the same from here.
+    """
+    paths = {Path(rel).as_posix() for rel in named}
+    for rel in sorted(paths - set(pending)):
+        say("ℹ️ ", f"--ported-path {rel}: no longer pending, so this names nothing to advance past")
+    unnamed = sorted(set(pending) - paths)
+    if unnamed:
+        say("⏸️ ", f"--ported-path named {len(paths)} file(s) and left {len(unnamed)} pending unnamed:")
+        for rel in unnamed:
+            item(rel)
+    return not unnamed
+
+
 def refuse_a_dirty_tree(target: Path, ported: bool = False) -> None:
     """An upgrade whose result cannot be read, or undone, must not start.
 
@@ -3058,6 +3075,14 @@ def main() -> int:
         "`--ported` records it for you on a collision (a file you had before the template claimed it).",
     )
     parser.add_argument(
+        "--ported-path",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="--ported for one named file, repeatable: advance the base only if every pending "
+        "file is named, so a new conflict cannot ride in behind the ones you resolved.",
+    )
+    parser.add_argument(
         "--ported",
         action="store_true",
         help="assert every conflict and collision is resolved as you want it, and advance "
@@ -3085,6 +3110,8 @@ def main() -> int:
     )
     parser.add_argument("--quick", action="store_true", help="with --rehearse: `check pre-push --quick`, no suites")
     args = parser.parse_args(join_set_arg(sys.argv[1:]))
+    if args.ported and args.ported_path:
+        parser.error("--ported advances past everything, so naming files beside it would check nothing: pick one")
     if args.quick and not args.rehearse:
         die("--quick only means something with --rehearse")
     if args.rehearse:
@@ -3101,7 +3128,7 @@ def main() -> int:
         die(f"{target} is not a directory")
 
     if not (args.dry_run or args.repair_manifest or args.allow_dirty):
-        refuse_a_dirty_tree(target, ported=args.ported)
+        refuse_a_dirty_tree(target, ported=args.ported or bool(args.ported_path))
 
     pre_upgrade = head_commit(target)
     # This one before a single byte is written, or it answers about the upgrade's
@@ -3903,6 +3930,8 @@ def main() -> int:
 
         # The generated docs are rebuilt, never merged.
         pending = conflicted + collided
+        if args.ported_path:
+            args.ported = ported_paths_cover(args.ported_path, pending)
         # **The move goes with the record, or not at all.** v0.37.0 moved the wrapper
         # inside the loop, on every run; a conflict elsewhere then held the record
         # back, leaving a tree rendered under the new name whose record named the
@@ -4009,7 +4038,8 @@ def main() -> int:
                 say("⏸️ ", f"{MANIFEST_NAME} left at {ref} — {len(pending)} file(s) still pending")
                 detail("Advancing it would record the new render as this tree's base for files")
                 detail("the new render never reached, and their changes would stop being offered.")
-                detail("Port them from tmp/upgrade/, then re-run with --ported to advance the base.")
+                detail("Port them from tmp/upgrade/, then re-run with --ported to advance the base,")
+                detail("or --ported-path <path> per file, which holds it if a pending file goes unnamed.")
                 detail("Not a plain re-run: a three-way merge cannot tell an applied hunk from an")
                 detail("unapplied one, so a hand-ported file conflicts again and the base never")
                 detail("moves. The dirty tree the porting leaves is expected and not refused.")
