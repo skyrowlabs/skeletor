@@ -70,7 +70,9 @@ named in `scripts/output.py` and pinned by `tests/test_output_contract.py`:
 | 2    | refused    | the instrument could not measure                                   |
 | 3    | no subject | it ran, and there was nothing for it to measure                    |
 
-Aggregating commands such as `skel check pre-push` treat 3 as a pass and name the gate.
+An aggregating command such as `skel check pre-push` passes a 3 and names the gate only
+when the gate declared it, with `no_subject=True` in `scripts/gates.py`. Any other 3 is red:
+pytest exits 3 on an internal error and pyright on a bad config, and neither means no subject.
 One line of a command can say `no subject` while the command exits 0: `check_doc_links.py`
 read its documents, so a tree with no fragment links is green with that line noted. `--json`
 carries the per-line state. A CI step running a script directly fails on any non-zero code.

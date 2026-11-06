@@ -165,10 +165,15 @@ def test_the_exit_codes_are_the_documented_four():
 
 
 @pytest.mark.parametrize(("codes", "expected"), [((0, 3), 0), ((3,), 0), ((0, 1), 1), ((0, 2), 1), ((3, 2), 1)])
-def test_an_aggregate_passes_no_subject_with_a_note_and_fails_a_refusal(codes, expected, capsys):
-    assert output.summarize((f"gate-{code}", code) for code in codes) == expected
+def test_an_aggregate_passes_a_declared_no_subject_and_fails_a_refusal(codes, expected, capsys):
+    assert output.summarize((f"gate-{code}", output.Declared(code)) for code in codes) == expected
     if expected == 0:
         assert "no subject: gate-3" in capsys.readouterr().err
+
+
+def test_a_bare_3_is_a_crash_until_a_gate_declares_it():
+    assert output.summarize([("pytest", 3)]) == output.EXIT_RED
+    assert output.summarize([("pyright", 3), ("lint", 0)]) == output.EXIT_RED
 
 
 @pytest.fixture
