@@ -18,6 +18,9 @@ commits wearing one hat, and the changelog generator will take only the first.
 **`git revert` runs no commit-msg hook**, so its `Revert "<subject>"`, and `Reapply "<subject>"`
 for a revert of a revert, are accepted here and in CI when the subject inside is valid.
 
+**A merge in progress passes the hook**, so git's own `Merge ...` subject goes through. The hook
+asks git whether a merge is under way, and CI's gate skips merges.
+
 ## Rules
 
 1. **ONE subject line** for the entire commit — never repeat the type prefix per file.
