@@ -7933,6 +7933,77 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
     ]
 
 
+def foreign_exit_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """Only a gate that declared the contract may turn exit 3 into a pass.
+
+    Every other code here comes from a checker, so synthetic rows cannot see this:
+    pytest exits 3 on an internal error and pyright on a bad config. proto.pilot ran
+    both against v0.75.0 and got a green `check pre-push` with no test run.
+    """
+    started = time.time()
+    result, tree = scaffold("core", "python", workdir, name="foreign-exit")
+    if not result.ok:
+        return [Result(f"foreign exit: {result.label}", False, result.seconds, result.output)]
+    (tree / ".venv").symlink_to(venv_python.parent.parent)
+    wrapper = f"./{CLI_NAME}"
+    env = {"PATH": f"{venv_python.parent}{os.pathsep}{os.environ.get('PATH', '')}"}
+
+    conftest = tree / "tests" / "conftest.py"
+    kept = conftest.read_text(encoding="utf-8")
+    conftest.write_text(kept + '\n\ndef pytest_collection_modifyitems(items):\n    raise RuntimeError("plant")\n')
+    bare, _ = run([str(venv_python), "-m", "pytest", "tests/", "-q"], cwd=tree, env_extra={"PYTHONPATH": str(tree)})
+    crashed, crash_out = run([wrapper, "check", "pre-push"], cwd=tree, env_extra=env)
+    conftest.write_text(kept)
+
+    config = tree / "pyrightconfig.json"
+    kept = config.read_text(encoding="utf-8")
+    config.write_text(kept.replace("{", '{\n  "extends": "/nonexistent/x.json",', 1), encoding="utf-8")
+    broken, broken_out = run([wrapper, "check", "lint"], cwd=tree, env_extra=env)
+    config.write_text(kept)
+
+    (tree / "scripts" / "mine_gate.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
+    gates = tree / "scripts" / "gates.py"
+    kept = gates.read_text(encoding="utf-8")
+    anchor = "# ── Skeletor's again below this line"
+    if anchor not in kept:
+        return [Result("foreign exit: scripts/gates.py lost its closing rule", False, 0.0, kept[-400:])]
+
+    def with_gate(declared: str) -> Tuple[int, str]:
+        line = f'PRE_PUSH_GATES += [Gate("mine", "scripts/mine_gate.py"{declared})]\n\n\n'
+        gates.write_text(kept.replace(anchor, line + anchor), encoding="utf-8")
+        return run([wrapper, "check", "pre-push", "--quick"], cwd=tree, env_extra=env)
+
+    declared, declared_out = with_gate(", no_subject=True")
+    undeclared, undeclared_out = with_gate("")
+    gates.write_text(kept)
+    return [
+        Result(
+            "foreign exit: a pytest that crashed with exit 3 turns check pre-push red",
+            bare == 3 and crashed == 1 and "❌  unit tests" in crash_out,
+            time.time() - started,
+            f"bare pytest {bare}, check pre-push {crashed}\n{crash_out[-700:]}",
+        ),
+        Result(
+            "foreign exit: a pyright that could not run turns check lint red",
+            broken == 1 and "❌  pyright" in broken_out,
+            0.0,
+            f"exit {broken}\n{broken_out[-700:]}",
+        ),
+        Result(
+            "foreign exit: a gate that declared no_subject passes and is named",
+            declared == 0 and "had no subject: mine" in declared_out,
+            0.0,
+            f"exit {declared}\n{declared_out[-700:]}",
+        ),
+        Result(
+            "foreign exit: the same gate undeclared is red",
+            undeclared == 1 and "❌  mine" in undeclared_out,
+            0.0,
+            f"exit {undeclared}\n{undeclared_out[-700:]}",
+        ),
+    ]
+
+
 def ported_path_gate(tier: str, workdir: Path) -> List[Result]:
     """`--ported-path` advances only when every pending file is named.
 
@@ -14459,6 +14530,7 @@ def main() -> int:
 
         results += required_contexts_gate(workdir)
 
+        results += foreign_exit_gate(workdir, venv_python)
         results += ported_path_gate(fullest, workdir)
         results += claim_sweep_gate(workdir)
         for gate in set_arg_gate(workdir):

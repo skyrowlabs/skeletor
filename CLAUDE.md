@@ -1600,8 +1600,12 @@ interlock, and which you cannot understand from one file:
 
 - **The exit contract.** `scripts/output.py` names four codes, per command: 0
   green with a count, 1 red, 2 refused because the instrument could not measure,
-  3 no subject. `summarize` passes a 3 and names the gate. `check scheduled` is
-  the one command that exits 3, and a stop on a step the rehearsal cannot stand
+  3 no subject. `summarize` passes a 3 only from a gate that declared it, with
+  `no_subject=True` in `scripts/gates.py`, because pytest and pyright exit 3 when
+  they crash: v0.75.0 passed any 3 and proto.pilot got a green `check pre-push`
+  with no test run. So the default is red and nothing has to opt out, and
+  `foreign_exit_gate` holds it with real tools, since synthetic rows cannot see
+  it. `check scheduled` is the one command that exits 3, and a stop on a step the rehearsal cannot stand
   in for counts, because the sweep would otherwise make 3 unreachable. One line
   can say `no subject` while the command exits 0: `check_doc_links.py` read its
   documents, and a fresh tree holds no fragment links. So does

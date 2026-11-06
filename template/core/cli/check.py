@@ -17,7 +17,7 @@ from scripts.gates import DOCS_GATES, PRE_PUSH_GATES, Gate
 from scripts.paths import TMP_DIR
 from scripts.yaml_text import read_uncommented
 
-from .helpers import PROJECT_ROOT, detail, fail, module, ok, run, script, summarize, warn
+from .helpers import PROJECT_ROOT, Declared, detail, fail, module, ok, run, script, summarize, warn
 
 #: tests/test_cli_smoke.py runs this module's argument-less commands for real.
 SMOKE_EXECUTES = True
@@ -166,7 +166,8 @@ def _docs() -> int:
 
 def _product(gates: list[Gate]) -> list:
     """Your gates from `scripts/gates.py`, run after the template's own."""
-    return [(gate.label, script(gate.script, *gate.args)) for gate in gates]
+    results = [(gate, script(gate.script, *gate.args)) for gate in gates]
+    return [(gate.label, Declared(code) if gate.no_subject else code) for gate, code in results]
 
 
 @check.command(name="doc-links")
