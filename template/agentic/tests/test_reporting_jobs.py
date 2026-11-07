@@ -159,7 +159,10 @@ def test_install_keeps_every_line_that_is_not_this_trees():
     assert crontab_block() in merged
 
 
-def test_install_replaces_this_trees_block_and_strays_in_place():
+def test_install_replaces_this_trees_block_and_strays_in_place(monkeypatch, tmp_path):
+    import scripts.reporting.jobs
+
+    monkeypatch.setattr(scripts.reporting.jobs, "SCHEDULE_ALLOWLIST", tmp_path / "none.yaml")  # every job scheduled
     ours = JOBS[0].cron_line()
     stale = crontab_block().replace(ours, "1 1 * * * " + ours.split(" ", 5)[5])
     merged = merged_crontab(f"{stale}{SIBLING}\n{ours}\n")
