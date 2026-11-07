@@ -288,6 +288,12 @@ jobs:
       - name: Install type-check dependencies
         run: pip install -r .github/pyright-deps.txt
 
+      # The test jobs run this too, and a `-r` chain cannot say so: without the
+      # project's own dependencies pyright reads them as `Unknown` and reports
+      # errors the tests never see (proto.pilot, a pydantic-typed parameter).
+      - name: Install the project, if it is one
+        run: python scripts/install_project.py
+
       - name: pyright (whole project)
         run: |
           pip install pyright==1.1.414

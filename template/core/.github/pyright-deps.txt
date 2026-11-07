@@ -11,5 +11,9 @@
 # reaches every requirements file the test jobs install. Described rather than
 # cited by path — a tree whose CI does not type-check is a configuration, not a
 # defect, and this header must not name a file such a tree has deleted.
+#
+# The project itself is not in this file, because a requirements file cannot
+# name it with its extras. The job runs the same install step the test jobs
+# run, and the unit suite requires that too.
 
 -r ../scripts/requirements.txt
