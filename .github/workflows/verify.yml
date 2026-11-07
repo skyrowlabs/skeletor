@@ -24,9 +24,17 @@ on:
   workflow_dispatch:
 
 jobs:
-  scaffold:
-    name: every tier passes its own gates
+  # The grid in parts, because it is serial and a runner's speed alone swings it
+  # from 25 to 55 minutes. `strategy.job-index` and `job-total` are the position,
+  # so adding a matrix entry is the whole of changing the split. Each shard
+  # scaffolds every tree and runs its share of what reads them.
+  shard:
+    name: grid shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       # `fetch-depth: 0` because two gates resolve *tags*: `dirty_ref_gate` and
       # `entangled_gate` scaffold at an older release and upgrade to HEAD, which
@@ -82,4 +90,17 @@ jobs:
             ${{ steps.python.outputs.oldest }}
             ${{ steps.python.outputs.version }}
 
-      - run: bin/skeletor-verify
+      - run: bin/skeletor-verify --shard ${{ strategy.job-index }}/${{ strategy.job-total }}
+
+  # The required context. A skipped required job reads as passing, and a job that
+  # `needs:` a failed one is skipped unless it says `always()`, so this condition
+  # and the result test below are what keep a red shard from landing.
+  grid:
+    name: every tier passes its own gates
+    if: always()
+    needs: shard
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "$RESULT" = success
+        env:
+          RESULT: ${{ needs.shard.result }}

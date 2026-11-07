@@ -40,7 +40,7 @@ import time
 import types
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 SKELETOR = Path(__file__).resolve().parents[1]
 SCAFFOLDER = SKELETOR / "bin" / "skeletor-new"
@@ -14924,7 +14924,6 @@ def round_v0722_gates(workdir: Path, venv_python: Path, fullest: str) -> List[Re
     results += tagline_gate(workdir, venv_python)
     results += gitignore_kept_gate(workdir)
     results += foreign_file_gate(workdir, venv_python)
-    results += changelog_prose_gate(workdir, venv_python)
     return results
 
 
@@ -15112,6 +15111,73 @@ def adopter_tree_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: b
     return results
 
 
+def shard_arg(text: str) -> Tuple[int, int]:
+    """`K/N` from the command line, K counted from 0 as `strategy.job-index` is."""
+    match = re.fullmatch(r"(\d+)/(\d+)", text)
+    if not match or int(match[2]) < 1 or int(match[1]) >= int(match[2]):
+        raise argparse.ArgumentTypeError(f"{text!r} is not K/N with 0 <= K < N")
+    return int(match[1]), int(match[2])
+
+
+def shard_steps(count: int, shard: int, shards: int) -> List[int]:
+    """Which of `count` steps this shard runs: every step lands in exactly one."""
+    return [index for index in range(count) if index % shards == shard]
+
+
+def shard_gate() -> List[Result]:
+    """The split loses nothing, and a red shard cannot read as a green grid.
+
+    The required context is one job. GitHub reads a skipped required job as
+    passing, and a job that `needs:` a failed job is skipped unless it says
+    `always()`, so the aggregator's condition and its reading of the shards'
+    result are what stop a red shard landing. The shard count comes from
+    `strategy.job-total`, so a matrix and a count cannot disagree.
+    """
+    started = time.time()
+    covered = all(
+        sorted(i for shard in range(shards) for i in shard_steps(count, shard, shards)) == list(range(count))
+        for count in (0, 1, 7, 64)
+        for shards in (1, 2, 3, 4, 9)
+    )
+    refused = [bad for bad in ("3/3", "-1/3", "1/0", "1", "a/b") if not _shard_arg_refuses(bad)]
+    text = "\n".join(
+        line
+        for line in (SKELETOR / ".github" / "workflows" / "verify.yml").read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    jobs = re.split(r"(?m)^  (?=[\w-]+:\n)", text.split("\njobs:\n", 1)[1])
+    required = [job for job in jobs if "name: every tier passes its own gates" in job]
+    runs = [job for job in jobs if "bin/skeletor-verify --shard" in job]
+    wiring = []
+    if len(required) != 1 or len(runs) != 1:
+        wiring.append(f"{len(required)} required job(s) and {len(runs)} sharded job(s), wanting one of each")
+    else:
+        shard_job = runs[0].split(":", 1)[0].strip()
+        for needle in (f"needs: {shard_job}", "if: always()", f"needs.{shard_job}.result"):
+            if needle not in required[0]:
+                wiring.append(f"the required job lacks `{needle}`")
+        if "strategy.job-index" not in runs[0] or "strategy.job-total" not in runs[0]:
+            wiring.append("the shard's position does not come from the strategy context")
+    return [
+        Result("shard: every step lands in exactly one shard", covered, time.time() - started, ""),
+        Result("shard: a position outside the split is refused", not refused, time.time() - started, str(refused)),
+        Result(
+            "shard: the required context waits on every shard and reads their result",
+            not wiring,
+            time.time() - started,
+            "\n".join(wiring),
+        ),
+    ]
+
+
+def _shard_arg_refuses(text: str) -> bool:
+    try:
+        shard_arg(text)
+    except argparse.ArgumentTypeError:
+        return True
+    return False
+
+
 def main() -> int:
     scaffolder = load_scaffolder()
     all_tiers = sorted(scaffolder.TIERS)
@@ -15123,6 +15189,7 @@ def main() -> int:
     parser.add_argument("--keep", action="store_true", help="do not delete the generated trees")
     parser.add_argument("--workdir", help="where to generate (default: a temp dir)")
     parser.add_argument("-q", "--quiet", action="store_true", help="summary only")
+    parser.add_argument("--shard", type=shard_arg, metavar="K/N", help="run shard K of N, counted from 0, as CI does")
     args = parser.parse_args()
 
     tiers = args.tier or all_tiers
@@ -15137,32 +15204,45 @@ def main() -> int:
     print(f"🔎 verifying {len(tiers)} tier(s) × {len(languages)} language(s) in {workdir}")
 
     results: List[Result] = []
+    #: Each returns what a gate returns: one `Result`, or several.
+    steps: List[Callable[[], Any]] = []
+    step = steps.append
+    shard, shards = args.shard or (0, 1)
     try:
         # Before the venv: it needs no toolchain, and a repository whose own
         # entry points disagree with its README should say so in two seconds
-        # rather than after a five-minute grid.
-        results.append(entry_point_gate())
-        results.append(manifest_args_gate())
-        results.append(tagline_required_gate(workdir))
-        results += unlinted_source_gate(workdir)
-        results.append(identity_gate())
-        results += checkout_path_literal_gate()
-        results.append(template_comment_names_gate())
-        results.append(already_applied_gate())
-        results.append(absent_region_gate())
-        results += upstream_record_gate()
-        results.append(tracked_source_gate())
-        results += shared_helper_api_gate()
-        results += template_annotations_gate()
-        results += maintain_summary_gate()
+        # rather than after a five-minute grid. These cost nothing, so they stay
+        # with the first shard rather than joining the split.
+        if shard == 0:
+            results.append(entry_point_gate())
+            results.append(manifest_args_gate())
+            results.append(tagline_required_gate(workdir))
+            results += unlinted_source_gate(workdir)
+            results.append(identity_gate())
+            results += checkout_path_literal_gate()
+            results.append(template_comment_names_gate())
+            results.append(already_applied_gate())
+            results.append(absent_region_gate())
+            results += upstream_record_gate()
+            results.append(tracked_source_gate())
+            results += shared_helper_api_gate()
+            results += template_annotations_gate()
+            results += maintain_summary_gate()
+            results += shard_gate()
         venv_python = make_venv(workdir, args.quiet)
-        results.append(shadow_gate(workdir, venv_python))
-        results.append(dirty_scope_gate(workdir))
-        results += new_flag_gate(workdir)
-        results.append(coverage_gate(workdir, venv_python))
         pyright_ok, pyright_note = warm_pyright(venv_python)
         if not args.quiet:
             print(f"   pyright {pyright_note}" if pyright_ok else f"   ⚠️  pyright unavailable: {pyright_note}")
+
+        # Every shard scaffolds every tree, and only what reads them is split:
+        # later gates reach for `{tier}-python` and `{tier}-both` by path, and
+        # one guarded by `.exists()` would skip in silence in a shard without it.
+        def tier_gates(tier: str, tree: Path) -> List[Result]:
+            found = gates(tree, venv_python, pyright_ok)
+            for gate in found:
+                gate.label = f"{tier}: {gate.label}"
+            return found
+
         for tier in tiers:
             for language in languages:
                 result, tree = scaffold(tier, language, workdir)
@@ -15181,215 +15261,142 @@ def main() -> int:
                 if language != gated_language:
                     continue
                 (tree / ".venv").symlink_to(venv_python.parents[1])
-                for gate in gates(tree, venv_python, pyright_ok):
-                    gate.label = f"{tier}: {gate.label}"
-                    results.append(gate)
-                if not args.quiet:
-                    print(f"   {tier}/{language} … {sum(1 for r in results if r.ok)} checks green so far")
+                step(lambda tier=tier, tree=tree: tier_gates(tier, tree))
+
+        step(lambda: shadow_gate(workdir, venv_python))
+        step(lambda: dirty_scope_gate(workdir))
+        step(lambda: new_flag_gate(workdir))
+        step(lambda: coverage_gate(workdir, venv_python))
 
         # The fullest tier, not the alphabetically last one — sorted(TIERS)
         # puts `governed` after `agentic`, which would have quietly gated the
         # wrong tree.
         fullest = max(tiers, key=lambda t: len(scaffolder.TIERS[t]))
-        for gate in versioning_gate(fullest, workdir, venv_python, pyright_ok):
-            results.append(gate)
 
-        for gate in one_branch_gate(fullest, workdir, venv_python):
-            results.append(gate)
+        def prefixed(found: Any) -> List[Result]:
+            found = [found] if isinstance(found, Result) else list(found)
+            for gate in found:
+                gate.label = f"{fullest}: {gate.label}"
+            return found
 
-        for gate in line_length_gate(fullest, workdir, venv_python):
-            results.append(gate)
-
-        for gate in prose_check_gate(fullest, workdir, venv_python):
-            results.append(gate)
-
-        results.append(dependabot_hold_gate(workdir / f"{fullest}-python"))
-        results.append(dependabot_config_gate(workdir / f"{fullest}-python"))
-        for gate in gating_gate(fullest, workdir):
-            results.append(gate)
-
-        for gate in host_exemption_gate(fullest, workdir, venv_python):
-            results.append(gate)
-
-        for gate in agentless_gate(fullest, workdir, venv_python):
-            results.append(gate)
-
+        step(lambda: versioning_gate(fullest, workdir, venv_python, pyright_ok))
+        step(lambda: one_branch_gate(fullest, workdir, venv_python))
+        step(lambda: line_length_gate(fullest, workdir, venv_python))
+        # One step, because the second reads the tree the first scaffolds.
+        step(
+            lambda: [
+                *prose_check_gate(fullest, workdir, venv_python),
+                *prefixed(changelog_prose_gate(workdir, venv_python)),
+            ]
+        )
+        step(lambda: dependabot_hold_gate(workdir / f"{fullest}-python"))
+        step(lambda: dependabot_config_gate(workdir / f"{fullest}-python"))
+        step(lambda: gating_gate(fullest, workdir))
+        step(lambda: host_exemption_gate(fullest, workdir, venv_python))
+        step(lambda: agentless_gate(fullest, workdir, venv_python))
         # After `agentless_gate`, because both ask what happens when a scaffold
         # is asked for something other than the default shape, and this one
         # costs a full `gates()` run on a tree of its own.
-        for gate in shell_package_gate(fullest, workdir, venv_python, pyright_ok):
-            results.append(gate)
-        results += cli_rename_gate(workdir)
-        results += rehearse_gate(workdir, venv_python)
-        results += newest_floor_gate(fullest, workdir, venv_python)
-        results += oldest_floor_gate(fullest, workdir)
-
+        step(lambda: shell_package_gate(fullest, workdir, venv_python, pyright_ok))
+        step(lambda: cli_rename_gate(workdir))
+        step(lambda: rehearse_gate(workdir, venv_python))
+        step(lambda: newest_floor_gate(fullest, workdir, venv_python))
+        step(lambda: oldest_floor_gate(fullest, workdir))
         # Beside it, and the one that would have stopped v0.22.0: a tree that
         # also contains the ADOPTER's own `python -m` package. Every other
         # fixture in this file is a fresh scaffold, so every one has exactly one
         # root `__main__.py` — a population that could not contain the subject.
-        for gate in product_package_gate(fullest, workdir, venv_python, pyright_ok):
-            results.append(gate)
-
+        step(lambda: product_package_gate(fullest, workdir, venv_python, pyright_ok))
         # And the other half of the same class: not what the tree CONTAINS but
         # where it SITS. A skip entry matched against an absolute path matches
         # the path to the checkout too.
-        for gate in hostile_parent_gate(fullest, workdir, venv_python):
-            results.append(gate)
-
-        for gate in badge_gate(fullest, workdir, venv_python):
-            results.append(gate)
-
-        for gate in populated_tree_gate(fullest, workdir):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
+        step(lambda: hostile_parent_gate(fullest, workdir, venv_python))
+        step(lambda: badge_gate(fullest, workdir, venv_python))
+        step(lambda: prefixed(populated_tree_gate(fullest, workdir)))
         # Beside `populated_tree_gate`, and after it, because it is the case
         # that gate's fixture cannot reach: a `--force` over a tree skeletor
         # itself made, rather than over decoys.
-        for gate in adopted_repo_gate(fullest, workdir, venv_python):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
-        for gate in rescaffold_gate(fullest, workdir):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
-        for gate in branch_gate(fullest, workdir):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
-        for gate in empty_clone_gate(fullest, workdir, venv_python, pyright_ok):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
-        for gate in dry_run_gate(fullest, workdir):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
+        step(lambda: prefixed(adopted_repo_gate(fullest, workdir, venv_python)))
+        step(lambda: prefixed(rescaffold_gate(fullest, workdir)))
+        step(lambda: prefixed(branch_gate(fullest, workdir)))
+        step(lambda: prefixed(empty_clone_gate(fullest, workdir, venv_python, pyright_ok)))
+        step(lambda: prefixed(dry_run_gate(fullest, workdir)))
         allow_tree = workdir / f"{fullest}-python"
         if allow_tree.exists():
-            gate = allowlist_gate(allow_tree, venv_python)
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
-        for gate in secrets_contract_gate(workdir, venv_python):
-            results.append(gate)
-
-        for gate in dirty_ref_gate(workdir):
-            results.append(gate)
-
-        for gate in pending_ref_gate(workdir):
-            results.append(gate)
-
-        for gate in divergence_record_gate(workdir, venv_python):
-            results.append(gate)
-
-        results.append(seam_record_scope_gate(workdir))
-        results.append(adoption_hint_gate(workdir))
-        results.extend(plant_gate(workdir, venv_python))
-        results.append(clock_ahead_gate(workdir, venv_python))
-        results.extend(product_scripts_gate(workdir, venv_python))
-        results.extend(green_stamp_gate(workdir, venv_python))
-        results.extend(node_product_gate(workdir, venv_python))
-        results.append(self_tree_gate(venv_python))
-
-        for gate in pinned_ref_gate(workdir):
-            results.append(gate)
-
-        for gate in unpinned_head_gate(workdir):
-            results.append(gate)
-
-        leak = author_leak_gate(fullest, workdir)
-        leak.label = f"{fullest}: {leak.label}"
-        results.append(leak)
-
-        for gate in ported_only_conflict_gate(workdir):
-            results.append(gate)
-
-        for gate in scaffold_dirt_gate(workdir):
-            results.append(gate)
-
-        for gate in dirty_signals_gate(workdir):
-            results.append(gate)
-
-        for gate in normalise_gate(workdir, venv_python):
-            results.append(gate)
-
-        for gate in append_seam_gate(workdir, venv_python):
-            results.append(gate)
-
-        for gate in moved_symbol_gate(workdir):
-            results.append(gate)
-
-        for gate in entangled_gate(workdir):
-            results.append(gate)
-
-        for gate in components_gate(workdir):
-            results.append(gate)
-
-        for gate in declined_gate(fullest, workdir):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
-        results += owned_gate(workdir)
-        results += pending_added_gate(workdir)
-        results += cron_notice_gate(workdir)
-        results += scheduled_rehearsal_gate(workdir, venv_python)
-        results += foreign_subtree_gate(workdir, venv_python, pyright_ok)
-        results.append(requirements_floor_gate(workdir))
-        for gate in sidecar_gate(fullest, workdir):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
-        for gate in lint_forecast_gate(fullest, workdir, venv_python):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
-        results += required_contexts_gate(workdir)
-
-        results += foreign_exit_gate(workdir, venv_python)
-        results += ported_path_gate(fullest, workdir)
-        results += claim_sweep_gate(workdir)
-        for gate in set_arg_gate(workdir):
-            results.append(gate)
-
-        for gate in test_id_gate(fullest, workdir, venv_python):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
+            step(lambda: prefixed(allowlist_gate(allow_tree, venv_python)))
+        step(lambda: secrets_contract_gate(workdir, venv_python))
+        step(lambda: dirty_ref_gate(workdir))
+        step(lambda: pending_ref_gate(workdir))
+        step(lambda: divergence_record_gate(workdir, venv_python))
+        step(lambda: seam_record_scope_gate(workdir))
+        step(lambda: adoption_hint_gate(workdir))
+        step(lambda: plant_gate(workdir, venv_python))
+        step(lambda: clock_ahead_gate(workdir, venv_python))
+        step(lambda: product_scripts_gate(workdir, venv_python))
+        step(lambda: green_stamp_gate(workdir, venv_python))
+        step(lambda: node_product_gate(workdir, venv_python))
+        step(lambda: self_tree_gate(venv_python))
+        step(lambda: pinned_ref_gate(workdir))
+        step(lambda: unpinned_head_gate(workdir))
+        step(lambda: prefixed(author_leak_gate(fullest, workdir)))
+        step(lambda: ported_only_conflict_gate(workdir))
+        step(lambda: scaffold_dirt_gate(workdir))
+        step(lambda: dirty_signals_gate(workdir))
+        step(lambda: normalise_gate(workdir, venv_python))
+        step(lambda: append_seam_gate(workdir, venv_python))
+        step(lambda: moved_symbol_gate(workdir))
+        step(lambda: entangled_gate(workdir))
+        step(lambda: components_gate(workdir))
+        step(lambda: prefixed(declined_gate(fullest, workdir)))
+        step(lambda: owned_gate(workdir))
+        step(lambda: pending_added_gate(workdir))
+        step(lambda: cron_notice_gate(workdir))
+        step(lambda: scheduled_rehearsal_gate(workdir, venv_python))
+        step(lambda: foreign_subtree_gate(workdir, venv_python, pyright_ok))
+        step(lambda: requirements_floor_gate(workdir))
+        step(lambda: prefixed(sidecar_gate(fullest, workdir)))
+        step(lambda: prefixed(lint_forecast_gate(fullest, workdir, venv_python)))
+        step(lambda: required_contexts_gate(workdir))
+        step(lambda: foreign_exit_gate(workdir, venv_python))
+        step(lambda: ported_path_gate(fullest, workdir))
+        step(lambda: claim_sweep_gate(workdir))
+        step(lambda: set_arg_gate(workdir))
+        step(lambda: prefixed(test_id_gate(fullest, workdir, venv_python)))
         # Not per-tier: it is a question ABOUT the tiers, so it scaffolds its own
         # grid and runs once.
-        results += tier_composition_gate(workdir)
-
+        step(lambda: tier_composition_gate(workdir))
         # The same shape of question at a different artifact: the composition
         # gate asks whether a shipped file NAMES something absent here; this
         # asks whether a shipped *generated* file was rendered for the tier it
         # landed in. Both are the generator's to ask, because both compare
         # configurations and a tree only ever holds one.
-        results += lane_views_gate(workdir)
-
-        for gate in round_v0722_gates(workdir, venv_python, fullest):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
+        step(lambda: lane_views_gate(workdir))
+        step(lambda: prefixed(round_v0722_gates(workdir, venv_python, fullest)))
         # Every fixture above holds only skeletor's files; this one holds the
         # adopter's too, and asks whether each check still reaches them.
-        for gate in adopter_tree_gate(fullest, workdir, venv_python, pyright_ok):
-            results.append(gate)
+        step(lambda: adopter_tree_gate(fullest, workdir, venv_python, pyright_ok))
+        step(lambda: prefixed(long_path_gate(fullest, workdir, venv_python)))
+        step(lambda: prefixed(name_length_gate(fullest, workdir, venv_python)))
 
-        for gate in long_path_gate(fullest, workdir, venv_python):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-        for gate in name_length_gate(fullest, workdir, venv_python):
-            gate.label = f"{fullest}: {gate.label}"
-            results.append(gate)
-
-        node_tree = workdir / f"{fullest}-both"
-        if node_tree.exists():
-            for gate in [*node_gates(node_tree), check_no_baked_paths(node_tree)]:
+        def node_tree_gates() -> List[Result]:
+            node_tree = workdir / f"{fullest}-both"
+            if not node_tree.exists():
+                return []
+            found = [*node_gates(node_tree), check_no_baked_paths(node_tree)]
+            for gate in found:
                 gate.label = f"{fullest}/both: {gate.label}"
-                results.append(gate)
+            return found
+
+        step(node_tree_gates)
+
+        mine = shard_steps(len(steps), shard, shards)
+        if shards > 1:
+            print(f"   shard {shard + 1} of {shards}: {len(mine)} of {len(steps)} steps")
+        for index in mine:
+            found = steps[index]()
+            results += [found] if isinstance(found, Result) else list(found)
+            if not args.quiet:
+                print(f"   step {index} … {sum(1 for r in results if r.ok)} checks green so far")
     finally:
         if not args.keep:
             shutil.rmtree(workdir, ignore_errors=True)
@@ -15410,6 +15417,9 @@ def main() -> int:
         print(f"❌ {len(failed)} of {len(results)} checks failed")
         return 1
 
+    if shards > 1:
+        print(f"✅ {len(results)} checks green in shard {shard + 1} of {shards}")
+        return 0
     print(f"✅ {len(results)} checks green — every tier scaffolds and passes its own gates")
     return 0
 
