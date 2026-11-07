@@ -92,6 +92,13 @@ jobs:
 
       - run: bin/skeletor-verify --shard ${{ strategy.job-index }}/${{ strategy.job-total }}
 
+      # Read by `bin/skeletor-maintain`, which compares a check's time across runs.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: grid-ledger-${{ strategy.job-index }}
+          path: tmp/grid-ledger-*.json
+          retention-days: 30
+
   # The required context. A skipped required job reads as passing, and a job that
   # `needs:` a failed one is skipped unless it says `always()`, so this condition
   # and the result test below are what keep a red shard from landing.

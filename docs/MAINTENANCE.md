@@ -53,6 +53,12 @@ names the questions it answered, never the ones it asked.
 different versions in two files, and the copy that is wrong is the one nobody is
 reading.
 
+### 1a. Read the grid's cost
+
+`bin/skeletor-maintain` prints a `grid:` line: a check far above its usual time, and a
+check run on CI or on this machine but not both, at one commit. It reports and hands
+no work over. `normalise` shows until it runs on CI, which is held by Jeston's ruling.
+
 ### 1b. Read what moved upstream
 
 `bin/skeletor-maintain` asks a third cheap question, and it is the only one that

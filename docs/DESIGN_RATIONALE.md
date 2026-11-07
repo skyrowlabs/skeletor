@@ -5854,3 +5854,20 @@ absent and the merge inserts it again, cleanly. dream-doll and sky-boss got two
 change, which is the silent loss, so `doubled_lines` checks the result: a template
 line held more often than either side holds it makes the file a conflict. Across 47
 real clean merges in eight trees at v0.81.0 it flagged none.
+
+## A grid ledger, and why it has no calibration
+
+`bin/skeletor-verify` writes each check's time to `tmp/grid-ledger*.json`, CI keeps
+them as artifacts, and `bin/skeletor-maintain` compares the newest passing run with
+up to five before it. `pending ref` went from 14s to 216s and `normalise` passed on CI
+without running, and nothing said so. Reading two runs by eye was worse: it reported a
+doubling that was the runner.
+
+A fixed timing loop was the first design. It is not needed, because most checks did
+not change between two runs, so the median ratio over the checks they share is the
+runner's speed. Backtested on 13 real CI logs, across a 1.9x swing: 2 reports in 10
+compared runs, both `pending ref`.
+
+It reports and never wakes an agent. A slower gate is a thing to look at, and work is
+something else. Comparing with a local grid needs one at a commit CI tested, so a
+machine that has not run one gets the jumps and not the gaps.

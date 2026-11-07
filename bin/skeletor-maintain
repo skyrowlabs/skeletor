@@ -57,9 +57,12 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import shutil
+import statistics
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -68,6 +71,14 @@ RELEASE_BRANCH = "main"
 PROCEDURE = "docs/MAINTENANCE.md"
 UPSTREAMS = SKELETOR / "upstream.json"
 LOCAL_UPSTREAMS = SKELETOR / "upstream.local.json"
+#: What `bin/skeletor-verify` leaves behind in a local run, unsharded.
+LOCAL_LEDGER = SKELETOR / "tmp" / "grid-ledger.json"
+#: How many passing `verify` runs to read, the newest being the one judged.
+GRID_RUNS = 6
+#: A check is reported at this multiple of its usual time, at or above this many seconds.
+GRID_JUMP, GRID_FLOOR = 3, 20
+#: Below this a check's time is mostly noise, so it does not set a run's speed.
+GRID_STEADY = 5
 
 
 def run(cmd: List[str]) -> Tuple[int, str]:
@@ -497,6 +508,97 @@ def self_verdict() -> Tuple[bool, str, bool]:
     return self_standing(recorded, newest.strip() if code == 0 else None)
 
 
+def ledger_label(label: str) -> str:
+    """A check's label with its versions and counts out, so two runs' labels compare."""
+    return re.sub(r"v?\d[\d.]*(-\d+-g[0-9a-f]+)?(-dirty)?", "#", label)
+
+
+def grid_jumps(current: Dict[str, float], previous: List[Dict[str, float]]) -> List[Tuple[str, int, int]]:
+    """`(label, usual, now)` for each check far above its usual time.
+
+    Hosted runners differ by nearly 2x, so each earlier run is first put on this
+    run's speed by the median ratio over the checks they share: most checks did not
+    change, so the median is the runner. Backtested on 10 runs: only `pending ref`.
+    """
+    usual: Dict[str, List[float]] = {}
+    for run_seconds in previous:
+        shared = [
+            current[label] / seconds
+            for label, seconds in run_seconds.items()
+            if seconds >= GRID_STEADY and current.get(label, 0) >= GRID_STEADY
+        ]
+        if not shared:
+            continue
+        speed = statistics.median(shared)
+        for label, seconds in run_seconds.items():
+            usual.setdefault(label, []).append(seconds * speed)
+    return sorted(
+        (label, round(statistics.median(usual[label])), round(seconds))
+        for label, seconds in current.items()
+        if label in usual and seconds >= GRID_FLOOR and seconds >= GRID_JUMP * statistics.median(usual[label])
+    )
+
+
+def read_ledger(path: Path) -> Tuple[Optional[str], Dict[str, float]]:
+    """`(sha, {label: seconds})` from one ledger file, labels made comparable."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data.get("sha"), {ledger_label(label): seconds for label, seconds in data.get("checks", {}).items()}
+
+
+def run_ledger(run_id: int, into: Path) -> Dict[str, float]:
+    """Every shard's checks from one run, or nothing when it kept no ledger."""
+    target = into / str(run_id)
+    code, _ = run(["gh", "run", "download", str(run_id), "--pattern", "grid-ledger-*", "--dir", str(target)])
+    if code != 0:
+        return {}
+    merged: Dict[str, float] = {}
+    for path in sorted(target.rglob("*.json")):
+        merged.update(read_ledger(path)[1])
+    return merged
+
+
+def grid_gaps(ci: Dict[str, float], local: Dict[str, float]) -> Tuple[List[str], List[str]]:
+    """Checks only CI ran and checks only this machine ran, at one commit."""
+    return sorted(set(ci) - set(local)), sorted(set(local) - set(ci))
+
+
+def grid_verdict() -> Tuple[List[str], str, bool]:
+    """`(findings, detail, measured)`: did a check jump, and does one run in one place only.
+
+    Reported and never work: a slower gate is a thing to look at, and waking an agent
+    for it would make a report into a job.
+    """
+    command = ["gh", "run", "list", "--workflow", "verify.yml", "--branch", RELEASE_BRANCH, "--status", "success"]
+    code, listed = run([*command, "--limit", str(GRID_RUNS), "--json", "databaseId,headSha"])
+    if code != 0:
+        return [], "could not list verify's runs", False
+    try:
+        runs = json.loads(listed)
+    except ValueError:
+        return [], "could not read verify's runs", False
+    with tempfile.TemporaryDirectory() as scratch:
+        ledgers = [(item["headSha"], run_ledger(item["databaseId"], Path(scratch))) for item in runs]
+    ledgers = [(sha, checks) for sha, checks in ledgers if checks]
+    if len(ledgers) < 2:
+        return [], f"{len(ledgers)} of the last {len(runs)} passing runs kept a ledger, and a jump needs two", False
+
+    findings = [
+        f"{label}: {now}s, usually {usual}s at this runner's speed"
+        for label, usual, now in grid_jumps(ledgers[0][1], [checks for _, checks in ledgers[1:]])
+    ]
+    detail = f"{len(ledgers[0][1])} checks against {len(ledgers) - 1} earlier run(s)"
+    if not LOCAL_LEDGER.exists():
+        return findings, f"{detail}; no local grid to compare with", True
+    sha, local = read_ledger(LOCAL_LEDGER)
+    same = next((checks for ledger_sha, checks in ledgers if ledger_sha == sha), None)
+    if same is None:
+        return findings, f"{detail}; the local grid is at a commit no read run tested", True
+    only_ci, only_local = grid_gaps(same, local)
+    findings += [f"only CI ran: {label}" for label in only_ci]
+    findings += [f"only this machine ran: {label}" for label in only_local]
+    return findings, f"{detail}, and the local grid at {sha[:7]}", True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="skeletor-maintain",
@@ -522,6 +624,7 @@ def main() -> int:
     stale, pins_detail, pins_measured = pin_verdict()
     upstream_moved, upstream_detail, upstream_measured = upstream_verdict()
     self_behind, self_detail, self_measured = self_verdict()
+    grid_findings, grid_detail, grid_measured = grid_verdict()
 
     print(f"skeletor maintenance — {RELEASE_BRANCH}")
     print(f"   CI:   {ci_detail}")
@@ -530,6 +633,9 @@ def main() -> int:
     print("   from upstream:")
     print(upstream_detail)
     print(f"   self: {self_detail}")
+    print(f"   grid: {grid_detail}")
+    for finding in grid_findings:
+        print(f"         ⚠️  {finding}")
     if unpulled not in ("0", ""):
         print(f"   git:  {unpulled} commit(s) on origin/{RELEASE_BRANCH} not pulled")
     print()
@@ -554,6 +660,8 @@ def main() -> int:
         print(f"⚠️  no upstream is being watched from this checkout — write {LOCAL_UPSTREAMS.name} to start")
     if not self_measured:
         print(f"⚠️  {self_detail}")
+    if not grid_measured:
+        print(f"⚠️  the grid's cost was not compared: {grid_detail}")
     if self_behind:
         newest = self_detail.rsplit(" ", 1)[-1]
         work.append(
@@ -594,6 +702,8 @@ def main() -> int:
             established.append("nothing has moved in a harvested path upstream")
         if self_measured:
             established.append("skeletor's own tree is on its newest release")
+        if grid_measured and not grid_findings:
+            established.append("no grid check jumped or ran in one place only")
         # Every clause can now be absent, which the first version of this could
         # not express — it seeded the list with the pin claim, on the assumption
         # that one question is always answered. Nothing is: a run with no
