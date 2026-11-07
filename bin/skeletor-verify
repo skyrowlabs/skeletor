@@ -11701,7 +11701,11 @@ def green_stamp_gate(workdir: Path, venv_python: Path) -> List[Result]:
 
     # A second clone holds none of it, and says so where the gate set will.
     second = workdir / "green-stamp" / "second"
-    run(["git", "clone", "-q", "-b", "develop", str(remote), str(second)], cwd=workdir)
+    cloned = run(["git", "clone", "-q", "-b", "develop", str(remote), str(second)], cwd=workdir)
+    if cloned[0] != 0:
+        # Nothing reached the remote, so every push above was refused; say so, never crash.
+        problems.append(f"the second clone: {cloned[1][-400:]}")
+        return [Result("green stamp: a real run feeds a real push", False, time.time() - started, "\n".join(problems))]
     installer = [str(venv_python), "scripts/git/install_merge_drivers.py"]
     expect("a second clone", run([*installer, "--check"], cwd=second), 1)
     expect("its installer", run(installer, cwd=second), 0, "pre-push hook")
