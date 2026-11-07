@@ -5795,3 +5795,15 @@ An upgrade reports a test name defined in a declined or diverged file's render w
 The hard part is that an editable install can import the real tree from a child, so a red could be about the wrong code. `PYTHONPATH` at the copy beat an editable install in `compat` and `strict` modes when measured. The default import-hook mode was not exercised, so the proof is a preflight rather than an assumption: a child at `/` asks the finders where each package resolves, and that sees a hook because a hook is what answers. `plant_gate` plants one.
 
 `test clock-ahead` is opt-in and `time-machine` stays out of `scripts/requirements.txt`, which conflicts regularly, so without it there is no subject. The plugin starts the shift on import through `-p`, because a test module computing a date at import time is the case worth catching. The template's own 570 unit tests at `agentic` passed at +30 and +400 days when this was built.
+
+## A product's CLI, held by the same two rules as the shell
+
+`template/core/tests/test_product_scripts.py` enrols each `[project.scripts]` entry into the docs and smoke questions. Four trees have one, and none of the shell's gates read it, so a doc could name a command the product no longer has. mind.head's own regex found two.
+
+**`--help` only, in process, and `SMOKE_EXECUTES` does not apply.** That declaration is per module, and stash.flow's entry is one file holding 121 commands, 47 of which run with no arguments and collect, block or rewrite data.
+
+**The walk goes by shape, not `isinstance`.** Typer 0.26 carries its own copy of click at `typer._click`, so its groups are not `click.Group` and `typer.main.get_command` does not change that. Measured in mind.head's venv. An `isinstance` walk reports an entry that works as unwalkable. So `--help` goes through the command's own `main()`, which both have.
+
+**An entry that cannot be walked is a finding, never a skip.** It would otherwise leave the population with nothing red. The allowlist takes it, with a reason, along with a command built from data and a tombstone like stash.flow's `schedule alerts`, which exits 2 on `--help` by design.
+
+**A word after a leaf is a positional**, so the docs question walks only as deep as groups go. The output contract stays out, because a product's output is not the shell's to rule.

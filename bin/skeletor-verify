@@ -11633,6 +11633,72 @@ def clock_ahead_gate(workdir: Path, venv_python: Path) -> Result:
     )
 
 
+def product_scripts_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """A tree's `[project.scripts]` entries answer for themselves, click and Typer alike."""
+    started = time.time()
+    clean = clean_skeletor(workdir)
+    tree = workdir / "product-scripts" / "probe"
+    args = ["--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", "core", "--language", "python", "--force"]
+    code, output = run([sys.executable, str(clean / "bin" / "skeletor-new"), str(tree), *args], cwd=SKELETOR)
+    if code != 0:
+        return [Result("product scripts: scaffold", False, time.time() - started, output)]
+    (tree / ".venv").symlink_to(venv_python.parent.parent)
+    (tree / "acme").mkdir()
+    (tree / "acme" / "__init__.py").write_text("", encoding="utf-8")
+    (tree / "acme" / "cli.py").write_text(
+        "from pathlib import Path\n\nimport click\n\n\n@click.group()\ndef main():\n    pass\n\n\n"
+        "@main.group()\ndef sub():\n    pass\n\n\n@sub.command()\ndef leaf():\n"
+        "    Path('RAN').write_text('a help walk ran a command')\n\n\n"
+        "def not_a_command():\n    pass\n",
+        encoding="utf-8",
+    )
+    (tree / "acme" / "tcli.py").write_text(
+        "import typer\n\napp = typer.Typer()\n\n\n@app.command()\ndef one():\n    pass\n\n\n"
+        "@app.command()\ndef two():\n    pass\n",
+        encoding="utf-8",
+    )
+    pyproject = tree / "pyproject.toml"
+    base = pyproject.read_text(encoding="utf-8")
+    doc = tree / "docs" / "DEVELOPMENT.md"
+    doc_text = doc.read_text(encoding="utf-8")
+    allow = tree / "tests" / "product_scripts_allowlist.yaml"
+    allow_text = allow.read_text(encoding="utf-8")
+
+    machine = workdir / "product-scripts" / "typer"
+    fetched, output = run([str(venv_python), "-m", "pip", "install", "-q", "--target", str(machine), "typer"], cwd=tree)
+    env = {"PYTHONPATH": str(machine)} if fetched == 0 else None
+    typer_entry = 'acmet = "acme.tcli:app"\n' if fetched == 0 else ""
+    suite = [str(venv_python), "-m", "pytest", "tests/test_product_scripts.py", "-q", "-p", "no:cacheprovider"]
+
+    def state(entries: str, shell: str = "", excused: str = "") -> Tuple[int, str]:
+        pyproject.write_text(base + f"\n[project.scripts]\n{entries}", encoding="utf-8")
+        doc.write_text(doc_text + f"\n```bash\n{shell}\n```\n" if shell else doc_text, encoding="utf-8")
+        allow.write_text(allow_text + excused, encoding="utf-8")
+        return run(suite, cwd=tree, env_extra=env)
+
+    good = 'acme = "acme.cli:main"\n' + typer_entry
+    cases = (
+        ("true entries and true docs", good, ".venv/bin/acme sub leaf some-positional\nacme sub", "", 0, ""),
+        ("a dead word", good, "acme sub nope", "", 1, "acme sub nope"),
+        ("a dead word in the venv form", good, ".venv/bin/acme nope", "", 1, "acme nope"),
+        ("an excused word", good, "acme sub nope", "acme sub nope: built from data\n", 0, ""),
+        ("an excuse for nothing", good, "", "acme sub: excuses nothing\n", 1, "excuses nothing"),
+        ("an entry that cannot be imported", 'gone = "acme.gone:main"\n', "", "", 1, "cannot be imported"),
+        ("an entry that is no command", 'bare = "acme.cli:not_a_command"\n', "", "", 1, "cannot be walked"),
+    )
+    if fetched == 0:
+        cases += (("a Typer word that is dead", good, "acmet three", "", 1, "acmet three"),)
+    problems = []
+    for label, entries, shell, excused, wanted, needle in cases:
+        got, output = state(entries, shell, excused)
+        if got != wanted or needle not in output or " skipped" in output:
+            problems.append(f"{label}: exit {got}, wanted {wanted} naming {needle!r}\n{output[-600:]}")
+    if (tree / "RAN").exists():
+        problems.append("the walk executed a command rather than asking for --help")
+    label = "product scripts: click and Typer walked, " + ("both" if fetched == 0 else "SKIPPED Typer, not fetchable")
+    return [Result(label, not problems, time.time() - started, "\n".join(problems))]
+
+
 def self_tree_gate(venv_python: Path) -> Result:
     """This checkout's own unit suite, which no other gate here runs and CI runs after the push.
 
@@ -15173,6 +15239,7 @@ def main() -> int:
         results.append(adoption_hint_gate(workdir))
         results.extend(plant_gate(workdir, venv_python))
         results.append(clock_ahead_gate(workdir, venv_python))
+        results.extend(product_scripts_gate(workdir, venv_python))
         results.extend(node_product_gate(workdir, venv_python))
         results.append(self_tree_gate(venv_python))
 

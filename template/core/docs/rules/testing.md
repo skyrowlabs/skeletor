@@ -158,6 +158,10 @@ Coverage is the opposite and stays combined: a line rate is a whole-tree measure
 `tests/test_ci_ratchet_inputs.py` holds the workflows to the same rule, because the version
 of this that shipped was a job running the ratchet and never writing the file.
 
+## Your Own CLI
+
+A `[project.scripts]` entry in `pyproject.toml` is held to two rules by `tests/test_product_scripts.py`: every command answers `--help`, and a shell block in a doc names only commands it has. Nothing is run but `--help`. An entry that cannot be imported or walked is a finding, and `tests/product_scripts_allowlist.yaml` takes what cannot meet the rules, with a reason.
+
 ## Proving a Gate
 
 `{{CLI}} test plant <patch> --expect-red <test-id>` proves a test catches what it claims, in a throwaway copy of the tree with your uncommitted work in it. The test must pass first, the patch must land, and the test must then fail. `--expect-red-cmd "<command>"` does the same for a gate no test wraps, where red means exit 1 exactly. Exit 0 means proved, 1 that it stayed green, 2 that nothing was proved.
