@@ -67,8 +67,11 @@ place:
 
 ```bash
 gh pr create --base {{RELEASE_BRANCH}} --head {{BASE_BRANCH}} \
-  --title "chore(release): <version>" --body "<the changelog Release Please will generate>"
+  --title "chore(release): promote {{BASE_BRANCH}} to {{RELEASE_BRANCH}}" --body "<the changelog Release Please will generate>"
 ```
+
+No version in the title: Release Please has not chosen one yet, and it is the one
+that does (sky.boss).
 
 The title becomes the merge commit's message, and Release Please reads it as one
 more commit. `chore` is a hidden section, so it adds nothing to the changelog; a

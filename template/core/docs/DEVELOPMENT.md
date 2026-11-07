@@ -208,6 +208,12 @@ bump to one of them could never merge. Bump those by hand, in both files.
 <!-- SCAFFOLD-IF .github/release-please-config.json -->
 Versioning is Conventional Commits → Release Please. Commit types decide the
 bump; `CHANGELOG.md` and `VERSION` are generated. **Never hand-edit either.**
+
+**Known: a pull request merged with a merge commit lists its change twice.**
+GitHub writes the PR title into the merge commit's body by default, and Release
+Please reads that line as a second commit (sky.vault, v0.2.0 and v0.3.0). The
+template leaves merge settings to you: squash merges, or PR titles with a hidden
+type such as `chore:`, avoid it. Measured on one tree only.
 <!-- /SCAFFOLD-IF -->
 <!-- SCAFFOLD-IF-NOT .github/release-please-config.json -->
 Versioning is the annotated git tag and nothing else. There is no `VERSION`
