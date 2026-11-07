@@ -5787,3 +5787,11 @@ Teaching `tests/test_pre_push_covers_ci.py` about npm surfaced a gap it had been
 ## A hint that the template may now carry what you hold
 
 An upgrade reports a test name defined in a declined or diverged file's render when it also appears in lines the tree added. It is a hint and changes nothing, and its yield is low by the trees' own measurement: mind.head's real adoption shares no name with what it replaced, and stash.flow's guard went upstream renamed. Plain function names were dropped because every overlap in mind.head's tree was `main` or `load_config`.
+
+## Proving a gate in a copy, and moving the clock
+
+`template/core/scripts/plant.py` is the plant-and-require-red rule this repository uses on itself, given to a tree as `test plant`. Each refusal is a way a plant has passed here: one that did not land, one a test was already red for, one caught by something else. A named test or an exit of exactly 1 is what separates them.
+
+The hard part is that an editable install can import the real tree from a child, so a red could be about the wrong code. `PYTHONPATH` at the copy beat an editable install in `compat` and `strict` modes when measured. The default import-hook mode was not exercised, so the proof is a preflight rather than an assumption: a child at `/` asks the finders where each package resolves, and that sees a hook because a hook is what answers. `plant_gate` plants one.
+
+`test clock-ahead` is opt-in and `time-machine` stays out of `scripts/requirements.txt`, which conflicts regularly, so without it there is no subject. The plugin starts the shift on import through `-p`, because a test module computing a date at import time is the case worth catching. The template's own 570 unit tests at `agentic` passed at +30 and +400 days when this was built.

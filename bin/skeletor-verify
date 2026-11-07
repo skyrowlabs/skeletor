@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import ast
 import base64
+import datetime
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -11477,6 +11478,161 @@ def divergence_record_gate(workdir: Path, venv_python: Path) -> List[Result]:
     return results
 
 
+def plant_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """`test plant` proves only what it was asked to, and leaves the tree as it found it."""
+    started = time.time()
+    clean = clean_skeletor(workdir)
+    tree = workdir / "plant" / "probe"
+    args = ["--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", "core", "--language", "python", "--force"]
+    code, output = run([sys.executable, str(clean / "bin" / "skeletor-new"), str(tree), *args], cwd=SKELETOR)
+    if code != 0:
+        return [Result("test plant: scaffold", False, time.time() - started, output)]
+    (tree / ".venv").symlink_to(venv_python.parent.parent)
+    (tree / "scripts" / "planted.py").write_text("# a comment\ndef value():\n    return 1\n", encoding="utf-8")
+    (tree / "scripts" / "planted_gate.py").write_text(
+        "import sys\n\nsys.path.insert(0, '.')\nfrom scripts.planted import value\n\n"
+        "sys.exit(int(sys.argv[1]) if value() != 1 else 0)\n",
+        encoding="utf-8",
+    )
+    (tree / "tests" / "test_planted.py").write_text(
+        "import pytest\n\nfrom scripts.planted import value\n\npytestmark = pytest.mark.unit\n\n\n"
+        "def test_value():\n    assert value() == 1\n\n\n"
+        "@pytest.mark.skip(reason='fixture')\ndef test_skipped():\n    assert value() == 1\n",
+        encoding="utf-8",
+    )
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "--quiet", "--no-verify", "-m", "fixture")
+
+    target = tree / "scripts" / "planted.py"
+    rendered = target.read_text(encoding="utf-8")
+
+    def patch(name: str, new: str) -> Path:
+        target.write_text(new, encoding="utf-8")
+        _, diff = git_in(tree, "diff", "--", "scripts/planted.py")
+        target.write_text(rendered, encoding="utf-8")
+        path = workdir / "plant" / f"{name}.patch"
+        path.write_text(diff, encoding="utf-8")
+        return path
+
+    breaks = patch("breaks", rendered.replace("return 1", "return 2"))
+    harmless = patch("harmless", rendered.replace("# a comment", "# another comment"))
+    stale = workdir / "plant" / "stale.patch"
+    stale.write_text(breaks.read_text(encoding="utf-8").replace("return 1", "return 9"), encoding="utf-8")
+    empty = workdir / "plant" / "empty.patch"
+    empty.write_text("", encoding="utf-8")
+
+    def plant(path: Path, *named: str, env: Optional[dict] = None) -> Tuple[int, str]:
+        return run([str(venv_python), "-m", "cli", "test", "plant", str(path), *named], cwd=tree, env_extra=env)
+
+    test_id = "tests/test_planted.py::test_value"
+    python = str(venv_python)
+    cases = (
+        ("a real catch", breaks, ("--expect-red", test_id), 0),
+        ("a real catch by command", breaks, ("--expect-red-cmd", f"{python} scripts/planted_gate.py 1"), 0),
+        ("a plant nothing catches", harmless, ("--expect-red", test_id), 1),
+        ("a patch that does not apply", stale, ("--expect-red", test_id), 2),
+        ("an empty patch", empty, ("--expect-red", test_id), 2),
+        ("a skipped test", breaks, ("--expect-red", "tests/test_planted.py::test_skipped"), 2),
+        ("an id naming nothing", breaks, ("--expect-red", "tests/test_planted.py::test_absent"), 2),
+        ("a command exiting 2 after", breaks, ("--expect-red-cmd", f"{python} scripts/planted_gate.py 2"), 2),
+        ("a command exiting 3 after", breaks, ("--expect-red-cmd", f"{python} scripts/planted_gate.py 3"), 2),
+    )
+    problems = []
+    for label, path, named, wanted in cases:
+        got, output = plant(path, *named)
+        if got != wanted:
+            problems.append(f"{label}: exit {got}, not {wanted}\n{output[-500:]}")
+    results = [
+        Result("test plant: each outcome exits as documented", not problems, time.time() - started, "\n".join(problems))
+    ]
+
+    # Uncommitted work is in the copy, so a test it already breaks is refused before the plant.
+    started = time.time()
+    problems = []
+    target.write_text(rendered.replace("return 1", "return 3"), encoding="utf-8")
+    got, output = plant(breaks, "--expect-red", test_id)
+    target.write_text(rendered, encoding="utf-8")
+    if got != 2 or "not green" not in output:
+        problems.append(f"a test already red in the working tree was not refused: exit {got}\n{output[-500:]}")
+
+    # An import hook sends a package to the real tree, which the preflight must see.
+    hook = workdir / "plant" / "hook"
+    hook.mkdir(exist_ok=True)
+    (hook / "sitecustomize.py").write_text(
+        "import importlib.machinery\nimport sys\n\n\nclass Real:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        f"        if name == 'scripts':\n            return importlib.machinery.PathFinder.find_spec(name, [{str(tree)!r}])\n\n\n"
+        "sys.meta_path.insert(0, Real())\n",
+        encoding="utf-8",
+    )
+    got, output = plant(breaks, "--expect-red", test_id, env={"PYTHONPATH": str(hook)})
+    if got != 2 or "outside the copy" not in output:
+        problems.append(f"an import hook onto the real tree passed the preflight: exit {got}\n{output[-500:]}")
+
+    _, worktrees = git_in(tree, "worktree", "list")
+    _, status = git_in(tree, "status", "--porcelain")
+    if len(worktrees.strip().splitlines()) != 1:
+        problems.append(f"a worktree was left registered:\n{worktrees}")
+    if status.strip():
+        problems.append(f"the tree was left changed:\n{status}")
+    results.append(
+        Result(
+            "test plant: the copy is what runs, and nothing is left",
+            not problems,
+            time.time() - started,
+            "\n".join(problems),
+        )
+    )
+    return results
+
+
+def clock_ahead_gate(workdir: Path, venv_python: Path) -> Result:
+    """`test clock-ahead` moves the clock before collection, and without its dependency has no subject."""
+    started = time.time()
+    clean = clean_skeletor(workdir)
+    tree = workdir / "clock" / "probe"
+    args = ["--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", "core", "--language", "python", "--force"]
+    code, output = run([sys.executable, str(clean / "bin" / "skeletor-new"), str(tree), *args], cwd=SKELETOR)
+    if code != 0:
+        return Result("clock ahead: scaffold", False, time.time() - started, output)
+    (tree / ".venv").symlink_to(venv_python.parent.parent)
+    command = [str(venv_python), "-m", "cli", "test", "clock-ahead"]
+    problems = []
+    code, output = run([*command, "30"], cwd=tree)
+    if code != 3 or "pip install time-machine" not in output:
+        problems.append(f"without time-machine: exit {code}, wanted 3 and the install line\n{output[-500:]}")
+
+    machine = workdir / "clock" / "machine"
+    code, output = run(
+        [str(venv_python), "-m", "pip", "install", "-q", "--target", str(machine), "time-machine"], cwd=tree
+    )
+    if code != 0:
+        return Result(
+            "clock ahead: no subject held; SKIPPED the shift, time-machine not fetchable",
+            not problems,
+            time.time() - started,
+            output,
+        )
+    expires = (datetime.date.today() + datetime.timedelta(days=10)).isoformat()
+    (tree / "tests" / "test_bomb.py").write_text(
+        "from datetime import date\n\nimport pytest\n\npytestmark = pytest.mark.unit\n"
+        f"AT_IMPORT = date.today()\n\n\ndef test_not_expired():\n    assert AT_IMPORT < date.fromisoformat({expires!r})\n",
+        encoding="utf-8",
+    )
+    env = {"PYTHONPATH": str(machine)}
+    near, near_output = run([*command, "1"], cwd=tree, env_extra=env)
+    far, far_output = run([*command, "30"], cwd=tree, env_extra=env)
+    if near != 0:
+        problems.append(f"one day ahead should be green: exit {near}\n{near_output[-700:]}")
+    if far != 1 or "test_not_expired" not in far_output:
+        problems.append(f"a date read at import did not go red at +30: exit {far}\n{far_output[-700:]}")
+    if not re.search(r"only this process shifted: [1-9]\d* test file", far_output):
+        problems.append(f"the run did not say only this process shifted, with a count:\n{far_output[:500]}")
+    return Result(
+        "clock ahead: the shift lands before collection", not problems, time.time() - started, "\n".join(problems)
+    )
+
+
 def self_tree_gate(venv_python: Path) -> Result:
     """This checkout's own unit suite, which no other gate here runs and CI runs after the push.
 
@@ -15015,6 +15171,8 @@ def main() -> int:
 
         results.append(seam_record_scope_gate(workdir))
         results.append(adoption_hint_gate(workdir))
+        results.extend(plant_gate(workdir, venv_python))
+        results.append(clock_ahead_gate(workdir, venv_python))
         results.extend(node_product_gate(workdir, venv_python))
         results.append(self_tree_gate(venv_python))
 
