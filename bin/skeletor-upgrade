@@ -1843,16 +1843,34 @@ RENAMES_A_PATH = {"--shell-package"}
 CLI_RENAME = "--cli"
 
 
-def head_flag_defaults(head_src: Path) -> Dict[str, str]:
-    """Every value-taking flag the head scaffolder parses, with its default as recorded."""
+def head_flag_actions(head_src: Path) -> list:
+    """Every value-taking flag the head scaffolder parses, as argparse actions."""
     loader = importlib.machinery.SourceFileLoader("_head_skeletor_new", str(head_src / "bin" / "skeletor-new"))
     module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
     loader.exec_module(module)
+    return [action for action in module.build_parser()._actions if action.option_strings and action.nargs != 0]
+
+
+def head_flag_defaults(head_src: Path) -> Dict[str, str]:
+    """Every value-taking flag the head scaffolder parses, with its default as recorded."""
     return {
         action.option_strings[0]: "" if action.default is None else str(action.default)
-        for action in module.build_parser()._actions
-        if action.option_strings and action.nargs != 0
+        for action in head_flag_actions(head_src)
     }
+
+
+#: Ships at `governed`, with its rules commented out until `--owner` names somebody.
+CODEOWNERS = ".github/CODEOWNERS"
+
+
+def head_flag_value(args: List[str], flag: str) -> str:
+    """`flag`'s value in a recorded arg list; empty when absent or recorded empty."""
+    return args[args.index(flag) + 1] if flag in args and args.index(flag) + 1 < len(args) else ""
+
+
+def head_choice_flags(head_src: Path) -> Set[str]:
+    """The flags whose values are a fixed set of words, which the claim sweep matches in context."""
+    return {action.option_strings[0] for action in head_flag_actions(head_src) if action.choices}
 
 
 def set_args(
@@ -2959,16 +2977,21 @@ CLAIMS_SHOWN = 20
 CLAIM_SWEEP_SKIPS = {MANIFEST_NAME, "CHANGELOG.md"}
 
 
-def claim_pattern(flag: str, value: str) -> "re.Pattern[str]":
-    """The old value as a whole word; a branch name only in branch-shaped context.
+def claim_pattern(flag: str, value: str, choice: bool = False) -> "re.Pattern[str]":
+    """The old value as a whole word; a branch name or a choice only in context.
 
     `main` is an ordinary word: breeze.brain measured 84 bare hits in `main()` and
-    "main battery bank", and a branch-shaped pattern kept all 3 real lines.
+    "main battery bank", and a branch-shaped pattern kept all 3 real lines. A
+    choice is too: node-zero's `--tier=agentic` listed 102 lines, every one the
+    game's own word "core". So a choice counts only beside its flag's name.
     """
     word = rf"(?<![\w.-]){re.escape(value)}(?![\w-]|\.\w)"
+    quote = "[\"'`]?"
+    if choice:
+        name = re.escape(flag.lstrip("-"))
+        return re.compile(rf"{name}{quote}\s*[ =:]\s*{quote}{word}|{word}{quote}\s+{name}\b", re.IGNORECASE)
     if "branch" not in flag:
         return re.compile(word)
-    quote = "[\"'`]?"
     before = r"(?:origin/|refs/heads/|--branch[ =]|\bbranch(?:es)?:?\s+|\bon\s+|\binto\s+|\bbase:\s*)"
     listed = r"\bbranches:\s*\[[^\]]*"
     return re.compile(rf"{before}{quote}{word}|{listed}{word}|{word}{quote}\s+(?i:branch)")
@@ -3004,10 +3027,16 @@ def lines_this_tree_wrote(path: Path, recorded: Optional[str], base: Optional[Pa
 
 
 def sweep_claims(
-    target: Path, changes: Dict[str, Tuple[str, str]], hashes: Dict[str, str], base_files: Dict[str, Path]
+    target: Path,
+    changes: Dict[str, Tuple[str, str]],
+    hashes: Dict[str, str],
+    base_files: Dict[str, Path],
+    choices: Set[str] = frozenset(),
 ) -> Tuple[List[str], int]:
     """Lines this tree wrote that still name an old arg value, and how many files were too big to read."""
-    wanted = [(flag, was, claim_pattern(flag, was)) for flag, (was, _) in sorted(changes.items()) if was]
+    wanted = [
+        (flag, was, claim_pattern(flag, was, flag in choices)) for flag, (was, _) in sorted(changes.items()) if was
+    ]
     hits: List[str] = []
     unread = 0
     for rel in tree_listed(target):
@@ -3878,7 +3907,9 @@ def main() -> int:
         # Also before any write: an applied file then differs from its recorded hash.
         arg_claims: List[str] = []
         if set_args_applied:
-            arg_claims, unread_claims = sweep_claims(target, set_args_applied, hashes, base_files)
+            arg_claims, unread_claims = sweep_claims(
+                target, set_args_applied, hashes, base_files, head_choice_flags(head_src)
+            )
             report_claims(arg_claims, unread_claims, not base_files)
 
         # **Measured against the base that will be in force when this is read.**
@@ -4600,6 +4631,13 @@ def main() -> int:
                     item(rel)
                 if len(group) > 20:
                     detail(f"… and {len(group) - 20} more")
+
+        # The file arrives with every rule commented out, and `doctor` goes red on
+        # it; the run that adds it is the one place that can name the flag (node-zero).
+        if CODEOWNERS in added and not head_flag_value(head_args, "--owner"):
+            say("📌", f"{CODEOWNERS}{verb} added with every rule commented out: this tree records no --owner")
+            detail("Set one on this run, and doctor stops reporting that nobody owns anything:")
+            detail("    --set-arg --owner=@user   (or @org/team; a bare @org requests no review)")
 
         held_merges = [rel for rel in merged if rel in holds]
         if held_merges:

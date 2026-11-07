@@ -8140,7 +8140,9 @@ def claim_sweep_gate(workdir: Path) -> List[Result]:
     }
     for rel, text in planted.items():
         (tree / rel).write_text((tree / rel).read_text(encoding="utf-8") + text, encoding="utf-8")
-    (tree / "docs" / "mine.md").write_text("Ship from origin/develop.\nWe develop features slowly.\n", encoding="utf-8")
+    (tree / "docs" / "mine.md").write_text(
+        "Ship from origin/develop.\nWe develop features slowly.\nThe core loop is the game.\n", encoding="utf-8"
+    )
     workflow = tree / ".github" / "workflows" / "mine.yml"
     workflow.write_text("on:\n  push:\n    branches:\n      - develop\n", encoding="utf-8")
     git_in(tree, "add", "-A")
@@ -8154,6 +8156,8 @@ def claim_sweep_gate(workdir: Path) -> List[Result]:
     named = sorted(hit.split(":", 1)[0].strip("`") for hit in claims)
     want = [".github/workflows/mine.yml", "README.md", "docs/mine.md"]
     tier_claims, tier_said = plan("--set-arg", "--tier=governed")
+    _, owned_said = plan("--set-arg", "--tier=governed", "--set-arg", "--owner=@probe")
+    unowned = "CODEOWNERS would be added with every rule commented out"
     quiet, quiet_said = plan()
     before = {rel: (tree / rel).read_text(encoding="utf-8") for rel in ("README.md", "docs/mine.md")}
     _, real = run(
@@ -8173,10 +8177,16 @@ def claim_sweep_gate(workdir: Path) -> List[Result]:
             f"want {want}\ngot {claims}\n{said[-1200:]}",
         ),
         Result(
-            "claim sweep: any other arg matches the literal value",
+            "claim sweep: a choice arg matches beside its flag's name, never as a bare word",
             [hit.split(":", 1)[0].strip("`") for hit in tier_claims] == ["pyproject.toml"],
             0.0,
             f"{tier_claims}\n{tier_said[-800:]}",
+        ),
+        Result(
+            "tier switch: adding CODEOWNERS with no owner names --owner, and is quiet with one",
+            unowned in tier_said and "--set-arg --owner=@user" in tier_said and unowned not in owned_said,
+            0.0,
+            f"{tier_said[-1500:]}\n--- with --owner ---\n{owned_said[-600:]}",
         ),
         Result(
             "claim sweep: a run that changes no arg does not sweep",
