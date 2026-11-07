@@ -67,11 +67,11 @@ def test_a_frozen_report_sits_beside_the_window_and_both_are_indexed(tree, monke
 def test_a_frozen_report_keeps_its_relative_links_pointing_where_they_did(tree, monkeypatch):
     releases, regular = tree
     monkeypatch.setattr(fr.release_window, "anchored_reports", lambda: ["status.md"])
-    body = "[a](../docs/x.md#h) [b](https://e.org/y) [c](#here) [d](mine.md)\n```\n[e](../fenced.md)\n```\n"
+    body = "[a](../notes/x.md#h) [b](https://e.org/y) [c](#here) [d](mine.md)\n```\n[e](../fenced.md)\n```\n"
     (regular / "status.md").write_text("---\nstatus: in-flight\n---\n" + body, encoding="utf-8")
     assert fr.main() == 0
     frozen = (releases / "v1.0.0" / "status.md").read_text(encoding="utf-8")
-    assert "[a](../../docs/x.md#h) [b](https://e.org/y) [c](#here) [d](../../regular/mine.md)" in frozen
+    assert "[a](../../notes/x.md#h) [b](https://e.org/y) [c](#here) [d](../../regular/mine.md)" in frozen
     assert "[e](../fenced.md)" in frozen
 
 
