@@ -63,8 +63,9 @@ import statistics
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 SKELETOR = Path(__file__).resolve().parent.parent
 RELEASE_BRANCH = "main"
@@ -559,7 +560,13 @@ def run_ledger(run_id: int, into: Path) -> Dict[str, float]:
 
 def grid_gaps(ci: Dict[str, float], local: Dict[str, float]) -> Tuple[List[str], List[str]]:
     """Checks only CI ran and checks only this machine ran, at one commit."""
-    return sorted(set(ci) - set(local)), sorted(set(local) - set(ci))
+    return gap_lines(set(ci) - set(local)), gap_lines(set(local) - set(ci))
+
+
+def gap_lines(labels: Set[str]) -> List[str]:
+    """One line per difference: one tool missing reads the same in every tree that runs it."""
+    counts = Counter(label.rsplit(": ", 1)[-1] for label in labels)
+    return [f"{text} (x{count})" if count > 1 else text for text, count in sorted(counts.items())]
 
 
 def grid_verdict() -> Tuple[List[str], str, bool]:

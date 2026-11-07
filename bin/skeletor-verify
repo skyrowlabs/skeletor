@@ -15211,6 +15211,8 @@ def grid_ledger_gate() -> Result:
         problems.append("two runs of one check do not share a label")
     if maintain.grid_gaps({"x": 1.0, "y": 1.0}, {"y": 1.0, "z": 1.0}) != (["x"], ["z"]):
         problems.append("a check run in one place only was not named")
+    if maintain.grid_gaps({"core: lint": 1.0, "agentic: lint": 1.0}, {}) != (["lint (x2)"], []):
+        problems.append("one difference across trees was not read as one")
     for label, answer in (("no readable list", (0, "")), ("no runs", (0, "[]")), ("gh failing", (1, ""))):
         maintain.run = lambda _cmd, answer=answer: answer
         if maintain.grid_verdict()[2]:
