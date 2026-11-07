@@ -25,6 +25,7 @@ import argparse
 import ast
 import base64
 import datetime
+import difflib
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -653,6 +654,10 @@ def pyright_gate(tree: Path, venv_python: Path, available: bool) -> List[Result]
     return results
 
 
+def npm_exec_eslint(tree: Path) -> str:
+    return str(tree / "node_modules" / ".bin" / "eslint")
+
+
 def node_gates(tree: Path) -> List[Result]:
     """eslint and prettier, once, on the one tree that has a package.json.
 
@@ -668,6 +673,12 @@ def node_gates(tree: Path) -> List[Result]:
     if code != 0:
         return [Result("npm install", False, time.time() - started, output)]
     results = [Result("npm install", True, time.time() - started)]
+    # With no config at all, because an adopter's may declare nothing for `.github/`.
+    code, output = run(
+        [npm_exec_eslint(tree), "--no-config-lookup", "--rule", '{"no-undef": 2}', ".github/scripts/node-gate.cjs"],
+        cwd=tree,
+    )
+    results.append(Result("node-gate.cjs needs no globals from the tree's eslint config", code == 0, 0.0, output))
 
     for script in ("lint:check", "format:check"):
         started = time.time()
@@ -7659,9 +7670,9 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
     conflicting edit, and that combination is why the bug lived.
 
     The plant is derived rather than written: the same configuration is
-    scaffolded at the tag and at HEAD, the first line that differs between a
-    file's two renders is the line the template is about to change, and the tree
-    gets a third value there. That is a conflict by construction at whatever the
+    scaffolded at the tag and at HEAD, the first change between a file's two
+    renders is what the template is about to do, and the tree gets a third value
+    there. That is a conflict by construction at whatever the
     two versions happen to disagree about, instead of a quotation from one
     release that goes stale at the next.
     """
@@ -7773,15 +7784,19 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
                     continue
                 old_lines = old_file.read_text(encoding="utf-8").splitlines(keepends=True)
                 new_lines = new_file.read_text(encoding="utf-8").splitlines(keepends=True)
-                differing = [
-                    i
-                    for i in range(min(len(old_lines), len(new_lines)))
-                    if old_lines[i] != new_lines[i] and old_lines[i].strip()
+                changes = [
+                    opcode
+                    for opcode in difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False).get_opcodes()
+                    if opcode[0] != "equal"
                 ]
-                if not differing:
+                if not changes:
                     continue
-                at = differing[0]
-                old_lines[at] = "A THIRD VALUE, BELONGING TO NEITHER RENDER\n"
+                # An insertion moves every line below it, so the first index that
+                # differs is one the template never touched and a plant there merges
+                # clean. A third insertion at the same point is what collides.
+                action, at = changes[0][0], changes[0][1]
+                third = "A THIRD VALUE, BELONGING TO NEITHER RENDER\n"
+                old_lines[at : at + (action != "insert")] = [third]
                 old_file.write_text("".join(old_lines), encoding="utf-8")
                 planted = (rel, at)
                 break
@@ -11598,6 +11613,9 @@ def clock_ahead_gate(workdir: Path, venv_python: Path) -> Result:
     (tree / ".venv").symlink_to(venv_python.parent.parent)
     command = [str(venv_python), "-m", "cli", "test", "clock-ahead"]
     problems = []
+    for node in ast.walk(ast.parse((tree / "scripts" / "clock_shift.py").read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import) and any(alias.name == "time_machine" for alias in node.names):
+            problems.append("clock_shift.py imports time_machine statically, which reddens a tree's type checker")
     code, output = run([*command, "30"], cwd=tree)
     if code != 3 or "pip install time-machine" not in output:
         problems.append(f"without time-machine: exit {code}, wanted 3 and the install line\n{output[-500:]}")
@@ -15111,6 +15129,48 @@ def adopter_tree_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: b
     return results
 
 
+def doubled_merge_gate(workdir: Path) -> Result:
+    """A clean merge that would repeat a template line is left alone as a conflict.
+
+    The shape dream-doll and sky-boss reported: an adopter's `package.json`, a key
+    the template added, filled in by hand between two runs. The hazard must
+    reproduce, or the refusal below proves nothing; and an ordinary merge must
+    still land, or the check is refusing everything.
+    """
+    started = time.time()
+    upgrade = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade_for_doubled")
+    base = '{\n  "scripts": {\n    "format": "prettier"\n  },\n  "devDependencies": {\n    "eslint": "^10"\n  }\n}\n'
+    block = '  "skeletor": {\n    "requiredScripts": []\n  },\n'
+    ours = base.replace('  "devDependencies"', block + '  "devDependencies"')
+    theirs = (
+        '{\n  "scripts": {\n    "dev": "vite",\n    "test": "vitest"\n  },\n'
+        '  "skeletor": {\n    "requiredScripts": ["test"]\n  },\n'
+        '  "dependencies": {\n    "react": "^19"\n  },\n'
+        '  "devDependencies": {\n    "eslint": "^10"\n  }\n}\n'
+    )
+    scratch = workdir / "doubled-merge"
+    scratch.mkdir(exist_ok=True)
+    plain = upgrade.merge(base, theirs, ours, scratch) or ""
+    found = upgrade.merge_file("package.json", base, theirs, ours, scratch)
+    untaken = theirs.replace('  "skeletor": {\n    "requiredScripts": ["test"]\n  },\n', "")
+    landed = upgrade.merge_file("package.json", base, untaken, ours, scratch)
+    problems = []
+    if plain.count('"skeletor"') != 2:
+        problems.append(f"the hazard did not reproduce, so this fixture proves nothing:\n{plain}")
+    if upgrade.already_applied(base, ours, theirs):
+        problems.append("already_applied answered yes, so the merge was never reached")
+    if found is not None:
+        problems.append(f"merge_file returned a doubled file:\n{found}")
+    if landed is None or landed.count('"skeletor"') != 1:
+        problems.append(f"an ordinary change no longer lands:\n{landed}")
+    return Result(
+        "doubled merge: a repeated template line is a conflict, and an ordinary merge still lands",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
+
+
 def shard_arg(text: str) -> Tuple[int, int]:
     """`K/N` from the command line, K counted from 0 as `strategy.job-index` is."""
     match = re.fullmatch(r"(\d+)/(\d+)", text)
@@ -15222,6 +15282,7 @@ def main() -> int:
             results += checkout_path_literal_gate()
             results.append(template_comment_names_gate())
             results.append(already_applied_gate())
+            results.append(doubled_merge_gate(workdir))
             results.append(absent_region_gate())
             results += upstream_record_gate()
             results.append(tracked_source_gate())

@@ -5829,3 +5829,28 @@ because the gates read the working tree and a stamp names a commit's tree.
 
 `--no-verify` remains, and the shape keeps it: this catches a push nobody meant to make
 unchecked, and is not a control against somebody who means to.
+
+## The grid in shards, and what a required job is
+
+`verify` ran serially, and the same gates took 25 to 55 minutes depending on the
+runner. `bin/skeletor-verify --shard K/N` runs every Nth step; CI runs three, and the
+split is by index so a new gate joins by being added.
+
+Every shard scaffolds every tree and only what reads them is split. Several gates
+reach for a tier's tree by path, and one guarded by `.exists()` would pass in silence
+in a shard without it. Splitting did expose one order dependency:
+`changelog_prose_gate` read the tree `prose_check_gate` scaffolds, so they are one step.
+
+The required context is a separate job. GitHub reads a skipped required job as
+passing, and a job that `needs:` a failed one is skipped unless it says `always()`.
+`shard_gate` holds that wiring, and a planted red shard established it on GitHub.
+`strategy.job-total` is the shard count, so a matrix and a number cannot disagree.
+
+## A clean merge can still be wrong
+
+`already_applied` wants an added block whole, so an edit inside the block reads as
+absent and the merge inserts it again, cleanly. dream-doll and sky-boss got two
+`skeletor` keys in `package.json`. Loosening that test would risk skipping a real
+change, which is the silent loss, so `doubled_lines` checks the result: a template
+line held more often than either side holds it makes the file a conflict. Across 47
+real clean merges in eight trees at v0.81.0 it flagged none.

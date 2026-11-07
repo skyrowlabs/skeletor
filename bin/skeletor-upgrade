@@ -178,7 +178,7 @@ REPORT_SECTIONS: Tuple[Tuple[str, Optional[str]], ...] = (
         "Up to three things skeletor does not do that this tree built for itself, each slugged, with this"
         " tree's evidence and what is specific to it. `none` rather than inventing one.",
     ),
-    ("FOR-THE-OWNER", "Decisions only this repository's owner can make. Empty is a fine answer."),
+    ("FOR-OPERATOR", "Decisions only this repository's operator can make. Empty is a fine answer."),
     ("NOTES", "Anything else worth keeping."),
 )
 
@@ -2478,7 +2478,27 @@ def merge_file(rel: str, base: str, theirs: str, ours: str, workdir: Path) -> Op
     """`merge`, with a requirements file's tree-moved floors taken as agreed first."""
     if _REQUIREMENTS.search(rel):
         base, ours = adopt_floors(base, theirs, ours)
-    return merge(base, theirs, ours, workdir)
+    merged = merge(base, theirs, ours, workdir)
+    return None if merged is not None and doubled_lines(base, theirs, ours, merged) else merged
+
+
+def doubled_lines(base: str, theirs: str, ours: str, merged: str) -> List[str]:
+    """Lines the template added that `merged` holds more often than either side does.
+
+    `already_applied` wants an added block whole, so an edit inside the block reads
+    as absent and the merge inserts it again, cleanly. dream-doll and sky-boss got
+    two `skeletor` keys in `package.json` that way. Skipping the merge on a partial
+    match could drop a real change, so the doubling is caught after it, as a conflict.
+    """
+    theirs_lines, ours_lines, merged_lines = theirs.splitlines(), ours.splitlines(), merged.splitlines()
+    added = set(ours_lines) - set(base.splitlines())
+    return sorted(
+        line.strip()
+        for line in added
+        if _ANCHOR.fullmatch(line)
+        and len(line.strip()) >= _ANCHOR_MIN
+        and merged_lines.count(line) > max(ours_lines.count(line), theirs_lines.count(line))
+    )
 
 
 def merge(base: str, theirs: str, ours: str, workdir: Path) -> Optional[str]:
@@ -3805,6 +3825,8 @@ def main() -> int:
         #: applied them, or the adopter ported them. Not written, and not nothing:
         #: see `already_applied`, and the advance below that has to count them.
         carried: List[str] = []
+        #: `{conflicted path: lines}` where the merge was clean and would have doubled them.
+        repeated: Dict[str, List[str]] = {}
         #: Merged or conflicted files where the template changed comments alone. See `touches_code`.
         comment_only: List[str] = []
         #: What `render_dirt` found in the checkout that renders `ours` — the
@@ -4103,6 +4125,9 @@ def main() -> int:
             resolved = merge_file(rel, base, theirs, ours, workdir)
             if resolved is None:
                 conflicted.append(rel)
+                again = merge(base, theirs, ours, workdir)
+                if again is not None:
+                    repeated[rel] = doubled_lines(base, theirs, ours, again)
                 if rel in holds:
                     hunk_lines[rel] = template_lines(base, ours)
                 # All or nothing. A partial count cannot tell a region the adopter
@@ -4594,7 +4619,16 @@ def main() -> int:
             say("🔎", f"lint: not forecast — {linter.reason}")
         elif linted and linter.asked() and not lint_new and not lint_unanswered:
             writes = "would write" if args.dry_run else "wrote"
-            say("🔎", f"lint: {', '.join(linter.consulted())} — nothing new in the {linted} file(s) this run {writes}")
+            unasked = len(written) - linted
+            rest = (
+                f"; {unasked} other file(s) and any other tool were not asked"
+                if unasked
+                else "; no other tool was asked"
+            )
+            say(
+                "🔎",
+                f"lint: {', '.join(linter.consulted())} — nothing new in the {linted} Python file(s) this run {writes}{rest}",
+            )
         if lint_new:
             # Tense from the run, because the dry run is where this is worth most:
             # it is the only moment the adopter can decide before their gate does.
@@ -4671,6 +4705,8 @@ def main() -> int:
             for rel in conflicted:
                 item(rel + where_it_was(rel))
                 report_held_conflict(rel)
+                if rel in repeated:
+                    detail(f"    merged clean, but would have repeated: {'; '.join(repeated[rel])}")
             detail()
             detail("Nothing was written to these.")
             if args.dry_run:
