@@ -356,8 +356,9 @@ def test_the_agent_runs_as_its_job(monkeypatch):
 def test_cron_check_on_an_empty_crontab_is_green_only_when_every_job_is_held(monkeypatch, tmp_path, held):
     import subprocess
 
-    import scripts.reporting.jobs
     from click.testing import CliRunner
+
+    import scripts.reporting.jobs
     from scripts.reporting import shellout
     from tests.shell import module
 
