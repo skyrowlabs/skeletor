@@ -181,12 +181,21 @@ the person who made it.
 
 ### 5. Tag if anything shipped
 
-If a merged change alters what a user would scaffold, cut a tag:
+If a merged change alters what a user would scaffold, cut a tag. Run this tree's
+own gates first:
 
 ```bash
+./skel check pre-push
 git tag -a vX.Y.Z -m "what moved, and why somebody would want it"
 git push origin vX.Y.Z
 ```
+
+**The grid does not cover that first line.** `bin/skeletor-verify` tests the
+template, so a tag commit can pass it and go red here. A tag precedes the
+self-upgrade, so a root doc citing a file the release adds names a path this tree
+lacks until then: `v0.74.0` and `v0.77.0` went red that way. Cite such a file as
+`template/core/...`, which exists at the tag. The grid's `self_tree_gate` runs the
+unit suite to hold this.
 
 `skeletor_ref()` writes `git describe` into every scaffold's `.skeletor.json`,
 and that value is the base `bin/skeletor-upgrade` re-renders from. An untagged

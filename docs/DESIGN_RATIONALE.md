@@ -5775,3 +5775,15 @@ file deleted but recorded keeps its entry. That is the second question a tree as
 of `.skeletor.json`, through `scripts/manifest.py`. The tool asks whether the disk
 equals a render with seam content counted, so an entry on a seam-only file is not
 stale, and a reformat retires an entry only on a `--normalise` run.
+
+## A node tree's product, gated by name and held by declaration
+
+`check pre-push` and the `node` job run `typecheck`, `test` and `build` when `package.json` has them. The template ships none of those, because it does not pick a test runner, so a fresh tree prints `no subject`.
+
+Running a script when present has a hole dream-doll named: deleting `test` turns a red into a pass. So `package.json` carries `skeletor.requiredScripts`, shipped empty. A script named there and missing is refused. The key lives in `package.json` because the `node` job sets up no python, which is also why `template/core/.github/scripts/node-gate.cjs` exists beside `check.py`. They are two readers of one rule, and `node_product_gate` runs both through each case.
+
+Teaching `tests/test_pre_push_covers_ci.py` about npm surfaced a gap it had been blind to: CI blocks on `format:check` and `check pre-push` never ran it. It runs now.
+
+## A hint that the template may now carry what you hold
+
+An upgrade reports a test name defined in a declined or diverged file's render when it also appears in lines the tree added. It is a hint and changes nothing, and its yield is low by the trees' own measurement: mind.head's real adoption shares no name with what it replaced, and stash.flow's guard went upstream renamed. Plain function names were dropped because every overlap in mind.head's tree was `main` or `load_config`.

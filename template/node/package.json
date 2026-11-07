@@ -9,6 +9,9 @@
     "format:check": "prettier --check .",
     "format": "prettier --write ."
   },
+  "skeletor": {
+    "requiredScripts": []
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.9.0",

@@ -11477,6 +11477,148 @@ def divergence_record_gate(workdir: Path, venv_python: Path) -> List[Result]:
     return results
 
 
+def self_tree_gate(venv_python: Path) -> Result:
+    """This checkout's own unit suite, which no other gate here runs and CI runs after the push.
+
+    A tag commit precedes the self-upgrade, so a root doc citing a file the release
+    adds names a path this tree lacks: `v0.74.0` and `v0.77.0` went red that way.
+    `check pre-push` itself cannot run here, because CI's clone has no merge driver.
+    """
+    started = time.time()
+    code, output = run(
+        [str(venv_python), "-m", "pytest", "tests/", "-m", "unit", "-q", "-p", "no:cacheprovider"], SKELETOR
+    )
+    hint = "\nA root doc citing a new file: cite `template/core/...` until the self-upgrade.\n" if code else ""
+    return Result("self-tree: this checkout's unit suite", code == 0, time.time() - started, hint + output[-2500:])
+
+
+def node_product_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """Both readers of `skeletor.requiredScripts` agree, since the grid runs no node tree's suite."""
+    started = time.time()
+    if not shutil.which("node") or not shutil.which("npm"):
+        return [Result("node product gates: SKIPPED, no node toolchain here", True, 0.0, "")]
+    clean = clean_skeletor(workdir)
+    tree = workdir / "node-gates" / "probe"
+    args = ["--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", "core", "--language", "both", "--force"]
+    code, output = run([sys.executable, str(clean / "bin" / "skeletor-new"), str(tree), *args], cwd=SKELETOR)
+    if code != 0:
+        return [Result("node product gates: scaffold", False, time.time() - started, output)]
+    (tree / ".venv").symlink_to(venv_python.parent.parent)
+    manifest_path = tree / "package.json"
+    shipped = json.loads(manifest_path.read_text(encoding="utf-8"))
+    probe = (
+        "import json, cli.check as c; rows = c._node_products(); "
+        "print('ROWS' + json.dumps({n: [int(v), type(v).__name__] for n, v in rows}))"
+    )
+
+    def both(gate: str, scripts: Dict[str, str], required: List[str]) -> Tuple[int, List[Any]]:
+        manifest = {**shipped, "scripts": scripts, "skeletor": {"requiredScripts": required}}
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        job, _ = run(["node", ".github/scripts/node-gate.cjs", gate], cwd=tree)
+        _, text = run([str(venv_python), "-c", probe], cwd=tree)
+        rows = next((json.loads(line[4:]) for line in text.splitlines() if line.startswith("ROWS")), {})
+        return job, rows.get(f"npm {gate}", [])
+
+    problems = []
+    if shipped.get("skeletor") != {"requiredScripts": []}:
+        problems.append(f"package.json does not ship the key empty: {shipped.get('skeletor')}")
+    if set(shipped["scripts"]) & {"typecheck", "test", "build"}:
+        problems.append("a product script shipped, and the template picks no runner")
+    cases = (
+        ("fresh", "test", {}, [], 0, [3, "Declared"]),
+        ("present and green", "test", {"test": "node -e 0"}, ["test"], 0, [0, "int"]),
+        ("present and red", "build", {"build": "node -e 'process.exit(4)'"}, [], 4, None),
+        ("declared and missing", "typecheck", {}, ["typecheck"], 2, [2, "int"]),
+    )
+    for label, gate, scripts, required, job_code, row in cases:
+        job, seen = both(gate, scripts, required)
+        if job != job_code:
+            problems.append(f"{label}: the job helper exited {job}, not {job_code}")
+        if row is not None and seen != row:
+            problems.append(f"{label}: check.py said {seen}, not {row}")
+        if row is None and (not seen or seen[0] == 0):
+            problems.append(f"{label}: check.py said {seen}, not a failure")
+    manifest_path.write_text(json.dumps(shipped, indent=2) + "\n", encoding="utf-8")
+    results = [
+        Result(
+            "node product gates: the job and check.py apply one rule",
+            not problems,
+            time.time() - started,
+            str(problems),
+        )
+    ]
+
+    # Unwired from `pre_push`, the tree's own partition has to notice.
+    started = time.time()
+    check_py = tree / "cli" / "check.py"
+    wired = check_py.read_text(encoding="utf-8")
+    call = "        results += _node_products()\n"
+    problems = [] if call in wired else ["the plant did not land: no call in pre_push"]
+    suite = [str(venv_python), "-m", "pytest", "tests/test_pre_push_covers_ci.py", "-q", "-p", "no:cacheprovider"]
+    green, output = run(suite, cwd=tree)
+    if green != 0:
+        problems.append(f"the partition is red on arrival:\n{output[-800:]}")
+    check_py.write_text(wired.replace(call, ""), encoding="utf-8")
+    red, output = run(suite, cwd=tree)
+    check_py.write_text(wired, encoding="utf-8")
+    if red == 0 or "npm:" not in output:
+        problems.append(f"pre_push stopped running the npm scripts and the partition stayed green:\n{output[-800:]}")
+    results.append(
+        Result(
+            "node product gates: pre_push is held to ci.yml's npm scripts",
+            not problems,
+            time.time() - started,
+            str(problems),
+        )
+    )
+    return results
+
+
+def adoption_hint_gate(workdir: Path) -> Result:
+    """A declined test's name in a file of the tree's own is hinted; a plain function's is not."""
+    started = time.time()
+    clean = clean_skeletor(workdir)
+    tree = workdir / "adoption-hint" / "probe"
+    args = ["--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", "core", "--language", "python", "--force"]
+    code, output = run([sys.executable, str(clean / "bin" / "skeletor-new"), str(tree), *args], cwd=SKELETOR)
+    if code != 0:
+        return Result("adoption hint: scaffold", False, time.time() - started, output)
+    pattern = re.compile(r"^def (test_\w+)", re.MULTILINE)
+    plain = re.compile(r"^def ([a-z]\w+)", re.MULTILINE)
+    tests = sorted((tree / "tests").glob("test_*.py"))
+    declined = next(p for p in tests if pattern.search(p.read_text(encoding="utf-8")))
+    source = declined.read_text(encoding="utf-8")
+    name = pattern.search(source).group(1)
+    helper = next((m for m in plain.findall(source) if not m.startswith("test_")), "helper_missing")
+    declined_rel = declined.relative_to(tree).as_posix()
+    declined.unlink()
+    own = "tests/test_ours.py"
+    (tree / own).write_text(
+        f"def {name}():\n    pass\n\n\ndef {helper}():\n    pass\n\n\ndef test_only_ours():\n    pass\n",
+        encoding="utf-8",
+    )
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "--quiet", "--no-verify", "-m", "adopter: took the test over")
+    upgrade = [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(tree), "--dry-run", "--json"]
+    ran = subprocess.run(upgrade, cwd=tree, capture_output=True, text=True, env=subprocess_env(None))
+    envelope = json.loads(ran.stdout) if ran.stdout.startswith("{") else {}
+    wanted = [{"name": name, "template_file": declined_rel, "found_in": own}]
+    problems = []
+    if envelope.get("adoption_hints") != wanted:
+        problems.append(f"hints are {envelope.get('adoption_hints')}, not {wanted}")
+    if "A shared name and nothing more" not in ran.stderr:
+        problems.append(f"the hint did not say what it is:\n{ran.stderr[-600:]}")
+    if ran.returncode != 0 or envelope.get("conflicted"):
+        problems.append(f"a hint changed an outcome: exit {ran.returncode}")
+    (tree / own).unlink()
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "--quiet", "--no-verify", "-m", "adopter: dropped it")
+    ran = subprocess.run(upgrade, cwd=tree, capture_output=True, text=True, env=subprocess_env(None))
+    if (json.loads(ran.stdout) if ran.stdout.startswith("{") else {}).get("adoption_hints") != []:
+        problems.append("a hint printed with nothing of the tree's to point at")
+    return Result("adoption hint: a test name, never a verdict", not problems, time.time() - started, str(problems))
+
+
 def seam_record_scope_gate(workdir: Path) -> Result:
     """A `--force` adoption records seams git tracks or would, and nothing git ignores."""
     started = time.time()
@@ -14872,6 +15014,9 @@ def main() -> int:
             results.append(gate)
 
         results.append(seam_record_scope_gate(workdir))
+        results.append(adoption_hint_gate(workdir))
+        results.extend(node_product_gate(workdir, venv_python))
+        results.append(self_tree_gate(venv_python))
 
         for gate in pinned_ref_gate(workdir):
             results.append(gate)

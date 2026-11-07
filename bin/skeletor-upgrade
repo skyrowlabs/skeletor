@@ -1185,6 +1185,47 @@ def retired_holds(
     return found
 
 
+#: A test the template defines. Test names only: on mind.head's tree every plain
+#: function-name overlap was `main` or `load_config`, and none was an adoption.
+TEST_DEF = re.compile(r"^\s*(?:async\s+)?def (test_\w+)", re.MULTILINE)
+TEST_NAME = re.compile(r"\btest_\w+")
+
+
+def adoption_hints(
+    target: Path,
+    declined: List[str],
+    diverged: List[str],
+    base_files: Dict[str, Path],
+    head_files: Dict[str, Path],
+    recorded: Dict[str, str],
+) -> List[Dict[str, str]]:
+    """Test names a declined or diverged file's render defines that appear in lines this tree added.
+
+    A hint and never a verdict: it asks whether the template now carries what the
+    tree holds, and a shared name proves neither that nor a rename it cannot see.
+    Added lines are a diverged file's lines its base lacks, and all of a file skeletor
+    did not write.
+    """
+    names: Dict[str, str] = {}
+    for rel in sorted({*declined, *diverged}):
+        text = read(head_files.get(rel)) if rel.endswith(".py") else None
+        names.update({name: rel for name in TEST_DEF.findall(text or "")})
+    if not names:
+        return []
+    listed = subprocess.run(["git", "-C", str(target), "ls-files", "*.py"], capture_output=True, text=True)
+    own = [rel for rel in listed.stdout.splitlines() if rel not in head_files and rel not in recorded]
+    hits = []
+    for rel in [*(r for r in diverged if r.endswith(".py")), *own]:
+        mine = read(target / rel) if (target / rel).is_file() else None
+        kept = set((read(base_files.get(rel)) or "").splitlines())
+        added = [line for line in (mine or "").splitlines() if line not in kept]
+        found = {token for line in added for token in TEST_NAME.findall(line)}
+        hits += [
+            {"name": name, "template_file": names[name], "found_in": rel} for name in sorted(found.intersection(names))
+        ]
+    return hits
+
+
 def template_lines(base: str, ours: str) -> str:
     """The lines of the template's current text that changed, as `3-5, 40`."""
     import difflib
@@ -4333,6 +4374,7 @@ def main() -> int:
         renders = [files for files in (base_files, head_files) if files]
         divergence = split_standing(diverged, holds, target, renders, normalising)
         retired = retired_holds(holds, target, renders, normalising)
+        hints = adoption_hints(target, declined, diverged, base_files, head_files, hashes or {})
         held_reached = [
             f"`{rel}` ({what}): {reason} ({held_note(hunk_lines.get(rel, ''))})"
             for what, group in (("conflict", conflicted), ("clean merge", merged))
@@ -4501,6 +4543,7 @@ def main() -> int:
                         # longer hold anything. Reported only: no outcome reads them.
                         "divergence": divergence,
                         "divergence_stale": retired,
+                        "adoption_hints": hints,
                         "dropped": dropped,
                         # Both halves of `stale_against_head`, for the reason
                         # `diverged` and `head_ref` are here: a consumer that has
@@ -4879,6 +4922,12 @@ def main() -> int:
             for key in retired:
                 item(key)
             detail("Delete them. The file no longer differs from the template, so the reason is out of date.")
+        if hints:
+            say("💡", f"{len(hints)} test name(s) from template files you declined or edited are in lines you added")
+            for hint in hints:
+                item(f"{hint['name']}: template's {hint['template_file']}, yours in {hint['found_in']}")
+            detail("A shared name and nothing more. The template may now carry what you hold; check before")
+            detail("collapsing yours into it.")
         if diverged:
             # The symmetric half of the block above, and it took an adopter to
             # notice the asymmetry. A deletion was standing state — reported
