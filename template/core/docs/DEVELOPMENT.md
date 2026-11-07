@@ -227,8 +227,15 @@ The release lands on `{{RELEASE_BRANCH}}`, so back-merge it. Until you do,
 names the release before this one (mind.head):
 
 ```bash
-git switch {{BASE_BRANCH}} && git merge --no-ff {{RELEASE_BRANCH}} && git push
+git fetch origin && git switch {{BASE_BRANCH}} && git merge --ff-only origin/{{RELEASE_BRANCH}} && git push
 ```
+
+A fast-forward, because a merge commit is a commit no check has run on, and a
+`{{BASE_BRANCH}}` with required checks takes it only by admin bypass (sky.vault).
+After a promote `{{BASE_BRANCH}}` is normally an ancestor of `{{RELEASE_BRANCH}}`,
+so the fast-forward gives the same tree. If git refuses, `{{BASE_BRANCH}}` has moved
+since: open the back-merge as a pull request from `{{RELEASE_BRANCH}}` and merge it
+with a merge commit, so it runs the checks and keeps the release commit an ancestor.
 <!-- /SCAFFOLD-IF -->
 
 A release closes the report window: in-flight reports under

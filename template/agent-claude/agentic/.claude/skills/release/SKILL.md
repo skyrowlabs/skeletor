@@ -131,8 +131,13 @@ Then back-merge, so `{{BASE_BRANCH}}` carries the release commit and the next
 release PR does not re-propose it:
 
 ```bash
-git switch {{BASE_BRANCH}} && git merge --no-ff {{RELEASE_BRANCH}}
+git fetch origin && git switch {{BASE_BRANCH}} && git merge --ff-only origin/{{RELEASE_BRANCH}} && git push
 ```
+
+If git refuses the fast-forward, `{{BASE_BRANCH}}` moved after the promote. Do not
+make a merge commit locally: no check has run on it, so it lands only by admin
+bypass. Open the back-merge as a pull request from `{{RELEASE_BRANCH}}`, report it,
+and stop; a human merges it with a merge commit, never a squash.
 <!-- /SCAFFOLD-IF -->
 
 Report: tag, what shipped, where the frozen editions went, and anything left
