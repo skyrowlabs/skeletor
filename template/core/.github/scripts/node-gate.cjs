@@ -18,4 +18,4 @@ if (manifest.skeletor?.requiredScripts?.includes(gate)) {
   console.error(`refused: package.json requires the \`${gate}\` script and has none`);
   process.exit(2);
 }
-console.log(`no subject: no \`${gate}\` script in package.json`);
+console.error(`no subject: no \`${gate}\` script in package.json`);

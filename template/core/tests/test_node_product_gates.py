@@ -73,4 +73,4 @@ def test_the_job_helper_agrees_when_node_is_here(tmp_path):
     except FileNotFoundError:
         return
     assert declared.returncode == EXIT_REFUSED
-    assert undeclared.returncode == 0 and "no subject" in undeclared.stdout
+    assert undeclared.returncode == 0 and "no subject" in undeclared.stderr
