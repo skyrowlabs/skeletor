@@ -44,6 +44,9 @@ from scripts.output import (  # noqa: E402
 from scripts.paths import PROJECT_ROOT  # noqa: E402
 from scripts.rehearse_scheduled import snapshot  # noqa: E402
 
+#: A name, not a parenthesised tuple: at a 3.14 target black rewrites `except (A, B):`.
+_UNREADABLE = (OSError, ElementTree.ParseError)
+
 #: Untracked but needed to run anything, so the copy borrows them.
 BORROWED = (".venv", "node_modules")
 
@@ -97,7 +100,7 @@ def counts(report: Path) -> dict:
     """Totals from a junit report: `{tests, failures, errors, skipped}`, all zero if it is unreadable."""
     try:
         root = ElementTree.parse(report).getroot()
-    except (OSError, ElementTree.ParseError):
+    except _UNREADABLE:
         return {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
     suite = root if root.tag == "testsuite" else root[0]
     return {key: int(suite.get(key, 0)) for key in ("tests", "failures", "errors", "skipped")}
