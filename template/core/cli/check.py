@@ -15,6 +15,7 @@ import sys
 import click
 
 from scripts.gates import DOCS_GATES, PRE_PUSH_GATES, Gate
+from scripts.git.green_stamp import clean_tree, record
 from scripts.output import EXIT_NO_SUBJECT, EXIT_REFUSED
 from scripts.paths import TMP_DIR
 from scripts.yaml_text import read_uncommented
@@ -269,7 +270,7 @@ def scheduled(plan: bool, workflows: tuple, keep: bool) -> None:
 
 
 @check.command(name="pre-push")
-@click.option("--quick", is_flag=True, help="lint and docs only — skip the test suites")
+@click.option("--quick", is_flag=True, help="lint and docs only — skip the test suites, and write no green stamp")
 def pre_push(quick: bool) -> None:
     """Every gate CI blocks on that can run on this host, in fail-fastest order.
 
@@ -297,6 +298,7 @@ def pre_push(quick: bool) -> None:
     `ci.yml` and from this function, and fails when a gate is in neither.
     """
     _say_if_interpreter_differs()
+    tree = clean_tree()
     results = [
         ("lint", _lint()),
         ("output discipline", script("scripts/check_output_discipline.py")),
@@ -323,7 +325,11 @@ def pre_push(quick: bool) -> None:
             ("skip budget", script("scripts/check_skip_budget.py", "--suite", "unit", "--junit", str(junit)))
         )
         results += _node_products()
-    sys.exit(summarize(results))
+    code = summarize(results)
+    # What scripts/hooks/pre-push reads: a push to a protected branch needs this.
+    if code == 0 and not quick:
+        record(tree)
+    sys.exit(code)
 
 
 #: The python this project was rendered for — what `ci.yml`'s single-version

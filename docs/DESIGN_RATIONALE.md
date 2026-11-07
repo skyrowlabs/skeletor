@@ -5807,3 +5807,25 @@ The hard part is that an editable install can import the real tree from a child,
 **An entry that cannot be walked is a finding, never a skip.** It would otherwise leave the population with nothing red. The allowlist takes it, with a reason, along with a command built from data and a tombstone like stash.flow's `schedule alerts`, which exits 2 on `--help` by design.
 
 **A word after a leaf is a positional**, so the docs question walks only as deep as groups go. The output contract stays out, because a product's output is not the shell's to rule.
+
+## A green stamp, and why a push reads it
+
+`check pre-push` was advice: nothing connected a passing run to the commit that left the
+machine, so a tree could be pushed having run nothing. `template/core/scripts/hooks/pre-push`
+makes the connection for the two protected branches. It refuses and names the command; it
+does not run the gates itself.
+
+It is a plain hook and not a pre-commit stage. That stage reads stdin and returns on the
+first ref with commits, so `git push origin feature develop` would be judged on `feature`
+alone. The cost is a file no install line covers, which is why the clone-local installer
+carries it and `--check` goes red without it. Every existing clone is red until that runs,
+on purpose: the alternative is a clone that looks protected and is not. Jeston reconfirmed
+that and the per-push cost.
+
+The stamp is keyed on the tree, not the commit. Two commits with one tree are one set of
+gate inputs, so a reworded commit keeps its stamp and the fetched tip of either branch
+passes, since CI has seen that tree. It needs a clean checkout at both ends of the run,
+because the gates read the working tree and a stamp names a commit's tree.
+
+`--no-verify` remains, and the shape keeps it: this catches a push nobody meant to make
+unchecked, and is not a control against somebody who means to.

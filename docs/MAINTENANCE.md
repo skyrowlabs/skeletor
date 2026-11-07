@@ -218,10 +218,14 @@ neither is the normal path.
 itself, so the release is not finished until it has upgraded:
 
 ```bash
-bin/skeletor-upgrade . --ref vX.Y.Z && ./skel check pre-push
+bin/skeletor-upgrade . --ref vX.Y.Z
+git add -A && git commit -m "chore(skeletor): take skeletor's own tree from vA to vB"
+./skel check pre-push
 ```
 
-Commit that as one `chore(skeletor):` change. It went undone for five releases
+Commit before the check: the pre-push hook needs a stamp, and only a clean tree earns
+one. An upgrade that changes the hook also needs
+`.venv/bin/python scripts/git/install_merge_drivers.py` first. The self-upgrade went undone for five releases
 (v0.68.0 to v0.72.2), so `bin/skeletor-maintain` now reports it as work.
 
 ### The runner label moves under every tree, on purpose

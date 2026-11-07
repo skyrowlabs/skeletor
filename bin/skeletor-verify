@@ -11633,6 +11633,56 @@ def clock_ahead_gate(workdir: Path, venv_python: Path) -> Result:
     )
 
 
+def green_stamp_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """A real `check pre-push` is what a real push to a protected branch reads, in a real scaffold."""
+    started = time.time()
+    clean = clean_skeletor(workdir)
+    tree = workdir / "green-stamp" / "probe"
+    args = ["--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", "core", "--language", "python", "--force"]
+    code, output = run([sys.executable, str(clean / "bin" / "skeletor-new"), str(tree), *args], cwd=SKELETOR)
+    if code != 0:
+        return [Result("green stamp: scaffold", False, time.time() - started, output)]
+    (tree / ".venv").symlink_to(venv_python.parent.parent)
+    remote = workdir / "green-stamp" / "remote.git"
+    run(["git", "init", "-q", "--bare", str(remote)], cwd=workdir)
+    run(["git", "remote", "add", "origin", str(remote)], cwd=tree)
+    cli = [f"./{CLI_NAME}", "check", "pre-push"]
+    stamps = tree / ".git" / "green-stamps"
+    problems: List[str] = []
+
+    def expect(what: str, done: Tuple[int, str], want: int, needle: str = "") -> None:
+        if done[0] != want or needle not in done[1]:
+            problems.append(f"{what}: wanted exit {want} with {needle!r}, got {done[0]}:\n{done[1][-800:]}")
+
+    installed = tree / ".git" / "hooks" / "pre-push"
+    if not installed.exists() or installed.read_bytes() != (tree / "scripts" / "hooks" / "pre-push").read_bytes():
+        problems.append("the scaffold did not install the hook it ships")
+    push = ["git", "push", "origin", "develop"]
+    expect("a fresh scaffold's push", run(push, cwd=tree), 1, f"./{CLI_NAME} check pre-push")
+    expect("--quick", run([*cli, "--quick"], cwd=tree), 0)
+    if stamps.exists():
+        problems.append("--quick wrote a stamp")
+    expect("the push after --quick", run(push, cwd=tree), 1, "no green stamp")
+    (tree / "uncommitted.txt").write_text("x\n", encoding="utf-8")
+    expect("a full run with a file uncommitted", run(cli, cwd=tree), 0, "Not stamped")
+    if stamps.exists():
+        problems.append("a dirty run wrote a stamp")
+    (tree / "uncommitted.txt").unlink()
+    expect("a full run on the clean tree", run(cli, cwd=tree), 0, "Stamped tree")
+    expect("the push after it", run(push, cwd=tree), 0)
+
+    # A second clone holds none of it, and says so where the gate set will.
+    second = workdir / "green-stamp" / "second"
+    run(["git", "clone", "-q", "-b", "develop", str(remote), str(second)], cwd=workdir)
+    installer = [str(venv_python), "scripts/git/install_merge_drivers.py"]
+    expect("a second clone", run([*installer, "--check"], cwd=second), 1)
+    expect("its installer", run(installer, cwd=second), 0, "pre-push hook")
+    expect("its check after that", run([*installer, "--check"], cwd=second), 0, "pre-push hook")
+    return [
+        Result("green stamp: a real run feeds a real push", not problems, time.time() - started, "\n".join(problems))
+    ]
+
+
 def product_scripts_gate(workdir: Path, venv_python: Path) -> List[Result]:
     """A tree's `[project.scripts]` entries answer for themselves, click and Typer alike."""
     started = time.time()
@@ -15240,6 +15290,7 @@ def main() -> int:
         results.extend(plant_gate(workdir, venv_python))
         results.append(clock_ahead_gate(workdir, venv_python))
         results.extend(product_scripts_gate(workdir, venv_python))
+        results.extend(green_stamp_gate(workdir, venv_python))
         results.extend(node_product_gate(workdir, venv_python))
         results.append(self_tree_gate(venv_python))
 
