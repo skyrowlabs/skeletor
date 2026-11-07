@@ -431,6 +431,21 @@ jobs:
         if: steps.node.outputs.present == 'true'
         run: npm run --if-present format:check
 
+      # The product's own scripts, by their conventional names. `--if-present` would
+      # let a deleted script pass, so `package.json`'s `skeletor.requiredScripts` names
+      # the ones that must exist. Skip ratchets over them stay the tree's.
+      - name: typecheck
+        if: steps.node.outputs.present == 'true'
+        run: node .github/scripts/node-gate.cjs typecheck
+
+      - name: test
+        if: steps.node.outputs.present == 'true'
+        run: node .github/scripts/node-gate.cjs test
+
+      - name: build
+        if: steps.node.outputs.present == 'true'
+        run: node .github/scripts/node-gate.cjs build
+
   # ── Unit tests ──────────────────────────────────────────────────────────
   # Ungated, by `docs_only` too: the host-side suite is minutes, and tests here
   # read `docs/` (plans, tables, references), so a docs-only change is exactly
