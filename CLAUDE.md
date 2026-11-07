@@ -1605,8 +1605,10 @@ interlock, and which you cannot understand from one file:
   they crash: v0.75.0 passed any 3 and proto.pilot got a green `check pre-push`
   with no test run. So the default is red and nothing has to opt out, and
   `foreign_exit_gate` holds it with real tools, since synthetic rows cannot see
-  it. `check scheduled` is the one command that exits 3, and a stop on a step the rehearsal cannot stand
-  in for counts, because the sweep would otherwise make 3 unreachable. One line
+  it. A command exits 3 itself when it has nothing to judge: `check health` on an
+  unwired tree, `test clock-ahead` without time-machine, and `check scheduled` when
+  nothing could be rehearsed, where a stop on a step the rehearsal cannot stand in
+  for counts, because the sweep would otherwise make 3 unreachable. One line
   can say `no subject` while the command exits 0: `check_doc_links.py` read its
   documents, and a fresh tree holds no fragment links. So does
   `check_commit_subjects.py` over an empty range, because CI runs it directly and
