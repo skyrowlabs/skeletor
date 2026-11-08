@@ -64,6 +64,26 @@ _REQUIREMENT = re.compile(r"pip\s+install\s+(?:-\S+\s+)*-r\s+(?P<path>[\w./\-]+)
 #: the caller does the joining.
 _INCLUDE = re.compile(r"^\s*-r\s+(?P<path>\S+)", re.MULTILINE)
 
+#: A step running one of this tree's own composite actions.
+_LOCAL_ACTION = re.compile(r"uses:\s*\./(?P<path>\.github/actions/[\w./\-]+?)/?\s*$", re.MULTILINE)
+
+#: The step that installs the tree as a package. No `-r` chain can name it.
+_PROJECT_INSTALL = "scripts/install_project.py"
+
+
+def _expanded(body: str) -> str:
+    """`body` with each local composite action's steps appended, comments blanked.
+
+    A job that installs through `.github/actions/unit-setup` names none of what
+    it installs, so a scan of the job alone reads it as installing nothing.
+    """
+    parts = [body]
+    for match in _LOCAL_ACTION.finditer(body):
+        action = PROJECT_ROOT / match.group("path") / "action.yml"
+        if action.is_file():
+            parts.append(read_uncommented(action))
+    return "\n".join(parts)
+
 
 def _type_check_jobs() -> dict:
     """`{(workflow, job): body}` for every job that runs pyright."""
@@ -71,7 +91,7 @@ def _type_check_jobs() -> dict:
     for path in sorted(WORKFLOWS.glob("*.yml")):
         for job, body in jobs(path).items():
             if re.search(r"\bpyright\b", body):
-                found[(path.name, job)] = body
+                found[(path.name, job)] = _expanded(body)
     return found
 
 
@@ -81,7 +101,7 @@ def _test_jobs() -> dict:
     for path in sorted(WORKFLOWS.glob("*.yml")):
         for job, body in jobs(path).items():
             if "pytest" in body:
-                found[(path.name, job)] = body
+                found[(path.name, job)] = _expanded(body)
     return found
 
 
@@ -252,4 +272,21 @@ def test_the_declared_set_reaches_every_test_job_requirement():
         + f"\n\nAdd `-r <relative path>` to {DEPS.name} (paths there resolve from "
         f"{DEPS.parent.name}/). pyright will otherwise see a leaner environment than the "
         "tests do, which reads as a clean run rather than as a check that gave up."
+    )
+
+
+def test_a_type_check_job_installs_the_project_when_the_tests_do():
+    """The project's own dependencies are part of the superset, outside any `-r` chain.
+
+    proto.pilot: the tests installed pydantic through the project, pyright did
+    not, and CI's type-check went red on a tree whose `check pre-push` was green.
+    """
+    installers = sorted(f"{w}:{j}" for (w, j), body in _test_jobs().items() if _PROJECT_INSTALL in body)
+    if not installers:
+        return  # no test job installs the project, so there is nothing to be a superset of
+    missing = sorted(f"{w}:{j}" for (w, j), body in _type_check_jobs().items() if _PROJECT_INSTALL not in body)
+    assert not missing, (
+        f"{', '.join(missing)} runs pyright without `python {_PROJECT_INSTALL}`, which "
+        f"{', '.join(installers)} run. Once this tree is a package, pyright there sees none of "
+        "its dependencies, reads them as `Unknown`, and reports errors the tests never see."
     )
