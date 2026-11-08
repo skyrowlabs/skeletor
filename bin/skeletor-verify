@@ -13149,6 +13149,62 @@ def template_comment_names_gate() -> Result:
     )
 
 
+def optional_import_gate() -> Result:
+    """A third-party module imported under `except ImportError` is imported by name.
+
+    The guard says the module is optional, so a static import reddens a type checker
+    that reads the file from a venv without it: v0.81.0's `time_machine`, then
+    v0.81.4's `coverage` in mind-head's isolated mypy hook. Found by the guard, not listed;
+    a module `scripts/requirements.txt` declares is a requirement, so its guard only reports.
+    """
+    template_core = SKELETOR / "template" / "core"
+    started = time.time()
+    caught = {"ImportError", "ModuleNotFoundError"}
+    # A declared requirement under a guard is a missing-install message, as `click` is.
+    requirements = template_core / "scripts" / "requirements.txt"
+    declared = {
+        re.split(r"[<>=!~\[ ;]", line.strip(), maxsplit=1)[0].lower().replace("-", "_")
+        for line in requirements.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    found, scanned_files = [], 0
+    for path in sorted((SKELETOR / "template").rglob("*.py")):
+        if "node_modules" in path.parts:
+            continue
+        scanned_files += 1
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Try):
+                continue
+            names = {
+                n.id for h in node.handlers if h.type is not None for n in ast.walk(h.type) if isinstance(n, ast.Name)
+            }
+            if not names & caught:
+                continue
+            for inner in (n for statement in node.body for n in ast.walk(statement)):
+                modules = (
+                    [a.name for a in inner.names]
+                    if isinstance(inner, ast.Import)
+                    else (
+                        [inner.module]
+                        if isinstance(inner, ast.ImportFrom) and inner.level == 0 and inner.module
+                        else []
+                    )
+                )
+                for module in modules:
+                    top = module.split(".")[0]
+                    if top not in sys.stdlib_module_names and top.lower() not in declared:
+                        found.append(f"{path.relative_to(SKELETOR)}:{inner.lineno} imports {module} statically")
+    if scanned_files < 50:
+        found.append(f"scanned {scanned_files} python file(s) under template/, which proves nothing")
+    return Result(
+        "optional imports: a module guarded by `except ImportError` is imported by name",
+        not found,
+        time.time() - started,
+        "\n".join(found),
+    )
+
+
 def checkout_path_literal_gate() -> List[Result]:
     """No file names the author's own path to this checkout.
 
@@ -15375,6 +15431,7 @@ def main() -> int:
             results += unlinted_source_gate(workdir)
             results.append(identity_gate())
             results += checkout_path_literal_gate()
+            results.append(optional_import_gate())
             results.append(template_comment_names_gate())
             results.append(already_applied_gate())
             results.append(doubled_merge_gate(workdir))
