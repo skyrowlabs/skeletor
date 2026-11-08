@@ -1071,6 +1071,10 @@ ALLOWLIST_READER = "scripts/allowlist.py"
 #: `tests/skip_budget.json` is not state: raising it is a decision, so it takes a reason.
 COVERAGE_BUDGET = "tests/coverage_budget.json"
 RELEASE_CONFIG = ".github/release-please-config.json"
+#: Report writers: the weekly job and the freeze rewrite the anchored reports, and the
+#: freeze rebuilds the archive index (sky-vault, dream-doll, stash-flow, v0.81.4 round).
+REGULAR_REPORTS = "docs/reports/regular"
+RELEASES_INDEX = "docs/reports/releases/README.md"
 RELEASE_MANIFEST = ".github/.release-please-manifest.json"
 HELD_CAVEAT = "recorded for the file, not this hunk"
 
@@ -1101,12 +1105,17 @@ def divergence_holds(target: Path, head_files: Dict[str, Path]) -> Tuple[Dict[st
 
 
 def state_files(target: Path) -> Set[str]:
-    """Files a release or a ratchet writes, read from the tree's own release config.
+    """Files a release, a ratchet or a report writer writes, read from the tree.
 
-    `version-file` and the manifest only. `extra-files` also names files a person
-    edits, such as `package.json`, so it is no evidence a file is state.
+    `version-file` and the manifest only from the release config. `extra-files` also
+    names files a person edits, such as `package.json`, so it is no evidence a file is
+    state. The reports are found by the rule their writers use (`release_window`'s
+    `anchored_reports()`), not by the job registry, which misses the freeze's index.
     """
-    found = {COVERAGE_BUDGET}
+    found = {COVERAGE_BUDGET, RELEASES_INDEX}
+    regular = target / REGULAR_REPORTS
+    if regular.is_dir():
+        found |= {f"{REGULAR_REPORTS}/{p.name}" for p in regular.glob("*.md") if p.name != "README.md"}
     config = target / RELEASE_CONFIG
     try:
         packages = json.loads(config.read_text(encoding="utf-8")).get("packages", {})
@@ -1251,7 +1260,8 @@ def report_divergence_parts(parts: Dict[str, Any]) -> None:
     if parts["state"]:
         say(
             "🧾",
-            f"{len(parts['state'])} state file(s) — written by a release or the coverage ratchet, not an edit to decide",
+            f"{len(parts['state'])} state file(s) — written by a release, the coverage ratchet"
+            " or a report writer, not an edit to decide",
         )
         for rel in parts["state"]:
             item(rel)

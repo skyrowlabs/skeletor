@@ -11271,6 +11271,7 @@ def divergence_record_gate(workdir: Path, venv_python: Path) -> List[Result]:
         ".flake8",
     )
     version, budget, config = "VERSION", upgrade_tool.COVERAGE_BUDGET, upgrade_tool.RELEASE_CONFIG
+    index = upgrade_tool.RELEASES_INDEX
 
     # The template moves: one line both sides change, one line only it changes.
     conflict_line = unique_line(conflict, 0.5)
@@ -11289,6 +11290,9 @@ def divergence_record_gate(workdir: Path, venv_python: Path) -> List[Result]:
         (tree / tail).read_text(encoding="utf-8") + "\nmine, after the template\n", encoding="utf-8"
     )
     (tree / version).write_text("9.9.9\n", encoding="utf-8")
+    # What `docs freeze-release` does to the archive index, which the job registry never names.
+    assert (tree / index).is_file(), f"the plant did not land: no {index} ships"
+    (tree / index).write_text((tree / index).read_text(encoding="utf-8") + "\n## v9.9.9\n", encoding="utf-8")
     (tree / budget).write_text((tree / budget).read_text(encoding="utf-8").rstrip() + "\n\n", encoding="utf-8")
     # `extra-files` is no evidence of state, so a file named there stays undecided.
     release = json.loads((tree / config).read_text(encoding="utf-8"))
@@ -11345,7 +11349,7 @@ def divergence_record_gate(workdir: Path, venv_python: Path) -> List[Result]:
         problems.append(f"decided is {sorted(parts.get('decided', {}))}")
     if sorted(parts.get("decided", {}).get(decided, {})) != [f"{decided}:one", f"{decided}:two"]:
         problems.append("the two labelled holds did not survive as two")
-    if set(parts.get("state", [])) != {version, budget}:
+    if set(parts.get("state", [])) != {version, budget, index}:
         problems.append(f"state is {parts.get('state')}")
     if parts.get("appended") != [tail]:
         problems.append(f"appended is {parts.get('appended')}")
@@ -11355,6 +11359,16 @@ def divergence_record_gate(workdir: Path, venv_python: Path) -> List[Result]:
         problems.append("the headline does not count undecided alone")
     if record_rel in dry.get("diverged", []):
         problems.append(f"{record_rel} holds entries between its rules and is on the standing list")
+    # An anchored report is state, and regular/'s README is not: `release_window`'s own rule.
+    reports = workdir / "divergence-reports"
+    (reports / upgrade_tool.REGULAR_REPORTS).mkdir(parents=True, exist_ok=True)
+    for name in ("README.md", "repository-report.md"):
+        (reports / upgrade_tool.REGULAR_REPORTS / name).write_text("x\n", encoding="utf-8")
+    found = upgrade_tool.state_files(reports) & {
+        f"{upgrade_tool.REGULAR_REPORTS}/{n}" for n in ("README.md", "repository-report.md")
+    }
+    if found != {f"{upgrade_tool.REGULAR_REPORTS}/repository-report.md"}:
+        problems.append(f"of regular/'s README and an anchored report, state holds {sorted(found)}")
     results.append(
         Result(
             "divergence record: the standing list splits in four",
