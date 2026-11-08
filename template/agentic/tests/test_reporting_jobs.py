@@ -261,6 +261,25 @@ def test_agent_argv_honours_the_override(monkeypatch):
     assert agent_argv("BODY") == ["some-agent", "run", "--yes", "BODY"]
 
 
+def test_every_tool_grant_names_a_job():
+    """An exemption is checked against what it exempts: a grant for a removed job is stale."""
+    from scripts.reporting.jobs import AGENT_TOOLS
+
+    stale = sorted(set(AGENT_TOOLS) - set(JOBS_BY_KEY))
+    assert not stale, f"AGENT_TOOLS grants tools to jobs that do not exist: {stale}"
+
+
+def test_a_grant_reaches_the_default_command_and_not_an_override(monkeypatch):
+    from scripts.reporting import agent_runner
+
+    key = JOBS[0].key
+    monkeypatch.setitem(agent_runner.AGENT_TOOLS, key, ("Bash(./x docs *)",))
+    monkeypatch.delenv(agent_runner.AGENT_CMD_VAR, raising=False)
+    assert agent_runner.tool_grants(key) == ["--allowedTools", "Bash(./x docs *)"]
+    monkeypatch.setenv(agent_runner.AGENT_CMD_VAR, "some-agent run {prompt}")
+    assert agent_runner.tool_grants(key) == []
+
+
 def test_agent_argv_refuses_a_template_with_no_prompt(monkeypatch):
     """The failure that looks most like success.
 
