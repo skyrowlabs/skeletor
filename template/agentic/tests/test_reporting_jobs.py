@@ -71,6 +71,21 @@ def test_every_job_has_a_prompt_named_after_its_module():
     assert not missing, f"Jobs with no prompts/<module>.md: {missing}"
 
 
+#: The wrapper's name, rendered: what a prompt must spell with its `./`.
+CLI_NAME = "{{CLI}}"
+
+
+def test_the_prompts_run_the_cli_by_path():
+    """A job's agent has no CLI on PATH, and the allow rules name `./<cli>` (dream-doll's `dd`)."""
+    prompts = sorted((SCRIPTS_DIR / "reporting" / "prompts").glob("*.md"))
+    bare = [
+        f"{path.name}: {found.group(0)}"
+        for path in scanned(prompts, "job prompts")
+        for found in re.finditer(rf"`{re.escape(CLI_NAME)} [^`]*`", path.read_text(encoding="utf-8"))
+    ]
+    assert not bare, f"Prompts naming the CLI bare, which runs whatever `{CLI_NAME}` is on PATH: {bare}"
+
+
 def test_fix_policies_are_known():
     unknown = {job.key: job.fix_policy for job in JOBS if job.fix_policy not in FIX_POLICIES}
     assert not unknown, f"Unknown fix policies: {unknown}. Valid: {sorted(FIX_POLICIES)}"
