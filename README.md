@@ -270,6 +270,29 @@ bin/skeletor-upgrade ../my-project --ref v0.57.1   # apply, rendering from a rel
 formatter noise, a file that reads as edited, and a flag added after you
 scaffolded: `bin/skeletor-upgrade --help`.
 
+## This repository's layout
+
+This root holds two layouts at once. The **generator** is skeletor itself. The
+**self-render** is skeletor scaffolded into its own checkout at `agentic`, so its
+rules apply here too. A self-render path is fixed by the template, and it moves
+only when the template moves it for every tree. Edit `template/`, never the render.
+
+| Entry | Role | What it is |
+| --- | --- | --- |
+| `bin/` | generator | The `skeletor-*` tools listed above |
+| `template/` | generator | What a scaffold copies: tier, language and agent overlays |
+| `docs/DESIGN_RATIONALE.md`, `SETUP_GUIDE.md`, `TIERS.md`, `MAINTENANCE.md` | generator | skeletor's own docs; `docs/README.md` indexes them |
+| `docs/assets/` | generator | The images this README shows |
+| `upstream.json` | generator | What was harvested from upstream, and what was declined |
+| `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/README.md`, `.gitignore`, `.github/dependabot.yml` | generator | Owned here (`--own`): the template ships them, and skeletor's copy is never merged |
+| `.github/workflows/{verify,pins,released}.yml`, `.github/pin-allowlist.yaml` | generator | The grid on CI, the weekly pin report, the release announcement |
+| `.claude/skills/new-project/` | generator | The `/new-project` pointer that `bin/skeletor-install-skill` installs |
+| `LICENSE`, `NOTICE` | generator | MIT, and its copyright notice |
+| `cli/`, `skel` | self-render | The shell CLI and its wrapper, `./skel` |
+| `scripts/`, `tests/` | self-render | The gates and suite `./skel check pre-push` runs on this checkout |
+| the rest of `docs/` | self-render | The shell's CLI, development, rules and reports docs |
+| `pyproject.toml`, `pyrightconfig.json`, the rest of `.github/`, `.claude/` and the dotfiles | self-render | Tool configs, CI and agent tooling; `.skeletor.json` records the render |
+
 ## Changing the template
 
 **The scaffold is the test.** Generate every configuration, then run each
