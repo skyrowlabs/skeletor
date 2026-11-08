@@ -263,10 +263,10 @@ def test_agent_argv_honours_the_override(monkeypatch):
 
 def test_every_tool_grant_names_a_job():
     """An exemption is checked against what it exempts: a grant for a removed job is stale."""
-    from scripts.reporting.jobs import AGENT_TOOLS
+    from scripts.reporting.jobs import AGENT_TOOLS, AUTO_PUSH
 
-    stale = sorted(set(AGENT_TOOLS) - set(JOBS_BY_KEY))
-    assert not stale, f"AGENT_TOOLS grants tools to jobs that do not exist: {stale}"
+    stale = sorted((set(AGENT_TOOLS) | AUTO_PUSH) - set(JOBS_BY_KEY))
+    assert not stale, f"AGENT_TOOLS or AUTO_PUSH name jobs that do not exist: {stale}"
 
 
 def test_a_grant_reaches_the_default_command_and_not_an_override(monkeypatch):
