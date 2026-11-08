@@ -4155,6 +4155,19 @@ def badge_gate(tier: str, workdir: Path, venv_python: Path) -> List[Result]:
             f"leaks: {leaks}\n{head}" if leaks else head,
         )
     )
+    manifest = json.loads((hidden / ".skeletor.json").read_text()) if code == 0 else {"files": {}}
+    badge = hidden / "docs/assets/skeletor-version.svg"
+    results.append(
+        Result(
+            "badges: the version badge exists, is shown, and is not in the manifest",
+            badge.is_file()
+            and "skeletor: " in badge.read_text()
+            and "docs/assets/skeletor-version.svg" in head
+            and "docs/assets/skeletor-version.svg" not in manifest["files"],
+            0.0,
+            head,
+        )
+    )
 
     # A badge is markup in a file two checkers read. `check docs` is what says
     # the row did not cost the tree its own docs gate.
@@ -7199,6 +7212,59 @@ def unpinned_head_gate(workdir: Path) -> List[Result]:
             time.time() - started,
             "\n".join(problems),
         )
+    ]
+
+
+def version_badge_gate(workdir: Path) -> List[Result]:
+    """An upgrade that advances the base rewrites the badge; one without a badge shown adds none."""
+    started = time.time()
+    clone = workdir / "version-badge" / "skeletor"
+    clone.parent.mkdir(parents=True, exist_ok=True)
+    run(["git", "clone", "-q", str(clean_skeletor(workdir)), str(clone)], cwd=workdir)
+    trees = {"shown": ["--org", "acme"], "bare": []}
+    for name, extra in trees.items():
+        must_scaffold(
+            [
+                sys.executable,
+                str(clone / "bin" / "skeletor-new"),
+                str(clone.parent / name),
+                "--name",
+                "Probe",
+                "--cli",
+                CLI_NAME,
+                "--tagline",
+                "t",
+                "--tier",
+                "core",
+                *extra,
+            ],
+            cwd=SKELETOR,
+        )
+    badge = clone.parent / "shown" / "docs/assets/skeletor-version.svg"
+    badge.write_text("stale\n", encoding="utf-8")
+    run(["git", "add", "-A"], cwd=clone.parent / "shown")
+    run(["git", "commit", "-qm", "chore: stale badge", "--no-verify"], cwd=clone.parent / "shown")
+    identity = ["-c", "user.name=grid", "-c", "user.email=grid@example.invalid"]
+    run(["git", *identity, "-C", str(clone), "commit", "-q", "--allow-empty", "-m", "chore: past"], cwd=clone)
+    run(["git", *identity, "-C", str(clone), "tag", "-a", "v99.0.0", "-m", "probe"], cwd=clone)
+    outputs = []
+    for name in trees:
+        tree = clone.parent / name
+        upgrade = [sys.executable, str(clone / "bin" / "skeletor-upgrade"), str(tree), "--ref", "v99.0.0"]
+        outputs.append(run(upgrade, cwd=tree)[1])
+    return [
+        Result(
+            "version badge: an advancing upgrade rewrites it",
+            "skeletor: v99.0.0" in badge.read_text(),
+            time.time() - started,
+            outputs[0],
+        ),
+        Result(
+            "version badge: a tree not showing one is given none",
+            not (clone.parent / "bare" / "docs/assets/skeletor-version.svg").exists(),
+            0.0,
+            outputs[1],
+        ),
     ]
 
 
@@ -15551,6 +15617,7 @@ def main() -> int:
         step(lambda: node_product_gate(workdir, venv_python))
         step(lambda: self_tree_gate(venv_python))
         step(lambda: pinned_ref_gate(workdir))
+        step(lambda: version_badge_gate(workdir))
         step(lambda: unpinned_head_gate(workdir))
         step(lambda: prefixed(author_leak_gate(fullest, workdir)))
         step(lambda: ported_only_conflict_gate(workdir))

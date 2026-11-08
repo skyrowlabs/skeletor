@@ -83,6 +83,8 @@ VERSIONING: Dict[str, Set[str]] = {
 }
 
 MANIFEST_NAME = ".skeletor.json"
+#: Written beside the manifest and, like it, not recorded in it.
+VERSION_BADGE = "docs/assets/skeletor-version.svg"
 
 #: The literal `--org` default. A badge is a claim about a repository that
 #: exists, and `OWNER` names one that does not — so the default scaffold ships
@@ -150,6 +152,34 @@ def setup_commands(language: str) -> List[str]:
     return steps
 
 
+def version_badge_svg(ref: str) -> str:
+    """The README's badge for the skeletor release a tree is on: a bare tag, or `untagged`.
+
+    A file rather than a shields URL, because a private repository's files are all
+    the org's badges can read. Unrecorded in the manifest: its bytes follow
+    `skeletor_ref`, which is not what a base render has to reproduce.
+    """
+    match = re.match(r"v\d+\.\d+\.\d+(?=-|$)", ref)
+    value = match.group(0) if match else "untagged"
+    left, right = 58, 7 * len(value) + 12
+    total = left + right
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{total}" height="20" role="img"'
+        f' aria-label="skeletor: {value}">\n'
+        f"  <title>skeletor: {value}</title>\n"
+        f'  <clipPath id="r"><rect width="{total}" height="20" rx="3"/></clipPath>\n'
+        f'  <g clip-path="url(#r)">\n'
+        f'    <rect width="{left}" height="20" fill="#555"/>\n'
+        f'    <rect x="{left}" width="{right}" height="20" fill="#7a8fa8"/>\n'
+        f"  </g>\n"
+        f'  <g fill="#fff" text-anchor="middle" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11">\n'
+        f'    <text x="{left // 2}" y="14">skeletor</text>\n'
+        f'    <text x="{left + right // 2}" y="14">{value}</text>\n'
+        f"  </g>\n"
+        f"</svg>\n"
+    )
+
+
 def badges(args, slug: str) -> str:
     """The README badge row — empty unless `--org` names a real owner.
 
@@ -184,12 +214,13 @@ def badges(args, slug: str) -> str:
     """
     if args.org == ORG_UNSET:
         return ""
+    version = f"![skeletor version]({VERSION_BADGE})"
     if args.visibility != "public":
         # Every badge below reads GitHub, and GitHub answers "repo not found" to
         # an anonymous reader of a private repo — while rendering fine for its
         # logged-in owner, the one person who would fix it. So a non-public row
         # states the visibility and nothing GitHub would have to serve.
-        return f"![repo: {args.visibility}](https://img.shields.io/badge/repo-{args.visibility}-informational)\n\n"
+        return f"![repo: {args.visibility}](https://img.shields.io/badge/repo-{args.visibility}-informational) {version}\n\n"
     repo = f"{args.org}/{slug}"
     if args.versioning == "tag":
         # `git tag -a` creates a TAG, not a GitHub Release — that object only
@@ -211,7 +242,7 @@ def badges(args, slug: str) -> str:
         f"?branch={args.release_branch}&label=release%20ci)]"
         f"(https://github.com/{repo}/actions/workflows/ci.yml)"
     )
-    return f"{release} {ci}\n\n"
+    return f"{release} {ci} {version}\n\n"
 
 
 def long_lived_branches(base: str, release: str) -> List[str]:
@@ -724,7 +755,7 @@ def skeletor_ref() -> str:
 #: the only thing a scaffold produces that differs between two identical runs —
 #: `regen.py` runs at scaffold time and leaves it behind — so a hash of it would
 #: make the manifest disagree with its own tree immediately.
-MANIFEST_SKIP = ("tmp/", ".git/", "node_modules/", ".venv/")
+MANIFEST_SKIP = ("tmp/", ".git/", "node_modules/", ".venv/", VERSION_BADGE)
 
 
 def hash_tree(target: Path) -> Dict[str, str]:
@@ -1663,6 +1694,10 @@ def main() -> int:
     # — but there the tree *is* the render, so `produced_files` is exact.
     produced = set(pristine) if populated else produced_files(written, after_copy, final)
     write_manifest(target, args, overlays, {rel: pristine.get(rel, final[rel]) for rel in sorted(produced)})
+    if args.org != ORG_UNSET:
+        badge = target / VERSION_BADGE
+        badge.parent.mkdir(parents=True, exist_ok=True)
+        badge.write_text(version_badge_svg(skeletor_ref()), encoding="utf-8")
 
     # `produced`, not `written`. The copy phase is not the only thing that
     # writes: `regen.py` overwrote a user's own `docs/todo_index.json` and this
@@ -1760,7 +1795,7 @@ def main() -> int:
     # against a real tree; reading the code would not have shown it, because the
     # code was correct about the set it named.
     if populated and (target / ".git").exists() and produced:
-        wrote = sorted(set(produced) | {MANIFEST_NAME})
+        wrote = sorted(set(produced) | {MANIFEST_NAME} | ({VERSION_BADGE} if args.org != ORG_UNSET else set()))
         ignored = subprocess.run(
             ["git", "check-ignore", "--", *wrote],
             cwd=str(target),

@@ -110,7 +110,9 @@ GENERATED = {
 
 #: Never rendered by the scaffolder into a comparable state: scratch, history,
 #: and installed dependencies.
-SKIP_PREFIXES = ("tmp/", ".git/", "node_modules/", ".venv/")
+#: Follows `skeletor_ref`, so a base render need not reproduce it. Same path as `bin/skeletor-new`.
+VERSION_BADGE = "docs/assets/skeletor-version.svg"
+SKIP_PREFIXES = ("tmp/", ".git/", "node_modules/", ".venv/", VERSION_BADGE)
 
 
 def say(symbol: str, message: str) -> None:
@@ -809,6 +811,15 @@ def files_under(root: Path) -> Dict[str, Path]:
             continue
         out[rel] = path
     return out
+
+
+def refresh_version_badge(target: Path, head_tree: Path) -> None:
+    """Move the tree's version badge with its base, if the tree shows or keeps one."""
+    source, badge, readme = head_tree / VERSION_BADGE, target / VERSION_BADGE, target / "README.md"
+    shown = readme.is_file() and VERSION_BADGE in readme.read_text(encoding="utf-8")
+    if source.is_file() and (shown or badge.is_file()):
+        badge.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, badge)
 
 
 def record_owned(target: Path, owned: List[str]) -> None:
@@ -4408,6 +4419,7 @@ def main() -> int:
                     detail("again — that is what the flag asserts, and it cannot be undone by")
                     detail("re-running.")
                 shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
+                refresh_version_badge(target, head_tree)
                 advanced = True
                 # **Announced where it happens, whatever else the run did.** v0.33.0
                 # put the line in the one branch that lists nothing, and neither real
@@ -5430,6 +5442,7 @@ def main() -> int:
                     detail("this is a relabel of the record and not a change to your files.")
                 else:
                     shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
+                    refresh_version_badge(target, head_tree)
                     record_owned(target, sorted(owned & set(head_files)))
                     say("📌", f"{MANIFEST_NAME}: {ref} → {head_ref}")
                     detail("The two renders are identical, so only the recorded ref moved. Your")
