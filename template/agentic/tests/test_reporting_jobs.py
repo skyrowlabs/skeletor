@@ -386,6 +386,39 @@ def test_the_agent_runs_as_its_job(monkeypatch):
     assert seen.get(SOURCE_ENV) == job.key
 
 
+@pytest.mark.parametrize("flag", ["--check", "--install"])
+def test_a_linked_worktree_is_refused_the_crontab(monkeypatch, tmp_path, flag):
+    """Its lines would name a path `worktree drop` removes (sky.boss)."""
+    import subprocess
+
+    from click.testing import CliRunner
+
+    from scripts.reporting import shellout
+    from tests.shell import module
+
+    def git(cwd, *args):
+        subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True)
+
+    main, linked = tmp_path / "main", tmp_path / "linked"
+    main.mkdir()
+    git(main, "init", "-q", "-b", "main")
+    git(main, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "s")
+    git(main, "worktree", "add", "-q", str(linked))
+    report = module("report")
+    monkeypatch.setattr(report, "PROJECT_ROOT", main)
+    assert report._main_checkout() is None
+    monkeypatch.setattr(report, "PROJECT_ROOT", linked)
+    real = shellout.run
+
+    def no_crontab(argv, **kwargs):
+        assert argv[0] != "crontab", "the refusal did not hold, and this would write the host's crontab"
+        return real(argv, **kwargs)
+
+    monkeypatch.setattr(shellout, "run", no_crontab)
+    result = CliRunner().invoke(report.report, ["cron", flag])
+    assert result.exit_code == 2 and str(main.resolve()) in result.output.replace("\n", ""), result.output
+
+
 @pytest.mark.parametrize("held", ["every", "all but one"])
 def test_cron_check_on_an_empty_crontab_is_green_only_when_every_job_is_held(monkeypatch, tmp_path, held):
     import subprocess

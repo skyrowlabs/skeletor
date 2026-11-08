@@ -4939,8 +4939,8 @@ def main() -> int:
             cli = recorded[recorded.index("--cli") + 1] if "--cli" in recorded[:-1] else "<cli>"
             verb = "would change" if args.dry_run else "changed"
             say("🕐", f"this upgrade {verb} {registry}, which the crontab is generated from")
-            detail(f"The installed crontab does not change with it: run `./{cli} report cron --check`,")
-            detail(f"and `./{cli} report cron --install` if it is red.")
+            detail(f"The installed crontab does not change with it: from the main checkout, not a worktree,")
+            detail(f"run `./{cli} report cron --check`, and `./{cli} report cron --install` if it is red.")
 
         if declined:
             # Deliberately a one-line standing state, not a roll-call. This is
