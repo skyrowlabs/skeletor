@@ -95,6 +95,7 @@ on:
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
+  # throwaway measurement: unchanged
   cancel-in-progress: true
 
 permissions:
