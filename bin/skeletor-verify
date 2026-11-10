@@ -34,6 +34,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -15337,6 +15338,120 @@ def write_ledger(results: List[Result], shard: int, shards: int) -> Path:
     return path
 
 
+WORKDIR_PREFIX = "skeletor-verify-"
+#: The pid of the run that owns a temp workdir, so a later run can tell a dead one.
+OWNER_FILE = ".skeletor-verify-pid"
+#: Set in the run `tmp_cleanup_gate` kills, so that run cannot start the gate again.
+NESTED_ENV = "SKELETOR_VERIFY_NESTED"
+
+
+def exit_on_signal() -> None:
+    """SIGTERM and SIGHUP raise SystemExit, so `main`'s `finally` removes the workdir.
+
+    An agent's Bash timeout ends a run with SIGTERM, which by default skips the
+    `finally`, and archdesk's /tmp is RAM-backed (jam-sense, 2026-11-10).
+    """
+
+    def stop(signum: int, _frame: Any) -> None:
+        raise SystemExit(128 + signum)
+
+    for signum in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, stop)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def sweep_dead_workdirs(root: Path) -> List[Path]:
+    """Remove the temp workdirs under `root` whose recorded owner is gone.
+
+    SIGKILL runs no handler, so this is the half `exit_on_signal` cannot be. A
+    directory with no readable owner, or a live one, is left alone.
+    """
+    removed = []
+    for candidate in sorted(root.glob(f"{WORKDIR_PREFIX}*")):
+        try:
+            pid = int((candidate / OWNER_FILE).read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            continue
+        if pid != os.getpid() and not _alive(pid):
+            shutil.rmtree(candidate, ignore_errors=True)
+            removed.append(candidate)
+    return removed
+
+
+def tmp_cleanup_gate(workdir: Path) -> List[Result]:
+    """A killed run removes its workdir, and a dead run's workdir is swept.
+
+    The first half kills a real run as it starts. The second plants owners in a
+    scratch root: a finished process, this one, none, garbled, a foreign prefix.
+    """
+    started = time.time()
+    victim = workdir / "tmp-cleanup-victim"
+    env = {**os.environ, NESTED_ENV: "1", "PYTHONUNBUFFERED": "1"}
+    log = workdir / "tmp-cleanup-victim.log"
+    with log.open("w", encoding="utf-8") as sink:
+        child = subprocess.Popen(
+            [sys.executable, str(SKELETOR / "bin" / "skeletor-verify"), "--workdir", str(victim), "--tier", "core"],
+            stdout=sink,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+    # Signalled once the run writes into its workdir, which is inside its `try`.
+    deadline = time.time() + 120
+    while child.poll() is None and time.time() < deadline and not (victim.is_dir() and any(victim.iterdir())):
+        time.sleep(0.2)
+    started_run = victim.is_dir() and child.poll() is None
+    child.send_signal(signal.SIGTERM)
+    try:
+        code = child.wait(timeout=120)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        code = child.wait()
+    output = log.read_text(encoding="utf-8")
+    killed = []
+    if not started_run:
+        killed.append(f"the run never reached its workdir:\n{output[-2000:]}")
+    if code != 128 + signal.SIGTERM:
+        killed.append(f"exit {code}, wanting {128 + signal.SIGTERM}")
+    if victim.exists():
+        killed.append(f"{victim} survived SIGTERM")
+
+    root = workdir / "tmp-cleanup-root"
+    root.mkdir(parents=True, exist_ok=True)
+    finished = subprocess.Popen(["true"])
+    finished.wait()
+    owners = {
+        f"{WORKDIR_PREFIX}dead": str(finished.pid),
+        f"{WORKDIR_PREFIX}live": str(os.getpid()),
+        f"{WORKDIR_PREFIX}unowned": None,
+        f"{WORKDIR_PREFIX}garbled": "x",
+        "skeletor-rehearsal-logs-dead": str(finished.pid),
+    }
+    for name, pid in owners.items():
+        (root / name).mkdir()
+        if pid is not None:
+            (root / name / OWNER_FILE).write_text(pid + "\n", encoding="utf-8")
+    swept = sorted(path.name for path in sweep_dead_workdirs(root))
+    left = sorted(path.name for path in root.iterdir())
+    wanted_left = sorted(name for name in owners if name != f"{WORKDIR_PREFIX}dead")
+    sweep = [] if swept == [f"{WORKDIR_PREFIX}dead"] and left == wanted_left else [f"swept {swept}, left {left}"]
+    shutil.rmtree(root, ignore_errors=True)
+    return [
+        Result(
+            "tmp cleanup: SIGTERM mid-run removes the workdir", not killed, time.time() - started, "\n".join(killed)
+        ),
+        Result("tmp cleanup: only a dead run's workdir is swept", not sweep, time.time() - started, "\n".join(sweep)),
+    ]
+
+
 def grid_ledger_gate() -> Result:
     """A jump is the check's own, a runner's speed is not, and the ledger reads back.
 
@@ -15476,8 +15591,14 @@ def main() -> int:
     #: overlay nobody generates is a `render()` failure a user finds first.
     gated_language = "python"
 
-    workdir = Path(args.workdir).resolve() if args.workdir else Path(tempfile.mkdtemp(prefix="skeletor-verify-"))
+    exit_on_signal()
+    swept = sweep_dead_workdirs(Path(tempfile.gettempdir()))
+    if swept:
+        print(f"🧹 removed {len(swept)} workdir(s) a killed run left in {swept[0].parent}")
+    workdir = Path(args.workdir).resolve() if args.workdir else Path(tempfile.mkdtemp(prefix=WORKDIR_PREFIX))
     workdir.mkdir(parents=True, exist_ok=True)
+    if not (args.workdir or args.keep):
+        (workdir / OWNER_FILE).write_text(f"{os.getpid()}\n", encoding="utf-8")
     print(f"🔎 verifying {len(tiers)} tier(s) × {len(languages)} language(s) in {workdir}")
 
     results: List[Result] = []
@@ -15509,6 +15630,8 @@ def main() -> int:
             results += maintain_summary_gate()
             results += shard_gate()
             results.append(grid_ledger_gate())
+            if not os.environ.get(NESTED_ENV):
+                results += tmp_cleanup_gate(workdir)
         venv_python = make_venv(workdir, args.quiet)
         pyright_ok, pyright_note = warm_pyright(venv_python)
         if not args.quiet:
