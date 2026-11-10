@@ -57,7 +57,7 @@ class Run:
     branch: str
     agent_ran: bool = False
     committed: str | None = None  # sha, if it wrote anything
-    findings: int = 0
+    findings: int | None = 0  # None: the job files its findings and they could not be counted
     reason: str = ""  # required for declined/failed
     # What the agent spent, when its output says; None is "not measured", not free.
     cost_usd: float | None = None
