@@ -7557,7 +7557,7 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
         # pin the tool's own imports with it. `bin/skeletor-new` is still the
         # tag's, and safe: it reads one name from this module and that name is
         # older than the tag.
-        git_in(stamped_scratch, "checkout", tip, "--", "bin/skeletor-upgrade", "bin/render_guard.py")
+        git_in(stamped_scratch, "checkout", tip, "--", "bin/skeletor-upgrade", "bin/render_guard.py", "bin/tempdirs.py")
         # **The marker is what makes the commit exist at all, and its absence is
         # how this gate failed on CI at the one moment it matters.** Taking a
         # file from the tip is a no-op when the tip IS the tag — which is exactly
@@ -15339,116 +15339,92 @@ def write_ledger(results: List[Result], shard: int, shards: int) -> Path:
 
 
 WORKDIR_PREFIX = "skeletor-verify-"
-#: The pid of the run that owns a temp workdir, so a later run can tell a dead one.
-OWNER_FILE = ".skeletor-verify-pid"
-#: Set in the run `tmp_cleanup_gate` kills, so that run cannot start the gate again.
+#: Set in the runs `tmp_cleanup_gate` kills, so a killed verify cannot start the gate again.
 NESTED_ENV = "SKELETOR_VERIFY_NESTED"
+#: `bin/tempdirs.py`, shared with `bin/skeletor-upgrade`.
+tempdirs = load_tool(SKELETOR / "bin" / "tempdirs.py", "skeletor_tempdirs")
 
 
-def exit_on_signal() -> None:
-    """SIGTERM and SIGHUP raise SystemExit, so `main`'s `finally` removes the workdir.
-
-    An agent's Bash timeout ends a run with SIGTERM, which by default skips the
-    `finally`, and archdesk's /tmp is RAM-backed (jam-sense, 2026-11-10).
-    """
-
-    def stop(signum: int, _frame: Any) -> None:
-        raise SystemExit(128 + signum)
-
-    for signum in (signal.SIGTERM, signal.SIGHUP):
-        signal.signal(signum, stop)
-
-
-def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def sweep_dead_workdirs(root: Path) -> List[Path]:
-    """Remove the temp workdirs under `root` whose recorded owner is gone.
-
-    SIGKILL runs no handler, so this is the half `exit_on_signal` cannot be. A
-    directory with no readable owner, or a live one, is left alone.
-    """
-    removed = []
-    for candidate in sorted(root.glob(f"{WORKDIR_PREFIX}*")):
-        try:
-            pid = int((candidate / OWNER_FILE).read_text(encoding="utf-8").strip())
-        except (OSError, ValueError):
-            continue
-        if pid != os.getpid() and not _alive(pid):
-            shutil.rmtree(candidate, ignore_errors=True)
-            removed.append(candidate)
-    return removed
-
-
-def tmp_cleanup_gate(workdir: Path) -> List[Result]:
-    """A killed run removes its workdir, and a dead run's workdir is swept.
-
-    The first half kills a real run as it starts. The second plants owners in a
-    scratch root: a finished process, this one, none, garbled, a foreign prefix.
-    """
-    started = time.time()
-    victim = workdir / "tmp-cleanup-victim"
-    env = {**os.environ, NESTED_ENV: "1", "PYTHONUNBUFFERED": "1"}
-    log = workdir / "tmp-cleanup-victim.log"
+def _killed(argv: List[str], tmp: Path, reached: Callable[[], bool]) -> Tuple[Optional[int], str]:
+    """SIGTERM `argv` once `reached()` holds, with TMPDIR at `tmp`: its exit, or None if it never got there."""
+    tmp.mkdir(parents=True, exist_ok=True)
+    log = tmp.parent / f"{tmp.name}.log"
+    env = {**subprocess_env(), NESTED_ENV: "1", "PYTHONUNBUFFERED": "1", "TMPDIR": str(tmp)}
     with log.open("w", encoding="utf-8") as sink:
-        child = subprocess.Popen(
-            [sys.executable, str(SKELETOR / "bin" / "skeletor-verify"), "--workdir", str(victim), "--tier", "core"],
-            stdout=sink,
-            stderr=subprocess.STDOUT,
-            env=env,
-        )
-    # Signalled once the run writes into its workdir, which is inside its `try`.
+        child = subprocess.Popen(argv, stdout=sink, stderr=subprocess.STDOUT, env=env, cwd=str(SKELETOR))
     deadline = time.time() + 120
-    while child.poll() is None and time.time() < deadline and not (victim.is_dir() and any(victim.iterdir())):
+    while child.poll() is None and time.time() < deadline and not reached():
         time.sleep(0.2)
-    started_run = victim.is_dir() and child.poll() is None
+    got_there = child.poll() is None and reached()
     child.send_signal(signal.SIGTERM)
     try:
         code = child.wait(timeout=120)
     except subprocess.TimeoutExpired:
         child.kill()
         code = child.wait()
-    output = log.read_text(encoding="utf-8")
+    return (code if got_there else None), log.read_text(encoding="utf-8")
+
+
+def tmp_cleanup_gate(workdir: Path) -> List[Result]:
+    """A killed verify or upgrade removes its temp tree and worktrees; a dead run's tree is swept.
+
+    The kills are real runs, signalled once each has a tree (the upgrade, once it
+    has a worktree registered here). The sweep plants owners: a finished process,
+    this one, none, garbled, v0.81.9's file name, and a foreign prefix.
+    """
+    started = time.time()
+    term = 128 + signal.SIGTERM
     killed = []
-    if not started_run:
-        killed.append(f"the run never reached its workdir:\n{output[-2000:]}")
-    if code != 128 + signal.SIGTERM:
-        killed.append(f"exit {code}, wanting {128 + signal.SIGTERM}")
-    if victim.exists():
-        killed.append(f"{victim} survived SIGTERM")
+
+    victim = workdir / "tmp-cleanup-victim"
+    argv = [sys.executable, str(SKELETOR / "bin" / "skeletor-verify"), "--workdir", str(victim), "--tier", "core"]
+    code, output = _killed(argv, workdir / "tmp-cleanup-verify-tmp", lambda: victim.is_dir() and any(victim.iterdir()))
+    if code != term or victim.exists():
+        killed.append(f"verify: exit {code}, wanting {term}; workdir left: {victim.exists()}\n{output[-1500:]}")
+
+    _, tree = scaffold("core", "python", workdir, name="tmp-cleanup-tree")
+    tmp = workdir / "tmp-cleanup-upgrade-tmp"
+
+    def registered() -> bool:
+        return str(tmp) in git_in(SKELETOR, "worktree", "list", "--porcelain")[1]
+
+    argv = [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--dry-run", "--ref", "HEAD"]
+    code, output = _killed(argv, tmp, registered)
+    left = sorted(path.name for path in tmp.glob("skeletor-upgrade-*")) if tmp.is_dir() else []
+    if code != term or left or registered():
+        killed.append(
+            f"upgrade: exit {code}, wanting {term}; left {left}; worktree still registered: {registered()}"
+            f"\n{output[-1500:]}"
+        )
 
     root = workdir / "tmp-cleanup-root"
     root.mkdir(parents=True, exist_ok=True)
     finished = subprocess.Popen(["true"])
     finished.wait()
+    dead = str(finished.pid)
     owners = {
-        f"{WORKDIR_PREFIX}dead": str(finished.pid),
-        f"{WORKDIR_PREFIX}live": str(os.getpid()),
+        f"{WORKDIR_PREFIX}dead": (tempdirs.OWNER_FILE, dead),
+        # Spelled here, not read from the module: it is what v0.81.9 wrote.
+        f"{WORKDIR_PREFIX}legacy": (".skeletor-verify-pid", dead),
+        f"{WORKDIR_PREFIX}live": (tempdirs.OWNER_FILE, str(os.getpid())),
         f"{WORKDIR_PREFIX}unowned": None,
-        f"{WORKDIR_PREFIX}garbled": "x",
-        "skeletor-rehearsal-logs-dead": str(finished.pid),
+        f"{WORKDIR_PREFIX}garbled": (tempdirs.OWNER_FILE, "x"),
+        "skeletor-rehearsal-logs-dead": (tempdirs.OWNER_FILE, dead),
     }
-    for name, pid in owners.items():
+    for name, owner in owners.items():
         (root / name).mkdir()
-        if pid is not None:
-            (root / name / OWNER_FILE).write_text(pid + "\n", encoding="utf-8")
-    swept = sorted(path.name for path in sweep_dead_workdirs(root))
+        if owner is not None:
+            (root / name / owner[0]).write_text(owner[1] + "\n", encoding="utf-8")
+    swept = sorted(path.name for path in tempdirs.sweep_dead(WORKDIR_PREFIX, root=root))
+    wanted = sorted(f"{WORKDIR_PREFIX}{end}" for end in ("dead", "legacy"))
     left = sorted(path.name for path in root.iterdir())
-    wanted_left = sorted(name for name in owners if name != f"{WORKDIR_PREFIX}dead")
-    sweep = [] if swept == [f"{WORKDIR_PREFIX}dead"] and left == wanted_left else [f"swept {swept}, left {left}"]
+    sweep = [] if swept == wanted and left == sorted(set(owners) - set(wanted)) else [f"swept {swept}, left {left}"]
     shutil.rmtree(root, ignore_errors=True)
     return [
         Result(
-            "tmp cleanup: SIGTERM mid-run removes the workdir", not killed, time.time() - started, "\n".join(killed)
+            "tmp cleanup: SIGTERM mid-run removes the temp tree", not killed, time.time() - started, "\n".join(killed)
         ),
-        Result("tmp cleanup: only a dead run's workdir is swept", not sweep, time.time() - started, "\n".join(sweep)),
+        Result("tmp cleanup: only a dead run's tree is swept", not sweep, time.time() - started, "\n".join(sweep)),
     ]
 
 
@@ -15591,14 +15567,14 @@ def main() -> int:
     #: overlay nobody generates is a `render()` failure a user finds first.
     gated_language = "python"
 
-    exit_on_signal()
-    swept = sweep_dead_workdirs(Path(tempfile.gettempdir()))
+    tempdirs.exit_on_signal()
+    swept = tempdirs.sweep_dead(WORKDIR_PREFIX)
     if swept:
         print(f"🧹 removed {len(swept)} workdir(s) a killed run left in {swept[0].parent}")
     workdir = Path(args.workdir).resolve() if args.workdir else Path(tempfile.mkdtemp(prefix=WORKDIR_PREFIX))
     workdir.mkdir(parents=True, exist_ok=True)
     if not (args.workdir or args.keep):
-        (workdir / OWNER_FILE).write_text(f"{os.getpid()}\n", encoding="utf-8")
+        tempdirs.record_owner(workdir)
     print(f"🔎 verifying {len(tiers)} tier(s) × {len(languages)} language(s) in {workdir}")
 
     results: List[Result] = []

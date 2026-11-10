@@ -94,8 +94,11 @@ from typing import Any, Callable, Dict, FrozenSet, List, NoReturn, Optional, Set
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from render_guard import bare_tag, head_standing, render_dirt, uncommitted  # noqa: E402
+from tempdirs import exit_on_signal, owned_tempdir, sweep_dead  # noqa: E402
 
 SKELETOR = Path(__file__).resolve().parents[1]
+#: This tool's own temp workdir; `sweep_dead` reads the prefix back.
+UPGRADE_PREFIX = "skeletor-upgrade-"
 MANIFEST_NAME = ".skeletor.json"
 
 #: Regenerated from their sources by `scripts/docs/regen.py`, and routed
@@ -2915,10 +2918,13 @@ def rehearse(args: argparse.Namespace) -> int:
     snapshot = git("stash", "create").stdout.strip() or git("rev-parse", "HEAD").stdout.strip()
     if not snapshot:
         die(f"{target} has no commit to rehearse from")
+    # The stage's worktree is registered in the tree, so a sweep prunes the tree.
+    sweep_dead(f"{target.name}-rehearsal-", root=target.parent, prune=target)
+    sweep_dead("skeletor-rehearse-", prune=target)
     try:
-        stage = Path(tempfile.mkdtemp(prefix=f"{target.name}-rehearsal-", dir=target.parent))
+        stage = owned_tempdir(f"{target.name}-rehearsal-", dir=target.parent)
     except OSError:
-        stage = Path(tempfile.mkdtemp(prefix="skeletor-rehearse-"))
+        stage = owned_tempdir("skeletor-rehearse-")
         say("⚠️ ", f"{target.parent} is not writable, so the rehearsal sits under {stage.parent}, not beside the tree")
     stage_tree = stage / target.name
     logs = Path(tempfile.mkdtemp(prefix="skeletor-rehearsal-logs-"))
@@ -3407,6 +3413,9 @@ def main() -> int:
     )
     parser.add_argument("--quick", action="store_true", help="with --rehearse: `check pre-push --quick`, no suites")
     args = parser.parse_args(join_set_arg(sys.argv[1:]))
+    # Before any temp directory exists: a killed run's `finally` then removes its
+    # own, and a SIGKILLed one's is swept by the next run (`bin/tempdirs.py`).
+    exit_on_signal()
     if args.ported and args.ported_path:
         parser.error("--ported advances past everything, so naming files beside it would check nothing: pick one")
     if args.quick and not args.rehearse:
@@ -3447,7 +3456,9 @@ def main() -> int:
     #: bijection with the base render, and ownership is a decision, not a render.
     owned = set(manifest.get("owned") or []) | {Path(own).as_posix().removeprefix("./") for own in args.own}
 
-    workdir = Path(tempfile.mkdtemp(prefix="skeletor-upgrade-"))
+    # Its worktrees are registered here, in skeletor, so a sweep prunes here.
+    sweep_dead(UPGRADE_PREFIX, prune=SKELETOR)
+    workdir = owned_tempdir(UPGRADE_PREFIX)
     # A list, because `--ref` adds a second one. It was a single Optional while
     # only the base could be a worktree, and a second assignment to that name
     # would have leaked the first — silently, since `git worktree remove` on a
