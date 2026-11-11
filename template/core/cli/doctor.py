@@ -504,6 +504,8 @@ def labels_exist() -> Fact:
 DEFAULT_PR_TYPES = ("opened", "synchronize", "reopened")
 #: `gh` or `git` asked under cron's environment; bounded, since a prompt cron cannot answer would hang.
 CRON_PROBE_TIMEOUT_S = 60
+#: `crontab` missing, or hanging: either way there is no installed block to read.
+_NO_CRONTAB = (OSError, subprocess.TimeoutExpired)
 
 
 _GLOB = {"**": ".*", "**/": "(?:.*/)?", "*": "[^/]*", "?": "[^/]"}
@@ -608,7 +610,7 @@ def cron_route(registry: Any) -> list[Fact]:
     try:
         listed = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=CRON_PROBE_TIMEOUT_S)
         live = listed.stdout if listed.returncode == 0 else ""
-    except (OSError, subprocess.TimeoutExpired):
+    except _NO_CRONTAB:
         live = ""
     block = registry.installed_block(live, checkout)
     if block is None:
