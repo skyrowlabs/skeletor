@@ -15,12 +15,15 @@ from pathlib import Path
 
 import pytest
 
+from scripts.lanes import LANES, source_line
 from scripts.reporting import agent_runner, run_ledger
-from scripts.reporting.jobs import JOBS
+from scripts.reporting.jobs import JOBS, SINK_QUEUE
 
 pytestmark = pytest.mark.unit
 
 JOB = next(job for job in JOBS if job.writes.startswith("docs/"))
+#: The real count, kept before `tree` stubs it so no other test asks the host's `gh`.
+FILED_SINCE = agent_runner._filed_since
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -51,6 +54,7 @@ def tree(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_runner, "PROJECT_ROOT", repo)
     monkeypatch.setattr(agent_runner, "PROMPTS", prompts)
     monkeypatch.setattr(agent_runner, "AUTO_PUSH", set())
+    monkeypatch.setattr(agent_runner, "_filed_since", lambda job_key, started: 0)
     monkeypatch.setattr(run_ledger, "ledger_path", lambda: ledger)
     monkeypatch.delenv(JOB.heartbeat_var or "UNSET_HEARTBEAT", raising=False)
     return repo
@@ -124,8 +128,12 @@ def origin(tree, tmp_path, monkeypatch):
 
 GH = """#!/bin/sh
 echo "$*" >> {log}
+if [ "$1" = issue ]; then
+  [ -z "$FAKE_GH_NO_ISSUES" ] || {{ echo refused >&2; exit 1; }}
+  printf '%s\n' "${{FAKE_GH_ISSUES:-[]}}"; exit 0
+fi
 case "$2" in
-  list) echo "$FAKE_GH_LIST" ;;
+  list) printf '%s\n' "$FAKE_GH_LIST" ;;
   create) [ -z "$FAKE_GH_NO_CREATE" ] || {{ echo refused >&2; exit 1; }}; echo https://example.invalid/pull/7 ;;
   merge) [ -z "$FAKE_GH_NO_MERGE" ] || {{ echo refused >&2; exit 1; }} ;;
 esac
@@ -218,3 +226,31 @@ def test_an_ok_run_still_names_what_it_was_refused(tree, monkeypatch):
     write = f"echo changed >> {tree / JOB.writes} && {COMMIT}"
     row = _run_with(monkeypatch, ["sh", "-c", f"{write}; echo '{denial}'"], tree)
     assert row["outcome"] == "ok" and "WebFetch" in row["reason"], row
+
+
+def _captures(*issues: tuple[int, str, str]) -> str:
+    return json.dumps([{"number": n, "body": f"x\n\n{body}\n", "createdAt": at} for n, body, at in issues])
+
+
+def test_findings_count_the_jobs_own_captures_filed_during_the_run(tree, origin, monkeypatch):
+    assert JOB.findings_sink == SINK_QUEUE, "the fixture's job files no captures, so this proves nothing"
+    monkeypatch.setattr(agent_runner, "_filed_since", FILED_SINCE)
+    mine, theirs = source_line(JOB.key), source_line("someone-else")
+    after, before = "2999-01-01T00:00:00Z", "2000-01-01T00:00:00Z"
+    listed = _captures((1, mine, after), (2, theirs, after), (3, mine, before))
+    monkeypatch.setenv("FAKE_GH_ISSUES", listed)
+    row = _run_with(monkeypatch, _report_commit(tree), tree)
+    assert row["outcome"] == "ok" and row["findings"] == 1, row
+
+
+def test_findings_are_null_not_zero_when_the_captures_cannot_be_listed(tree, origin, monkeypatch):
+    monkeypatch.setattr(agent_runner, "_filed_since", FILED_SINCE)
+    monkeypatch.setenv("FAKE_GH_NO_ISSUES", "1")
+    row = _run_with(monkeypatch, _report_commit(tree), tree)
+    assert row["outcome"] == "ok" and row["findings"] is None, row
+
+
+def test_an_issue_in_two_lanes_counts_once(tree, origin, monkeypatch):
+    assert len(LANES) > 1, "one lane cannot show an issue counted twice"
+    monkeypatch.setenv("FAKE_GH_ISSUES", _captures((5, source_line(JOB.key), "2999-01-01T00:00:00Z")))
+    assert FILED_SINCE(JOB.key, "2026-01-01T00:00:00Z") == 1

@@ -35,11 +35,19 @@ from pathlib import Path
 # owns every path below — can be imported. See scripts/paths.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.lanes import SOURCE_ENV  # noqa: E402
+from scripts.lanes import LANES, SOURCE_ENV, source_line  # noqa: E402
 from scripts.output import line, skip, step  # noqa: E402
 from scripts.paths import PROJECT_ROOT  # noqa: E402
 from scripts.reporting import run_ledger, shellout  # noqa: E402
-from scripts.reporting.jobs import AGENT_TOOLS, AUTO_PUSH, FIX_POLICIES, JOBS_BY_KEY, SeatError, seat_env  # noqa: E402
+from scripts.reporting.jobs import (  # noqa: E402
+    AGENT_TOOLS,
+    AUTO_PUSH,
+    FIX_POLICIES,
+    JOBS_BY_KEY,
+    SINK_QUEUE,
+    SeatError,
+    seat_env,
+)
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
 
@@ -331,7 +339,11 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "main") -> i
             branch=branch,
             agent_ran=agent_ran,
             committed=head_after if job.commits and head_after != head_before else None,
-            findings=int(collected.get("finding_count", 0) or 0),
+            findings=(
+                _filed_since(job.key, started)
+                if job.findings_sink == SINK_QUEUE
+                else int(collected.get("finding_count", 0) or 0)
+            ),
             reason=reason,
             **usage(result.stdout),
         )
@@ -391,6 +403,38 @@ def _git(*args: str, timeout: int = PUSH_TIMEOUT_S):
 
 def _gh(*args: str):
     return shellout.run(["gh", *args], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=PUSH_TIMEOUT_S)
+
+
+#: `gh` missing, slow, or answering with something that is not JSON.
+_UNCOUNTABLE = (OSError, subprocess.TimeoutExpired, ValueError)
+
+
+def _filed_since(job_key: str, started: str) -> int | None:
+    """How many captures `job_key`'s agent filed since `started`; `None` when `gh` could not say.
+
+    Read back by the attribution line every capture carries, across every lane, so
+    an issue with two lane labels counts once. `None`, never 0: "could not count"
+    and "found none" are different answers (breeze-brain, 2026-11-08).
+    """
+    filed: set[int] = set()
+    for lane in LANES:
+        try:
+            listed = _gh(
+                "issue", "list", "--label", lane.label, "--state", "all",
+                "--search", f"created:>={started[:10]}", "--limit", "200",
+                "--json", "number,body,createdAt",
+            )  # fmt: skip
+            issues = json.loads(listed.stdout or "[]") if listed.returncode == 0 else None
+        except _UNCOUNTABLE:
+            issues = None
+        if not isinstance(issues, list):
+            return None
+        filed |= {
+            issue["number"]
+            for issue in issues
+            if source_line(job_key) in (issue.get("body") or "") and (issue.get("createdAt") or "") >= started
+        }
+    return len(filed)
 
 
 def _catch_up(branch: str) -> None:
