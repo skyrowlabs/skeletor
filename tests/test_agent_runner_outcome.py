@@ -134,6 +134,7 @@ if [ "$1" = issue ]; then
 fi
 case "$2" in
   list) printf '%s\n' "$FAKE_GH_LIST" ;;
+  view) printf '%s\n' "${{FAKE_GH_VIEW:-}}" ;;
   create) [ -z "$FAKE_GH_NO_CREATE" ] || {{ echo refused >&2; exit 1; }}; echo https://example.invalid/pull/7 ;;
   merge) [ -z "$FAKE_GH_NO_MERGE" ] || {{ echo refused >&2; exit 1; }} ;;
 esac
@@ -254,3 +255,54 @@ def test_an_issue_in_two_lanes_counts_once(tree, origin, monkeypatch):
     assert len(LANES) > 1, "one lane cannot show an issue counted twice"
     monkeypatch.setenv("FAKE_GH_ISSUES", _captures((5, source_line(JOB.key), "2999-01-01T00:00:00Z")))
     assert FILED_SINCE(JOB.key, "2026-01-01T00:00:00Z") == 1
+
+
+EARLIER = "https://example.invalid/pull/5"
+
+
+def _opened_earlier(url: str = EARLIER) -> None:
+    """A past `ok` row saying this runner opened `url`, as `_publish` words it."""
+    when = run_ledger.now()
+    run_ledger.record(
+        run_ledger.Run(
+            job=JOB.key, outcome="ok", started=when, finished=when, branch="main", agent_ran=True,
+            committed="abc1234", reason=f"{url} set to auto-merge; whether it lands is CI's",
+        )
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "state, checks, said",
+    [
+        ("CLOSED", [], "closed without merging"),
+        ("OPEN", [{"name": "unit", "conclusion": "FAILURE"}], "checks failed: unit"),
+        ("OPEN", [{"context": "ci/x", "state": "ERROR"}], "checks failed: ci/x"),
+        ("OPEN", [{"name": "unit", "conclusion": None, "status": "IN_PROGRESS"}], None),
+        ("MERGED", [], None),
+    ],
+)
+def test_the_last_report_pull_requests_failure_is_a_row_of_its_own(tree, origin, monkeypatch, state, checks, said):
+    _opened_earlier()
+    monkeypatch.setenv("FAKE_GH_VIEW", json.dumps({"state": state, "statusCheckRollup": checks}))
+    row = _run_with(monkeypatch, _report_commit(tree), tree)
+    assert row["outcome"] == "ok", row
+    rows = run_ledger.runs_of(JOB.key)
+    if said is None:
+        assert len(rows) == 2, rows
+        return
+    assert len(rows) == 3 and rows[1]["outcome"] == "failed" and not rows[1]["agent_ran"], rows
+    assert rows[1]["reason"].startswith(EARLIER) and said in rows[1]["reason"], rows[1]
+
+
+def test_a_report_pull_request_is_followed_up_once(tree, origin, monkeypatch):
+    _opened_earlier()
+    monkeypatch.setenv("FAKE_GH_VIEW", json.dumps({"state": "CLOSED", "statusCheckRollup": []}))
+    agent_runner._follow_up(JOB, "main")
+    agent_runner._follow_up(JOB, "main")
+    assert [row["outcome"] for row in run_ledger.runs_of(JOB.key)] == ["ok", "failed"]
+
+
+def test_an_unreadable_pull_request_writes_nothing(tree, origin, monkeypatch):
+    _opened_earlier()
+    agent_runner._follow_up(JOB, "main")
+    assert len(run_ledger.runs_of(JOB.key)) == 1

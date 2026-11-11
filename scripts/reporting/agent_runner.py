@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -296,6 +297,7 @@ def run_triage(job_key: str, collected: dict, *, base_branch: str = "main") -> i
         return 0
 
     if job.key in AUTO_PUSH:
+        _follow_up(job, branch)
         _catch_up(branch)
     head_before = _head()
     artifact_before = _artifact_hash(job)
@@ -469,6 +471,52 @@ def _close_earlier(job, topic: str) -> list[str]:
             if _gh("pr", "close", number, "--delete-branch", "--comment", f"Replaced by {topic}.").returncode == 0:
                 closed.append(f"#{number}")
     return closed
+
+
+#: The pull request an `ok` row says this runner opened, as `_publish`'s note words it.
+_OPENED = re.compile(r"(\S+/pull/\d+) set to auto-merge")
+#: A check conclusion (or a status's state) that keeps auto-merge from firing.
+_FAILED_CHECK = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+
+
+def _follow_up(job, branch: str) -> None:
+    """Append a `failed` row when the last report pull request closed unmerged or its checks failed.
+
+    A row of its own: the ledger is append-only, and the verdict is about an
+    earlier run. Merged, still pending, unreadable, or already followed up: nothing.
+    """
+    rows = run_ledger.runs_of(job.key)
+    for at in range(len(rows) - 1, -1, -1):
+        match = _OPENED.search(rows[at].get("reason") or "")
+        if match:
+            break
+    else:
+        return
+    url = match.group(1)
+    if any(url in (row.get("reason") or "") for row in rows[at + 1 :]):
+        return
+    viewed = _gh("pr", "view", url, "--json", "state,statusCheckRollup")
+    try:
+        pull = json.loads(viewed.stdout) if viewed.returncode == 0 else None
+    except ValueError:
+        return
+    if not isinstance(pull, dict):
+        return
+    failed = [
+        check.get("name") or check.get("context") or "?"
+        for check in pull.get("statusCheckRollup") or []
+        if (check.get("conclusion") or check.get("state")) in _FAILED_CHECK
+    ]
+    if pull.get("state") == "CLOSED":
+        why = "closed without merging"
+    elif pull.get("state") == "OPEN" and failed:
+        why = f"cannot auto-merge, its checks failed: {', '.join(failed)}"
+    else:
+        return
+    when = run_ledger.now()
+    run_ledger.record(
+        run_ledger.Run(job=job.key, outcome="failed", started=when, finished=when, branch=branch, reason=f"{url} {why}")
+    )
 
 
 def _publish(job, head_before: str, head_after: str, branch: str) -> tuple[str, str]:
