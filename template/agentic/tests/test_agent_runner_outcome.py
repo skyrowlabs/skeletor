@@ -130,10 +130,10 @@ GH = """#!/bin/sh
 echo "$*" >> {log}
 if [ "$1" = issue ]; then
   [ -z "$FAKE_GH_NO_ISSUES" ] || {{ echo refused >&2; exit 1; }}
-  echo "${{FAKE_GH_ISSUES:-[]}}"; exit 0
+  printf '%s\n' "${{FAKE_GH_ISSUES:-[]}}"; exit 0
 fi
 case "$2" in
-  list) echo "$FAKE_GH_LIST" ;;
+  list) printf '%s\n' "$FAKE_GH_LIST" ;;
   create) [ -z "$FAKE_GH_NO_CREATE" ] || {{ echo refused >&2; exit 1; }}; echo https://example.invalid/pull/7 ;;
   merge) [ -z "$FAKE_GH_NO_MERGE" ] || {{ echo refused >&2; exit 1; }} ;;
 esac
