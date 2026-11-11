@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Any
 
 OWNER_FILE = ".skeletor-owner-pid"
+#: An owner file that is missing or does not hold a pid.
+_UNREADABLE = (OSError, ValueError)
 
 
 def exit_on_signal() -> None:
@@ -65,7 +67,7 @@ def sweep_dead(prefix: str, root: Path | None = None, prune: Path | None = None)
     for candidate in sorted(Path(root or tempfile.gettempdir()).glob(f"{prefix}*")):
         try:
             pid = int((candidate / OWNER_FILE).read_text(encoding="utf-8").strip())
-        except (OSError, ValueError):
+        except _UNREADABLE:
             continue
         if pid != os.getpid() and not alive(pid):
             shutil.rmtree(candidate, ignore_errors=True)

@@ -405,6 +405,10 @@ def _gh(*args: str):
     return shellout.run(["gh", *args], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=PUSH_TIMEOUT_S)
 
 
+#: `gh` missing, slow, or answering with something that is not JSON.
+_UNCOUNTABLE = (OSError, subprocess.TimeoutExpired, ValueError)
+
+
 def _filed_since(job_key: str, started: str) -> int | None:
     """How many captures `job_key`'s agent filed since `started`; `None` when `gh` could not say.
 
@@ -421,7 +425,7 @@ def _filed_since(job_key: str, started: str) -> int | None:
                 "--json", "number,body,createdAt",
             )  # fmt: skip
             issues = json.loads(listed.stdout or "[]") if listed.returncode == 0 else None
-        except (OSError, subprocess.TimeoutExpired, ValueError):
+        except _UNCOUNTABLE:
             issues = None
         if not isinstance(issues, list):
             return None
