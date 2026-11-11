@@ -15237,6 +15237,14 @@ def adopter_tree_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: b
     gates_py = target / "scripts" / "gates.py"
     closer = "\n\n\n# ── Skeletor's again"
     _plant_swap(gates_py, closer, f"\n\n{ADOPTER_GATE}{closer}")
+    jobs_py = target / "scripts" / "reporting" / "jobs.py"
+    if jobs_py.exists():
+        # Enrolled as every round A tree was, from the seam's own example: v0.83.0's
+        # doctor tests read this host once a job published, and only an enrolled tree shows it.
+        enrol = re.search(r"^#:\s+(AUTO_PUSH\.add\(\"[^\"]+\"\))$", jobs_py.read_text(encoding="utf-8"), re.M)
+        if enrol is None:
+            return [Result("adopter tree: jobs.py documents an AUTO_PUSH append", False, time.time() - started, "")]
+        _plant_swap(jobs_py, closer, f"\n\n{enrol.group(1)}{closer}")
     # Amended, as product_package_gate does: one commit is what the tree asserts.
     run(["git", "add", "-A"], cwd=target)
     run(["git", "commit", "--amend", "--no-edit"], cwd=target)
