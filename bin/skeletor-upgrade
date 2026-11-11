@@ -77,6 +77,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -84,12 +85,13 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
-from typing import Any, Callable, Dict, FrozenSet, List, NoReturn, Optional, Set, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterator, List, NoReturn, Optional, Set, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -723,9 +725,27 @@ def render_with(checkout: Path, args: List[str], into: Path) -> None:
         die(f"rendering with {checkout} failed:\n{result.stdout}\n{result.stderr}")
 
 
-def base_checkout(ref: str, workdir: Path, *, fatal: bool = True) -> Tuple[Optional[Path], Optional[Path], str]:
-    """A detached worktree of skeletor at `ref`: the tree, what to clean up, and
-    the ref actually used — which is not `ref` when the scaffold was dirty."""
+#: What `exit_on_signal()` turns into `SystemExit`, held while git makes a worktree.
+HELD_SIGNALS = {signal.SIGTERM, signal.SIGHUP}
+
+
+@contextlib.contextmanager
+def signals_held() -> Iterator[None]:
+    """SIGTERM and SIGHUP wait until the block ends, then arrive.
+
+    For `git worktree add`: interrupted, it leaves the registration locked and a
+    child of git still checking files out, which no cleanup can race.
+    """
+    signal.pthread_sigmask(signal.SIG_BLOCK, HELD_SIGNALS)
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, HELD_SIGNALS)
+
+
+def base_checkout(ref: str, workdir: Path, cleanup: List[Path], *, fatal: bool = True) -> Tuple[Optional[Path], str]:
+    """A detached worktree of skeletor at `ref`, and the ref actually used — not
+    `ref` when the scaffold was dirty. The tree joins `cleanup` before it exists."""
     if ref.endswith("-dirty"):
         ref = ref[: -len("-dirty")]
         say("⚠️ ", f"the tree was scaffolded from a dirty checkout — using the committed part ({ref})")
@@ -755,11 +775,13 @@ def base_checkout(ref: str, workdir: Path, *, fatal: bool = True) -> Tuple[Optio
         detail("It can also be *bounded* right now: if the recorded hashes match this base")
         detail("render, the edits touched nothing this scaffold ships. Watch for that line.")
     tree = workdir / "base-checkout"
-    result = subprocess.run(
-        ["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(tree), ref],
-        capture_output=True,
-        text=True,
-    )
+    cleanup.append(tree)
+    with signals_held():
+        result = subprocess.run(
+            ["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(tree), ref],
+            capture_output=True,
+            text=True,
+        )
     if result.returncode != 0:
         if fatal:
             die(
@@ -767,11 +789,11 @@ def base_checkout(ref: str, workdir: Path, *, fatal: bool = True) -> Tuple[Optio
                 "   A shallow clone or a rewritten history cannot reproduce the base. "
                 "Pass --from-dir with a checkout that can."
             )
-        return None, None, ref
-    return tree, tree, ref
+        return None, ref
+    return tree, ref
 
 
-def head_checkout(ref: str, workdir: Path) -> Path:
+def head_checkout(ref: str, workdir: Path, cleanup: List[Path]) -> Path:
     """A detached worktree of skeletor at `ref`, to render *ours* from.
 
     The mirror of `base_checkout`, and it exists for one reason: what an upgrade
@@ -790,11 +812,13 @@ def head_checkout(ref: str, workdir: Path) -> Path:
     it cannot be checked, which is this repository's own recurring failure.
     """
     tree = workdir / "head-checkout"
-    result = subprocess.run(
-        ["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(tree), ref],
-        capture_output=True,
-        text=True,
-    )
+    cleanup.append(tree)
+    with signals_held():
+        result = subprocess.run(
+            ["git", "-C", str(SKELETOR), "worktree", "add", "--detach", str(tree), ref],
+            capture_output=True,
+            text=True,
+        )
     if result.returncode != 0:
         die(
             f"cannot check out skeletor at '{ref}':\n   {result.stderr.strip()}\n"
@@ -2928,11 +2952,12 @@ def rehearse(args: argparse.Namespace) -> int:
         say("⚠️ ", f"{target.parent} is not writable, so the rehearsal sits under {stage.parent}, not beside the tree")
     stage_tree = stage / target.name
     logs = Path(tempfile.mkdtemp(prefix="skeletor-rehearsal-logs-"))
-    added = git("worktree", "add", "--detach", "--quiet", str(stage_tree), snapshot)
-    if added.returncode != 0:
-        shutil.rmtree(stage, ignore_errors=True)
-        die(f"could not make a rehearsal worktree: {added.stderr.strip()}")
     try:
+        # Inside the try and held against signals, as `base_checkout()` explains.
+        with signals_held():
+            added = git("worktree", "add", "--detach", "--quiet", str(stage_tree), snapshot)
+        if added.returncode != 0:
+            die(f"could not make a rehearsal worktree: {added.stderr.strip()}")
         for borrowed in (".venv", "node_modules"):
             if (target / borrowed).exists() and not (stage_tree / borrowed).exists():
                 (stage_tree / borrowed).symlink_to(target / borrowed)
@@ -2962,8 +2987,9 @@ def rehearse(args: argparse.Namespace) -> int:
         failing_after = failing_tests(stage_tree)
         hooks_after, hook_blocks, hooks_after_out = hook_table(stage_tree)
     finally:
-        git("worktree", "remove", "--force", str(stage_tree))
+        # Directory first, then the registration, as at the end of main().
         shutil.rmtree(stage, ignore_errors=True)
+        git("worktree", "remove", "--force", "--force", str(stage_tree))
     (logs / "before.log").write_text(before_out, encoding="utf-8")
     (logs / "after.log").write_text(after_out, encoding="utf-8")
     (logs / "hooks-before.log").write_text(hooks_before_out, encoding="utf-8")
@@ -3459,6 +3485,8 @@ def main() -> int:
     # Its worktrees are registered here, in skeletor, so a sweep prunes here.
     sweep_dead(UPGRADE_PREFIX, prune=SKELETOR)
     workdir = owned_tempdir(UPGRADE_PREFIX)
+    # Each checkout joins this list before its `git worktree add`, which runs with
+    # signals held (`signals_held()`), so a signal never finds one unlisted.
     # A list, because `--ref` adds a second one. It was a single Optional while
     # only the base could be a worktree, and a second assignment to that name
     # would have leaked the first — silently, since `git worktree remove` on a
@@ -3497,9 +3525,7 @@ def main() -> int:
             die(f"{MANIFEST_NAME} records no skeletor_ref — pass --from-dir or --no-base")
         else:
             scaffolded_dirty = ref.endswith("-dirty")
-            reachable, base_cleanup, ref = base_checkout(ref, workdir, fatal=not hashes)
-            if base_cleanup is not None:
-                cleanup_worktrees.append(base_cleanup)
+            reachable, ref = base_checkout(ref, workdir, cleanup_worktrees, fatal=not hashes)
             if reachable is None:
                 # The history is gone, but the hashes can still say what is
                 # untouched. Degraded on purpose, and it says so.
@@ -3530,8 +3556,7 @@ def main() -> int:
         # refusal has anything to say about it.
         head_src = SKELETOR
         if args.ref:
-            head_src = head_checkout(args.ref, workdir)
-            cleanup_worktrees.append(head_src)
+            head_src = head_checkout(args.ref, workdir, cleanup_worktrees)
             # No line here: the standing line below already names the render's
             # ref, read out of the render's own manifest rather than echoed from
             # the flag — which is the stronger statement and was already being
@@ -5527,12 +5552,14 @@ def main() -> int:
         # did record the value, and exited 1.
         return 1 if (conflicted or collided) and not advanced else 0
     finally:
+        # Directory first, registration second, twice forced: a worktree git left locked or without
+        # `.git` (a pre-fix run's, or a SIGKILL's) still loses its registration once the directory is gone.
+        shutil.rmtree(workdir, ignore_errors=True)
         for leftover in cleanup_worktrees:
             subprocess.run(
-                ["git", "-C", str(SKELETOR), "worktree", "remove", "--force", str(leftover)],
+                ["git", "-C", str(SKELETOR), "worktree", "remove", "--force", "--force", str(leftover)],
                 capture_output=True,
             )
-        shutil.rmtree(workdir, ignore_errors=True)
 
 
 if __name__ == "__main__":
