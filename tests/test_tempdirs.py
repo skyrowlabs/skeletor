@@ -70,9 +70,12 @@ def test_sigterm_runs_the_callers_cleanup(tmp_path):
         from scripts.tempdirs import exit_on_signal, owned_tempdir
         exit_on_signal()
         made = owned_tempdir("probe-")
-        print(made, flush=True)
         try:
-            time.sleep(60)
+            # Printed inside the try: the parent signals on this line, and must find the finally armed.
+            print(made, flush=True)
+            # Short sleeps: a signal landing just before a sleep's syscall does not cut it short.
+            for _ in range(1200):
+                time.sleep(0.05)
         finally:
             shutil.rmtree(made)
         """)
