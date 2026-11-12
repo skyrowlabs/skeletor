@@ -413,6 +413,18 @@ def warn_a_dirty_base(base: Path, role: str) -> None:
     detail("Read the plan as a statement about a tree that exists on one machine.")
 
 
+def origin_of(checkout: Path) -> str:
+    """`origin`'s URL in `checkout`, or `""` when it has none."""
+    return subprocess.run(
+        ["git", "-C", str(checkout), "remote", "get-url", "origin"], capture_output=True, text=True
+    ).stdout.strip()
+
+
+def is_local_url(url: str) -> bool:
+    """A filesystem path rather than a URL or an scp-style `user@host:path`."""
+    return bool(url) and "://" not in url and not re.match(r"^[\w.-]+@[\w.-]+:", url)
+
+
 def ref_on_remote(checkout: Path, ref: str, commit: str) -> Optional[str]:
     """`"here"`, `"absent"` or `"elsewhere"` for tag `ref` on `origin`; `None` if unknown.
 
@@ -840,13 +852,21 @@ def files_under(root: Path) -> Dict[str, Path]:
     return out
 
 
-def refresh_version_badge(target: Path, head_tree: Path) -> None:
-    """Move the tree's version badge with its base, if the tree shows or keeps one."""
+def version_badge_moves(target: Path, head_tree: Path) -> bool:
+    """Whether advancing the base rewrites the tree's version badge: shown or kept, and different."""
     source, badge, readme = head_tree / VERSION_BADGE, target / VERSION_BADGE, target / "README.md"
     shown = readme.is_file() and VERSION_BADGE in readme.read_text(encoding="utf-8")
-    if source.is_file() and (shown or badge.is_file()):
-        badge.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, badge)
+    if not source.is_file() or not (shown or badge.is_file()):
+        return False
+    return not badge.is_file() or badge.read_bytes() != source.read_bytes()
+
+
+def refresh_version_badge(target: Path, head_tree: Path, head_ref: str) -> None:
+    """Move the tree's version badge with its base, if the tree shows or keeps one, and say so."""
+    if version_badge_moves(target, head_tree):
+        (target / VERSION_BADGE).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(head_tree / VERSION_BADGE, target / VERSION_BADGE)
+        say("🏷️ ", f"{VERSION_BADGE} follows the base to {head_ref}")
 
 
 def record_owned(target: Path, owned: List[str]) -> None:
@@ -2494,6 +2514,56 @@ class Linter:
         return introduced, unanswered
 
 
+def first_party_names(target: Path, head_files: Dict[str, Path]) -> Set[str]:
+    """Every module and directory name a Python path here or in the head render carries."""
+    listed = subprocess.run(["git", "-C", str(target), "ls-files", "*.py"], capture_output=True, text=True)
+    names: Set[str] = set()
+    for rel in [*head_files, *listed.stdout.splitlines()]:
+        if rel.endswith(".py"):
+            path = Path(rel)
+            names.update({*path.parent.parts, path.stem})
+    return names
+
+
+def third_party_imports(text: Optional[str], first_party: Set[str]) -> Optional[Set[str]]:
+    """Top-level names `text` imports that are neither the standard library nor this tree's; None if unparseable."""
+    if text is None:
+        return set()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None
+    names: Set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module.split(".")[0])
+    return {name for name in names if name not in sys.stdlib_module_names and name not in first_party}
+
+
+def import_changes(
+    written: Dict[str, Tuple[Optional[str], str]], first_party: Set[str]
+) -> Tuple[Dict[str, Dict[str, List[str]]], List[str]]:
+    """`({path: {"gained": [...], "lost": [...]}}, [unparseable paths])` for the Python files written.
+
+    Measured against what the file holds now, as the lint forecast is: for a file
+    skeletor replaces that is the base render, and for a merged one it leaves the
+    adopter's own imports out of what the template brings (mind.head).
+    """
+    changes: Dict[str, Dict[str, List[str]]] = {}
+    unparsed: List[str] = []
+    for rel, (before, after) in sorted(written.items()):
+        if not rel.endswith(".py"):
+            continue
+        earlier, later = third_party_imports(before, first_party), third_party_imports(after, first_party)
+        if earlier is None or later is None:
+            unparsed.append(rel)
+        elif earlier != later:
+            changes[rel] = {"gained": sorted(later - earlier), "lost": sorted(earlier - later)}
+    return changes, unparsed
+
+
 def read(path: Optional[Path]) -> Optional[str]:
     if path is None or not path.exists():
         return None
@@ -3789,25 +3859,28 @@ def main() -> int:
                     # From a clone of a local checkout — the way a pinned render is
                     # often made — `origin` IS that checkout, which always has the tag:
                     # a row every time, meaning nothing. mind.head reasoned it.
-                    origin_url = subprocess.run(
-                        ["git", "-C", str(head_src), "remote", "get-url", "origin"],
-                        capture_output=True,
-                        text=True,
-                    ).stdout.strip()
-                    local = bool(origin_url) and "://" not in origin_url
-                    local = local and not re.match(r"^[\w.-]+@[\w.-]+:", origin_url)
+                    origin_url = origin_of(head_src)
+                    local = is_local_url(origin_url)
                     # **Asked, where `origin` is a remote.** Four of six trees ran this
                     # `ls-remote` by hand every round, so one round trip on the run that
                     # stamps a manifest is the cheaper side. No answer stays unknown.
-                    pushed = None if local or not origin_url else ref_on_remote(head_src, args.ref, sha)
+                    # A local `origin` is followed one hop, to that checkout's own
+                    # `origin`, and no further (node.zero).
+                    asked, answered_by = head_src, origin_url
+                    if local:
+                        hop = Path(origin_url)
+                        hop = hop if hop.is_absolute() else (head_src / hop).resolve()
+                        hop_url = origin_of(hop) if hop.is_dir() else ""
+                        asked, answered_by = (hop, hop_url) if hop_url and not is_local_url(hop_url) else (None, "")
+                    pushed = ref_on_remote(asked, args.ref, sha) if asked is not None and answered_by else None
                     if pushed == "here":
-                        say("✅", f"{args.ref} is on origin at the commit rendered — adopters can resolve it")
+                        say("✅", f"{args.ref} is on {answered_by} at the commit rendered — adopters can resolve it")
                     elif pushed == "absent":
-                        say("⚠️ ", f"{args.ref} is not on origin")
+                        say("⚠️ ", f"{args.ref} is not on {answered_by}")
                         detail("The manifest will record a name nobody else can resolve until it is")
                         detail(f"pushed there: `git push origin {args.ref}` from the skeletor checkout.")
                     elif pushed == "elsewhere":
-                        say("⚠️ ", f"origin has {args.ref} at a different commit from the one rendered")
+                        say("⚠️ ", f"{answered_by} has {args.ref} at a different commit from the one rendered")
                         detail(f"Adopters resolve {args.ref} to origin's commit, not this render. Do not")
                         detail("force-push a published tag: take origin's, then re-run —")
                         detail(f"  git fetch --force origin tag {args.ref}   (in the skeletor checkout)")
@@ -3817,9 +3890,12 @@ def main() -> int:
                         detail("description of this checkout — but a name only resolves for somebody")
                         detail(f"else once it is pushed. `git ls-remote <remote> {args.ref}` is the check;")
                         detail("a row means an adopter can reach it.")
-                    if local:
+                    if pushed is not None and local:
+                        detail(f"`origin` here is {origin_url}, a local path; asked its origin, {answered_by}.")
+                    if local and pushed is None:
                         detail(f"Not `origin` here: it is {origin_url}, a local path, which has every")
-                        detail("tag this checkout has. Ask the remote adopters actually fetch from.")
+                        detail("tag this checkout has, and its own `origin` is not a remote either.")
+                        detail("Ask the remote adopters actually fetch from.")
                 else:
                     say("⚠️ ", f"this checkout tracks no branch — whether {head_ref} is reachable")
                     detail("elsewhere cannot be determined from here. If it is a pushed tag, it is fine;")
@@ -4266,6 +4342,7 @@ def main() -> int:
             for rel, found in linter.reformatted(written, normaliser).items():
                 lint_new.setdefault(rel, []).extend(found)
         linted = sum(1 for rel in written if linter.applies(rel))
+        imports_changed, imports_unparsed = import_changes(written, first_party_names(target, head_files))
 
         for rel in sorted(set(base_files)):
             if rel in head_files or rel in GENERATED:
@@ -4349,6 +4426,12 @@ def main() -> int:
         # `--ref`. proto.pilot read that the unpinned `--ported` re-run in this state
         # might not advance; it could not. The files ARE at the new render, which is
         # the one thing an advance records.
+        # A dry run never advances, so it says what the advance below would write that no
+        # file list carries: the badge is outside every comparison (proto.pilot, mind.head).
+        would_advance = bool(added or updated or merged or pending or set_args_applied or carried)
+        if args.dry_run and would_advance and not (pending and not args.ported):
+            if version_badge_moves(target, head_tree):
+                say("🏷️ ", f"{VERSION_BADGE} would follow the base to {head_ref}")
         if not args.dry_run and (added or updated or merged or pending or set_args_applied or carried):
             # The head render's manifest, verbatim — the hashes recorded are of
             # what skeletor PRODUCES, never of what is on disk. The difference
@@ -4455,7 +4538,7 @@ def main() -> int:
                     detail("again — that is what the flag asserts, and it cannot be undone by")
                     detail("re-running.")
                 shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
-                refresh_version_badge(target, head_tree)
+                refresh_version_badge(target, head_tree, head_ref)
                 advanced = True
                 # **Announced where it happens, whatever else the run did.** v0.33.0
                 # put the line in the one branch that lists nothing, and neither real
@@ -4631,6 +4714,9 @@ def main() -> int:
                         # run's included. `lint_unanswered` is the files a linter
                         # crashed on, which is not the same answer as none.
                         "lint_new": lint_new,
+                        # Third-party imports each written Python file gains or loses.
+                        "imports_changed": imports_changed,
+                        "imports_unparsed": imports_unparsed,
                         "lint_unanswered": lint_unanswered,
                         "lint_unsupported": linter.unsupported,
                         # What was asked of how much, so `lint_new: {}` can be
@@ -4740,6 +4826,26 @@ def main() -> int:
             detail("formatters with the settings file they read.")
             detail("The template is clean under its own lint settings; these are yours, and stricter here.")
             detail("Nothing was held back over them: suppress, refactor or loosen, as you would for your own code.")
+        # Every third-party import the written Python gains or loses, whatever consumes
+        # it: a requirements entry or a dependency check is the tree's own (mind.head).
+        python_written = sum(1 for rel in written if rel.endswith(".py"))
+        if python_written:
+            writes = "would write" if args.dry_run else "wrote"
+            if imports_changed:
+                say("📦", f"third-party imports change in {len(imports_changed)} Python file(s) this run {writes}")
+                for rel, change in imports_changed.items():
+                    moved = [f"+{name}" for name in change["gained"]] + [f"-{name}" for name in change["lost"]]
+                    item(f"{rel}: {' '.join(moved)}")
+                detail("Top-level names, neither standard library nor this tree's own modules. What")
+                detail("each needs, a requirements entry or a dependency check, is your tree's call.")
+            elif python_written > len(imports_unparsed):
+                read_count = python_written - len(imports_unparsed)
+                say(
+                    "📦",
+                    f"imports: no third-party import gained or lost in the {read_count} Python file(s) this run {writes}",
+                )
+            if imports_unparsed:
+                detail(f"Not read, because they do not parse: {', '.join(imports_unparsed)}.")
         if lint_unanswered:
             writes = "would write" if args.dry_run else "wrote"
             say("⚠️ ", f"your linter could not answer for {len(lint_unanswered)} file(s) this run {writes}")
@@ -4796,6 +4902,18 @@ def main() -> int:
             detail("in tmp/upgrade/<path>.patch. If you ported it in your own words, or kept yours on")
             detail("purpose, that patch is a record. If not, port it now: the base has advanced and this")
             detail("change will not be offered again, and the next real run clears the directory.")
+        elif conflicted and args.dry_run and args.ported:
+            # A dry run never advances, so `advanced` cannot speak for it; `args.ported`
+            # is what the real run would act on, once `--ported-path` named every
+            # pending file (mind.head, Dream Doll, sky.vault, stash.flow).
+            say("→", f"{len(conflicted)} conflicted file(s) — the real run would advance past this conflict")
+            for rel in conflicted:
+                item(rel + where_it_was(rel))
+                report_held_conflict(rel)
+            detail()
+            detail("Nothing was written. Run the same command without --dry-run and the base")
+            detail("advances, taking each on trust as resolved; its template change is then not")
+            detail("offered again.")
         elif conflicted:
             say("❌", f"{len(conflicted)} file(s) that differ from the template — merge conflicts, LEFT ALONE")
             for rel in conflicted:
@@ -4951,6 +5069,10 @@ def main() -> int:
                 item(rel)
             detail("Yours stands where it was. The template's version is in tmp/upgrade/<path>.new until")
             detail("the next real run clears that directory; `--show <path> --ref <tag>` re-renders it.")
+        elif collided and args.dry_run and args.ported:
+            say("→", f"{len(collided)} collided file(s) — the real run would advance past them, keeping yours")
+            for rel in collided:
+                item(rel)
         elif collided:
             say("❌", f"{len(collided)} file(s) you already had where the template now ships one")
             for rel in collided:
@@ -5186,15 +5308,23 @@ def main() -> int:
             # So the predicate stays — tightening it would miss real adoptions and
             # fail in the reassuring direction, since fewer rows read as nothing
             # to re-ask — and the claim shrinks to the one that is always true.
+            #
+            # **Every list above, by predicate, and each row says which** (Dream Doll).
+            # A decided file is the one most worth re-asking about, and "these" sat
+            # under two lists while counting four. Whatever this run did to a file —
+            # conflict, clean merge, nothing — it is in by the predicate alone.
             overlap = [rel for rel in diverged if rel in head_files and sha256(head_files[rel]) != hashes.get(rel)]
             if overlap:
+                part_of = {rel: "decided" for rel in divergence["decided"]}
+                part_of.update({rel: name for name in ("state", "appended", "undecided") for rel in divergence[name]})
+                label = {"decided": "decided", "state": "state", "appended": "appended", "undecided": "edited"}
                 detail()
-                detail(f"{len(overlap)} of these the template also changed in this release. That is an")
-                detail("overlap, not a verdict: it cannot tell a change we made BECAUSE of your")
-                detail("divergence from one that merely landed in the same file. Re-read the merge")
-                detail("in each and decide whether you still need yours:")
+                detail(f"{len(overlap)} of the files listed above (edited, decided, state or appended) the")
+                detail("template also changed since your base. That is an overlap, not a verdict: it")
+                detail("cannot tell a change we made BECAUSE of your divergence from one that merely")
+                detail("landed in the same file. Compare each and decide whether you still need yours:")
                 for rel in overlap:
-                    item(rel)
+                    item(f"{rel}  ({label[part_of.get(rel, 'undecided')]})  →  --show {rel}")
 
         # After the two blocks that name files needing a decision, because this
         # is about those files — and before `dropped`, which is unrelated.
@@ -5476,9 +5606,14 @@ def main() -> int:
                     detail(f"{MANIFEST_NAME} records {ref}; --ref would record {head_ref} instead.")
                     detail("Nothing else is being carried over — the two renders are identical, so")
                     detail("this is a relabel of the record and not a change to your files.")
+                    if version_badge_moves(target, head_tree):
+                        say(
+                            "🏷️ ",
+                            f"{VERSION_BADGE} would follow the record to {head_ref}, the one file a relabel writes",
+                        )
                 else:
                     shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
-                    refresh_version_badge(target, head_tree)
+                    refresh_version_badge(target, head_tree, head_ref)
                     record_owned(target, sorted(owned & set(head_files)))
                     say("📌", f"{MANIFEST_NAME}: {ref} → {head_ref}")
                     detail("The two renders are identical, so only the recorded ref moved. Your")
@@ -5550,7 +5685,7 @@ def main() -> int:
         # is the success it exists for; exiting 1 there reported the port as a
         # failure to every caller that reads a status. mind.head saw it: a run that
         # did record the value, and exited 1.
-        return 1 if (conflicted or collided) and not advanced else 0
+        return 1 if (conflicted or collided) and not (advanced or (args.dry_run and args.ported)) else 0
     finally:
         # Directory first, registration second, twice forced: a worktree git left locked or without
         # `.git` (a pre-fix run's, or a SIGKILL's) still loses its registration once the directory is gone.

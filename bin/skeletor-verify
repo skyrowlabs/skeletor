@@ -5910,6 +5910,62 @@ def lint_forecast_gate(tier: str, workdir: Path, venv_python: Path) -> List[Resu
                 ),
             )
         )
+
+    # **Imports, forecast beside lint** (mind.head): the render of a shell module
+    # imports click, and the disk it replaces imports a name nothing ships plus os.
+    # Gained is click; lost is the planted name; the stdlib and the tree's own are neither.
+    started = time.time()
+    shell = next(
+        (
+            rel
+            for rel in sorted(manifest["files"])
+            if rel.endswith(".py")
+            and "/" in rel
+            and re.search(r"^import click$", (tree / rel).read_text(encoding="utf-8"), re.MULTILINE)
+            and re.search(r"^from (scripts|\.)", (tree / rel).read_text(encoding="utf-8"), re.MULTILINE)
+        ),
+        None,
+    )
+    if shell is None:
+        results.append(
+            Result("imports forecast: the fixture has a module importing click and its own code", False, 0.0, "")
+        )
+        return results
+    shipped_shell = (tree / shell).read_text(encoding="utf-8")
+    disk = "import os\nimport probe_dependency_lost\n"
+    record = json.loads(pristine)
+    record["files"][shell] = hashlib.sha256(disk.encode("utf-8")).hexdigest()
+    try:
+        (tree / shell).write_text(disk, encoding="utf-8")
+        manifest_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        done = subprocess.run(
+            [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), "--no-base", "--dry-run", "--json"],
+            cwd=tree,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+    finally:
+        (tree / shell).write_text(shipped_shell, encoding="utf-8")
+        manifest_path.write_text(pristine, encoding="utf-8")
+    try:
+        payload = json.JSONDecoder().raw_decode(done.stdout[done.stdout.index("{") :])[0]
+    except ValueError:
+        payload = {}
+    change = payload.get("imports_changed", {}).get(shell, {})
+    results.append(
+        Result(
+            "imports forecast: a dry run names third-party imports gained and lost, and no stdlib or own module",
+            "click" in change.get("gained", [])
+            and change.get("lost") == ["probe_dependency_lost"]
+            and not {"os", "scripts", "cli", "sys", "pathlib"} & set(change.get("gained", []))
+            and f"{shell}: " in done.stderr
+            and "+click" in done.stderr
+            and "-probe_dependency_lost" in done.stderr,
+            time.time() - started,
+            f"{shell}: {change}\n{done.stderr[-1200:]}",
+        )
+    )
     return results
 
 
@@ -7248,15 +7304,39 @@ def version_badge_gate(workdir: Path) -> List[Result]:
     identity = ["-c", "user.name=grid", "-c", "user.email=grid@example.invalid"]
     run(["git", *identity, "-C", str(clone), "commit", "-q", "--allow-empty", "-m", "chore: past"], cwd=clone)
     run(["git", *identity, "-C", str(clone), "tag", "-a", "v99.0.0", "-m", "probe"], cwd=clone)
+
+    def plan(name: str, tag: str) -> str:
+        tree = clone.parent / name
+        return run(
+            [sys.executable, str(clone / "bin" / "skeletor-upgrade"), str(tree), "--ref", tag, "--dry-run"], cwd=tree
+        )[1]
+
+    # A dry run lists the badge the real run would write (proto.pilot, mind.head), on
+    # both advancing paths: the relabel, where the renders agree, and an applying run.
+    relabel = {name: plan(name, "v99.0.0") for name in trees}
+    rule = clone / "template" / "core" / "docs" / "rules" / "commits.md"
+    assert rule.is_file(), f"the plant did not land: no {rule}"
+    rule.write_text(rule.read_text(encoding="utf-8") + "\nA probe line.\n", encoding="utf-8")
+    run(["git", *identity, "-C", str(clone), "commit", "-qam", "chore: move a rule"], cwd=clone)
+    run(["git", *identity, "-C", str(clone), "tag", "-a", "v99.0.1", "-m", "probe"], cwd=clone)
+    applying = {name: plan(name, "v99.0.1") for name in trees}
+    unwritten = badge.read_text() == "stale\n"
     outputs = []
     for name in trees:
         tree = clone.parent / name
-        upgrade = [sys.executable, str(clone / "bin" / "skeletor-upgrade"), str(tree), "--ref", "v99.0.0"]
+        upgrade = [sys.executable, str(clone / "bin" / "skeletor-upgrade"), str(tree), "--ref", "v99.0.1"]
         outputs.append(run(upgrade, cwd=tree)[1])
+    needle = "docs/assets/skeletor-version.svg would follow the"
     return [
         Result(
-            "version badge: an advancing upgrade rewrites it",
-            "skeletor: v99.0.0" in badge.read_text(),
+            "version badge: a dry run lists the badge it would write, and writes none",
+            unwritten and all(needle in said["shown"] and needle not in said["bare"] for said in (relabel, applying)),
+            time.time() - started,
+            f"relabel:\n{relabel['shown'][-500:]}\napplying:\n{applying['shown'][-500:]}",
+        ),
+        Result(
+            "version badge: an advancing upgrade rewrites it, and says so",
+            "skeletor: v99.0.1" in badge.read_text() and "skeletor-version.svg follows the base" in outputs[0],
             time.time() - started,
             outputs[0],
         ),
@@ -7340,9 +7420,13 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
     #
     # `assert_advice` is the positive half and is what keeps the negatives
     # honest — it fails if the block did not run at all.
+    # `GIT_ALLOW_PROTOCOL=file`: the shared clone's origin is this checkout, whose own
+    # origin is a real remote. The tool follows that one hop, and this run must not
+    # reach the network, so the hop fails fast and the answer stays unknown.
     _, output = run(
         [sys.executable, str(clean / "bin" / "skeletor-upgrade"), str(target), "--ref", tag],
         cwd=target,
+        env_extra={"GIT_ALLOW_PROTOCOL": "file"},
     )
 
     problems = []
@@ -7423,7 +7507,8 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
 
     # **Pushed is answered where `origin` is a remote** — four of six trees asked
     # it by hand each round. A `file://` bare repository is a remote to the tool and
-    # needs no network; the shared clone's origin is a local path, which is not asked.
+    # needs no network. A local-path origin is followed one hop to its own origin
+    # (node.zero), and no further.
     started = time.time()
     remote_problems = []
     if "cannot be determined" not in output:
@@ -7437,12 +7522,28 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
     git_in(asker, "remote", "set-url", "origin", bare.resolve().as_uri())
     # `--allow-dirty`: the run above applied the pinned render and left it uncommitted.
     upgrade = [sys.executable, str(asker / "bin" / "skeletor-upgrade"), str(target), "--ref", tag, "--allow-dirty"]
+    uri = bare.resolve().as_uri()
     _, held = run(upgrade, cwd=target)
-    if f"{tag} is on origin at the commit rendered" not in held:
+    if f"{tag} is on {uri} at the commit rendered" not in held:
         remote_problems.append(f"origin holds {tag} and the run did not say so:\n{held[-600:]}")
+    # One hop: a clone of `asker` has a local-path origin whose own origin is the
+    # remote, so the remote answers and the run names it. Two hops is not followed.
+    hopper, hopper2 = workdir / "pinned-ref" / "hopper", workdir / "pinned-ref" / "hopper2"
+    for path in (hopper, hopper2):
+        if path.exists():
+            shutil.rmtree(path)
+    run(["git", "clone", "--quiet", "--no-hardlinks", str(asker), str(hopper)], cwd=workdir)
+    run(["git", "clone", "--quiet", "--no-hardlinks", str(hopper), str(hopper2)], cwd=workdir)
+    hop_argv = [str(target), "--ref", tag, "--allow-dirty"]
+    _, hopped = run([sys.executable, str(hopper / "bin" / "skeletor-upgrade"), *hop_argv], cwd=target)
+    if f"{tag} is on {uri} at the commit rendered" not in hopped or f"asked its origin, {uri}" not in hopped:
+        remote_problems.append(f"a local origin one hop from the remote was not followed to it:\n{hopped[-600:]}")
+    _, stopped = run([sys.executable, str(hopper2 / "bin" / "skeletor-upgrade"), *hop_argv], cwd=target)
+    if "cannot be determined" not in stopped or uri in stopped:
+        remote_problems.append(f"a local origin two hops from the remote was followed past one:\n{stopped[-600:]}")
     git_in(bare, "tag", "-d", tag)
     _, missing = run(upgrade, cwd=target)
-    if f"{tag} is not on origin" not in missing:
+    if f"{tag} is not on {uri}" not in missing:
         remote_problems.append(f"origin lacks {tag} and the run did not say so:\n{missing[-600:]}")
     # A tag moved on origin is not fixed by pushing, which origin refuses (mind.head).
     parent = git_in(asker, "rev-parse", f"{tag}^{{commit}}^")[1].strip()
@@ -7456,7 +7557,7 @@ def pinned_ref_gate(workdir: Path) -> List[Result]:
         remote_problems.append(f"a moved tag was answered with a push, not a fetch:\n{block}")
     results.append(
         Result(
-            f"pinned ref: whether {tag} is on a remote origin is answered, all three ways",
+            f"pinned ref: whether {tag} is on a remote origin is answered, all three ways, one hop and no further",
             not remote_problems,
             time.time() - started,
             "\n".join(remote_problems),
@@ -8161,6 +8262,10 @@ def ported_path_gate(tier: str, workdir: Path) -> List[Result]:
         return code, output, upgrade.envelope_of(output[output.rfind("\n{") + 1 :])
 
     mixed, refused, _ = apply("--ported", "--ported-path", first)
+    # Dry runs first, since the last real run below advances. Naming both says the
+    # real run would advance; naming one is the control, still a conflict left alone.
+    dry_code, dry_whole, _ = apply("--dry-run", "--ported-path", first, "--ported-path", second)
+    dry_held_code, dry_partial, _ = apply("--dry-run", "--ported-path", first)
     _, partial, held = apply("--ported-path", first)
     _, whole, moved = apply("--ported-path", first, "--ported-path", f"./{second}", "--ported-path", "docs/typo.md")
     return [
@@ -8169,6 +8274,16 @@ def ported_path_gate(tier: str, workdir: Path) -> List[Result]:
             mixed != 0 and "pick one" in refused,
             0.0,
             refused[-600:],
+        ),
+        Result(
+            "ported path: a dry run naming every pending file says the real run would advance",
+            dry_code == 0
+            and "would advance past this conflict" in dry_whole
+            and "LEFT ALONE" not in dry_whole
+            and dry_held_code == 1
+            and "LEFT ALONE" in dry_partial,
+            time.time() - started,
+            f"named both (exit {dry_code}):\n{dry_whole[-900:]}\nnamed one (exit {dry_held_code}):\n{dry_partial[-600:]}",
         ),
         Result(
             "ported path: an unnamed pending file holds the base and is named",
@@ -11424,6 +11539,13 @@ def divergence_record_gate(workdir: Path, venv_python: Path) -> List[Result]:
         problems.append(f"undecided is {parts.get('undecided')}: a file in `extra-files` is not state")
     if "2 file(s) skeletor wrote and you have edited" not in text:
         problems.append("the headline does not count undecided alone")
+    # The overlap names its list and each row's own --show, decided rows included by
+    # predicate (Dream Doll): the two decided files the template moved, and not the third.
+    rows = re.findall(r"^\s*· (\S+)  \((\w+)\)  →  --show (\S+)$", text, re.M)
+    if "of the files listed above (edited, decided, state or appended)" not in text:
+        problems.append("the overlap's count does not name the lists it counts")
+    if sorted(rows) != sorted((rel, "decided", rel) for rel in (conflict, merges)):
+        problems.append(f"the overlap rows are {rows}: want {conflict} and {merges}, decided, each with --show")
     if record_rel in dry.get("diverged", []):
         problems.append(f"{record_rel} holds entries between its rules and is on the standing list")
     # An anchored report is state, and regular/'s README is not: `release_window`'s own rule.
