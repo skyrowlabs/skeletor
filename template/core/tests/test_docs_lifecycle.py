@@ -198,7 +198,7 @@ def test_filing_refuses_a_plan_with_open_tasks(tree):
 
 def test_a_plan_dropped_unbuilt_is_filed_with_its_tasks_and_claims_no_completion(tree):
     """proto.pilot filed two such plans with `--force`, and the archive called them completed."""
-    from datetime import date
+    import re
 
     plan = tree / "docs" / "TODO" / "widget-cache.md"
     plan.write_text(PLAN.replace("- [x] Add the cache", "- [ ] Add the cache"), encoding="utf-8")
@@ -208,9 +208,11 @@ def test_a_plan_dropped_unbuilt_is_filed_with_its_tasks_and_claims_no_completion
 
     result = run(tree, "docs", "file", "widget-cache", "--category", "backend", "--dropped", "the list moved")
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
-    today = date.today().isoformat()
     filed = (tree / "docs" / "implementations" / "backend" / "widget-cache.md").read_text(encoding="utf-8")
-    assert f"dropped: {today}" in filed and "completed:" not in filed, filed
+    # Read back, not today's: `test clock-ahead` shifts this process and not the filing's.
+    stamped = re.search(r"^dropped: (\d{4}-\d{2}-\d{2})$", filed, re.MULTILINE)
+    assert stamped and "completed:" not in filed, filed
+    today = stamped.group(1)
     assert f"> **Status**: Dropped {today} — the list moved" in filed and "🟢 Ready" not in filed, filed
     assert "- [ ] Add the cache" in filed, "the task nobody will do was ticked or removed"
     [entry] = index(tree, "implementation_index.json")["implementations"]
