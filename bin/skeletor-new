@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import keyword
+import os
 import re
 import shutil
 import subprocess
@@ -25,6 +26,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -1107,7 +1109,10 @@ def build_parser() -> argparse.ArgumentParser:
             "skeletor-upgrade --set-arg --visibility=public"
         ),
     )
-    parser.add_argument("--timezone", default="UTC", help="the timezone the crontab fires in (agentic tier)")
+    parser.add_argument(
+        "--timezone",
+        help="the timezone the crontab fires in (agentic tier); default: this host's, from /etc/localtime, else UTC",
+    )
     # Not the flag to reach for when scaffolding into a repository that already
     # exists: the guard below already skips a tree with a `.git`, so `--no-git`
     # is a no-op there and only bites in the case it looks safest in — an empty
@@ -1490,7 +1495,28 @@ def resolve(args):
     caller's business.
     """
     args.python_ceiling = args.python_ceiling or args.python
+    args.timezone = args.timezone or host_zone()
     return args
+
+
+#: What ZoneInfo raises for a name it cannot load; named, as black spells a bare tuple per target.
+_NOT_A_ZONE = (ValueError, ZoneInfoNotFoundError)
+
+
+def host_zone(localtime: Path = Path("/etc/localtime")) -> str:
+    """The IANA zone `/etc/localtime` names, which is the zone cron fires in; UTC when it names none.
+
+    The record holds the value, so an upgrade renders from it on any host.
+    """
+    parts = Path(os.path.realpath(localtime)).parts
+    if "zoneinfo" not in parts:
+        return "UTC"
+    name = "/".join(parts[len(parts) - parts[::-1].index("zoneinfo") :])
+    try:
+        ZoneInfo(name)
+    except _NOT_A_ZONE:
+        return "UTC"
+    return name
 
 
 def main() -> int:

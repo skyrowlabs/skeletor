@@ -33,6 +33,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -244,6 +245,9 @@ def scaffold(tier: str, language: str, workdir: Path, name: Optional[str] = None
             language,
             "--tagline",
             "a scaffold under test",
+            # The default is the host's zone, so a runner (UTC) and a desk would render apart.
+            "--timezone",
+            "UTC",
             "--force",
         ],
         cwd=SKELETOR,
@@ -12756,7 +12760,7 @@ def new_flag_gate(workdir: Path) -> List[Result]:
     results.append(
         Result(
             "new flag: a defaulted flag the record lacks is announced",
-            code == 0 and "📌 new flag --timezone=UTC" in output,
+            code == 0 and f"📌 new flag --timezone={load_scaffolder().host_zone()}" in output,
             time.time() - started,
             output,
         )
@@ -12779,6 +12783,67 @@ def new_flag_gate(workdir: Path) -> List[Result]:
             code != 0 and "does not ship it either" in output,
             time.time() - started,
             output,
+        )
+    )
+    return results
+
+
+def timezone_gate(workdir: Path, venv_python: Path) -> List[Result]:
+    """`--timezone` defaults to the zone `/etc/localtime` names, recorded; the cron hint's command runs.
+
+    breeze-brain: the hint pointed at SCHEDULE_TZ, a rendered value whose edit conflicts every upgrade.
+    """
+    started = time.time()
+    scaffolder = load_scaffolder()
+    links = workdir / "localtimes"
+    links.mkdir()
+    cases = {"Europe/Paris": "Europe/Paris", "Not/AZone": "UTC"}
+    for name in cases:
+        (links / name.replace("/", "-")).symlink_to(Path("/usr/share/zoneinfo") / name)
+    (links / "copied").write_bytes(b"TZif")
+    read = {name: scaffolder.host_zone(links / name.replace("/", "-")) for name in cases}
+    read["copied"] = scaffolder.host_zone(links / "copied")
+    results = [
+        Result(
+            "timezone: the default is the zone /etc/localtime names, else UTC",
+            read == {**cases, "copied": "UTC"},
+            time.time() - started,
+            str(read),
+        )
+    ]
+    started = time.time()
+    unpinned = workdir / "tz-default"
+    code, output = run(
+        [sys.executable, str(SCAFFOLDER), str(unpinned), "--allow-dirty", "--name", "Probe", "--cli", CLI_NAME]
+        + ["--tier", "core", "--tagline", "a scaffold under test", "--force"],
+        cwd=SKELETOR,
+    )
+    recorded = json.loads((unpinned / ".skeletor.json").read_text(encoding="utf-8"))["args"] if code == 0 else []
+    zone = scaffolder.host_zone()
+    results.append(
+        Result(
+            f"timezone: an unpinned scaffold records the host's zone ({zone}) in its args",
+            "--timezone" in recorded and recorded[recorded.index("--timezone") + 1] == zone,
+            time.time() - started,
+            output + f"\nrecorded: {recorded}",
+        )
+    )
+    started = time.time()
+    result, tree = scaffold("agentic", "python", workdir, name="tz-hint")
+    if not result.ok:
+        return results + [Result(f"timezone: {result.label}", False, result.seconds, result.output)]
+    probe = "from scripts.reporting.jobs import zone_command; print(zone_command('America/Chicago'))"
+    code, printed = run([str(venv_python), "-c", probe], cwd=tree)
+    argv = shlex.split(printed.strip().splitlines()[-1]) if code == 0 and printed.strip() else []
+    shaped = argv[:2] == ["skeletor-upgrade", "."]
+    upgrade = [sys.executable, str(SKELETOR / "bin" / "skeletor-upgrade"), str(tree), *argv[2:]]
+    code, output = run(upgrade + ["--from-dir", str(SKELETOR)], cwd=tree) if shaped else (1, "")
+    results.append(
+        Result(
+            "timezone: the cron hint's command parses and moves the recorded zone",
+            shaped and code == 0 and "'UTC' → 'America/Chicago'" in output and "--dry-run" in argv,
+            time.time() - started,
+            f"printed: {printed}\n{output}",
         )
     )
     return results
@@ -15775,6 +15840,7 @@ def main() -> int:
         step(lambda: shadow_gate(workdir, venv_python))
         step(lambda: dirty_scope_gate(workdir))
         step(lambda: new_flag_gate(workdir))
+        step(lambda: timezone_gate(workdir, venv_python))
         step(lambda: coverage_gate(workdir, venv_python))
 
         # The fullest tier, not the alphabetically last one — sorted(TIERS)
