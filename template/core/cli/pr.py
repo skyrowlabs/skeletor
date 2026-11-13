@@ -30,7 +30,7 @@ from scripts.output import EXIT_RED, EXIT_REFUSED
 from .check import pre_push
 from .helpers import PROJECT_ROOT, detail, die, fail, item, line, ok, step
 
-SMOKE_EXECUTES = "pushes this branch and opens a pull request on the real account — a test must not reach it"
+SMOKE_EXECUTES = True
 
 BASE_BRANCH = "{{BASE_BRANCH}}"
 RELEASE_BRANCH = "{{RELEASE_BRANCH}}"
@@ -148,57 +148,32 @@ def open_pull(branch: str, base: str) -> tuple[str, str]:
     return number, pull.get("url") or f"#{number}"
 
 
-@click.group()
-def pr() -> None:
-    """Land a branch through a pull request."""
+def red(headline: str, names: list[str]) -> None:
+    """`fail` with one item per name, then stop red."""
+    fail(headline)
+    for name in names:
+        item(name)
+    raise SystemExit(EXIT_RED)
 
 
-@pr.command()
-@click.option("--base", default=BASE_BRANCH, show_default=True, help="the branch the pull request merges into")
-@click.option("--merge", "merging", is_flag=True, help="merge once it is ready, then watch the base branch's push runs")
-@click.option("--timeout", default=45, show_default=True, help="minutes to wait for each set of checks")
-@click.pass_context
-def land(ctx: click.Context, base: str, merging: bool, timeout: int) -> None:
-    """Gate, push, open the pull request, wait for its checks, and print the pinned merge."""
+def gate(ctx: click.Context, base: str) -> str:
+    """The branch to land, once it is a topic branch, clean, and green under `check pre-push`."""
     branch = run("git", "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     if branch in ("HEAD", "", base, RELEASE_BRANCH):
         die(f"on {branch or 'no branch'}: land a topic branch, not {base} or {RELEASE_BRANCH}", EXIT_REFUSED)
     if run("git", "status", "--porcelain").stdout.strip():
         die("the working tree has changes: pre-push checks the tree and a push sends commits", EXIT_REFUSED)
-
     step("check pre-push")
     try:
         ctx.invoke(pre_push, quick=False)
     except SystemExit as stop:
         if stop.code:
             die("check pre-push is red, so nothing was pushed", EXIT_RED)
-    sha = run("git", "rev-parse", "HEAD").stdout.strip()
-    pushed = run("git", "push", "-u", "origin", branch)
-    if pushed.returncode != 0:
-        die(f"git push refused: {pushed.stderr.strip()[-300:]}")
-    number, url = open_pull(branch, base)
-    step(f"{url}: waiting for its checks on {sha[:12]}")
+    return branch
 
-    pull, why = read_pull(number, sha, timeout * 60)
-    if pull is None:
-        die(f"#{number} is not ready after {timeout} minutes: {why}")
-    broken = failed(pull.get("statusCheckRollup") or [])
-    if broken:
-        fail(f"#{number}: {len(broken)} check(s) on {sha[:12]} did not pass")
-        for name in broken:
-            item(name)
-        raise SystemExit(EXIT_RED)
-    state = pull["mergeStateStatus"]
-    if state in STUCK:
-        die(f"#{number} cannot merge: {STUCK[state]} ({state})")
 
-    command = f"gh pr merge {number} --merge --match-head-commit {sha}"
-    if not merging:
-        ok(f"#{number} is ready to merge: every check on {sha[:12]} passed and GitHub reads it {state}")
-        detail("Merge it pinned to the commit that was checked, or rerun with --merge:")
-        line(command)
-        return
-
+def merge_and_watch(number: str, command: str, base: str, timeout: int) -> None:
+    """Run the pinned merge, then wait for the base branch's push runs on the merge commit."""
     merged = run(*command.split())
     if merged.returncode != 0:
         die(f"{command} failed: {merged.stderr.strip()[-300:]}")
@@ -212,8 +187,44 @@ def land(ctx: click.Context, base: str, merging: bool, timeout: int) -> None:
         die(f"#{number} is merged and {why}")
     broken = failed(runs)
     if broken:
-        fail(f"#{number} is merged and {len(broken)} push run(s) on {merge_sha[:12]} did not pass")
-        for name in broken:
-            item(name)
-        raise SystemExit(EXIT_RED)
+        red(f"#{number} is merged and {len(broken)} push run(s) on {merge_sha[:12]} did not pass", broken)
     ok(f"#{number} merged as {merge_sha}, and {len(runs)} push run(s) on it passed")
+
+
+@click.group()
+def pr() -> None:
+    """Land a branch through a pull request."""
+
+
+@pr.command()
+@click.option("--base", default=BASE_BRANCH, show_default=True, help="the branch the pull request merges into")
+@click.option("--merge", "merging", is_flag=True, help="merge once it is ready, then watch the base branch's push runs")
+@click.option("--timeout", default=45, show_default=True, help="minutes to wait for each set of checks")
+@click.pass_context
+def land(ctx: click.Context, base: str, merging: bool, timeout: int) -> None:
+    """Gate, push, open the pull request, wait for its checks, and print the pinned merge."""
+    branch = gate(ctx, base)
+    sha = run("git", "rev-parse", "HEAD").stdout.strip()
+    pushed = run("git", "push", "-u", "origin", branch)
+    if pushed.returncode != 0:
+        die(f"git push refused: {pushed.stderr.strip()[-300:]}")
+    number, url = open_pull(branch, base)
+    step(f"{url}: waiting for its checks on {sha[:12]}")
+
+    pull, why = read_pull(number, sha, timeout * 60)
+    if pull is None:
+        die(f"#{number} is not ready after {timeout} minutes: {why}")
+    broken = failed(pull.get("statusCheckRollup") or [])
+    if broken:
+        red(f"#{number}: {len(broken)} check(s) on {sha[:12]} did not pass", broken)
+    state = pull["mergeStateStatus"]
+    if state in STUCK:
+        die(f"#{number} cannot merge: {STUCK[state]} ({state})")
+
+    command = f"gh pr merge {number} --merge --match-head-commit {sha}"
+    if merging:
+        merge_and_watch(number, command, base, timeout)
+        return
+    ok(f"#{number} is ready to merge: every check on {sha[:12]} passed and GitHub reads it {state}")
+    detail("Merge it pinned to the commit that was checked, or rerun with --merge:")
+    line(command)
