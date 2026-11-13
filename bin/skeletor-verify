@@ -12127,7 +12127,29 @@ def adoption_hint_gate(workdir: Path) -> Result:
     ran = subprocess.run(upgrade, cwd=tree, capture_output=True, text=True, env=subprocess_env(None))
     if (json.loads(ran.stdout) if ran.stdout.startswith("{") else {}).get("adoption_hints") != []:
         problems.append("a hint printed with nothing of the tree's to point at")
+    problems += merged_line_hints(workdir / "adoption-hint" / "merged")
     return Result("adoption hint: a test name, never a verdict", not problems, time.time() - started, str(problems))
+
+
+def merged_line_hints(root: Path) -> List[str]:
+    """A test the head render merged into a diverged file is the template's; the tree's own line is still hinted."""
+    upgrade = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade")
+    rel = "tests/test_merged.py"
+    base, head = "def test_old():\n    pass\n", "def test_old():\n    pass\n\n\ndef test_new():\n    pass\n"
+    files = {}
+    for side, text in (("base", base), ("head", head), ("tree", head)):
+        (root / side / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / side / rel).write_text(text, encoding="utf-8")
+        files[side] = {rel: root / side / rel}
+    problems = []
+    hints = upgrade.adoption_hints(root / "tree", [], [rel], files["base"], files["head"], {})
+    if hints:
+        problems.append(f"a line the head render merged in was hinted as the tree's: {hints}")
+    (root / "tree" / rel).write_text(head + "\n\nassert test_new  # the tree's own line\n", encoding="utf-8")
+    hints = upgrade.adoption_hints(root / "tree", [], [rel], files["base"], files["head"], {})
+    if [hint["name"] for hint in hints] != ["test_new"]:
+        problems.append(f"the tree's own line naming a template test was not hinted: {hints}")
+    return problems
 
 
 def seam_record_scope_gate(workdir: Path) -> Result:

@@ -1270,8 +1270,9 @@ def adoption_hints(
 
     A hint and never a verdict: it asks whether the template now carries what the
     tree holds, and a shared name proves neither that nor a rename it cannot see.
-    Added lines are a diverged file's lines its base lacks, and all of a file skeletor
-    did not write.
+    Added lines are a diverged file's lines that neither render of it holds, and all
+    of a file skeletor did not write: a line the head render has is the template's,
+    merged in by this run or carried by both (proto.pilot, round v0.85.0).
     """
     names: Dict[str, str] = {}
     for rel in sorted({*declined, *diverged}):
@@ -1284,7 +1285,7 @@ def adoption_hints(
     hits = []
     for rel in [*(r for r in diverged if r.endswith(".py")), *own]:
         mine = read(target / rel) if (target / rel).is_file() else None
-        kept = set((read(base_files.get(rel)) or "").splitlines())
+        kept = {line for files in (base_files, head_files) for line in (read(files.get(rel)) or "").splitlines()}
         added = [line for line in (mine or "").splitlines() if line not in kept]
         found = {token for line in added for token in TEST_NAME.findall(line)}
         hits += [
