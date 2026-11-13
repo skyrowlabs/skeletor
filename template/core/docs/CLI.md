@@ -19,6 +19,7 @@ and the second person to need it writes it again.
 | `{{CLI}} doctor` | Account facts no file can state (release PRs, required checks) |
 | `{{CLI}} settings` | Set GitHub settings to `scripts/repo_settings.py`; previews unless `--apply` |
 | `{{CLI}} inbox`  | Every open capture per lane, every job at its cap, and every Dependabot PR waiting on a person |
+| `{{CLI}} pr`     | Land a branch: `check pre-push`, push, pull request, its checks, then the pinned merge command |
 
 Run `./{{CLI}} <group> --help` for the current commands — the help is generated
 from the code, so it cannot go stale the way this table can.
