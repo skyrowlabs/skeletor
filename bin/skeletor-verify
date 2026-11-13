@@ -8185,10 +8185,16 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
                 "\n".join(problems) or f"tried: {'; '.join(attempts)}",
             ),
             Result(
-                "pending ref: --ported-path naming a correctly ported file advances and says it left pending",
-                named_ref != before and f"--ported-path {rel}: not pending" in named,
+                "pending ref: --ported-path naming a correctly ported file advances and says the port is in",
+                named_ref != before and f"--ported-path {rel}: not pending, because it already carries" in named,
                 0.0,
                 f"ref {before} → {named_ref}\n{named[-1500:]}",
+            ),
+            Result(
+                "pending ref: a held-back run prints the --ported-path re-run that advances it",
+                "Once they are ported" in first and f"--ported-path {rel}" in first,
+                0.0,
+                first[-1500:],
             ),
             Result(
                 "pending ref: a re-run with nothing to do leaves the finished report alone",

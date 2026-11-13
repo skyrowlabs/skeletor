@@ -84,6 +84,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -91,7 +92,7 @@ import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
-from typing import Any, Callable, Dict, FrozenSet, Iterator, List, NoReturn, Optional, Set, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterator, List, NoReturn, Optional, Sequence, Set, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -595,15 +596,24 @@ def refuse_a_dirty_base(base: Path, writing: str, role: str) -> None:
     raise SystemExit(1)
 
 
-def ported_paths_cover(named: List[str], pending: List[str]) -> bool:
+def ported_paths_cover(named: List[str], pending: List[str], carried: Sequence[str] = ()) -> bool:
     """Whether `--ported-path` named every pending file, saying what it did not match.
 
-    A named path that is not pending is printed and never refused: a correct port
-    leaves pending by being carried, and a typo looks the same from here.
+    A named path that is not pending is printed and never refused. A correct port
+    leaves pending by being carried, and that is said as such: "names nothing"
+    read as "drop the flag", and the run without it is refused on the tree the
+    held-back run left dirty (stash.flow). Anything else may be a typo.
     """
     paths = {Path(rel).as_posix() for rel in named}
+    ported = sorted(paths & set(carried))
     for rel in sorted(paths - set(pending)):
-        say("ℹ️ ", f"--ported-path {rel}: not pending, so this names nothing to advance past")
+        if rel in ported:
+            say("ℹ️ ", f"--ported-path {rel}: not pending, because it already carries the change: your port is in")
+        else:
+            say("ℹ️ ", f"--ported-path {rel}: not pending, so this names nothing to advance past")
+    if ported:
+        detail("Keep the flag on the real run: it is what lets that run advance the base on a tree")
+        detail("still dirty from the run that left the conflict. Without it the run is refused.")
     unnamed = sorted(set(pending) - paths)
     if unnamed:
         say("⏸️ ", f"--ported-path named {len(paths)} file(s) and left {len(unnamed)} pending unnamed:")
@@ -4392,7 +4402,7 @@ def main() -> int:
         # The generated docs are rebuilt, never merged.
         pending = conflicted + collided
         if args.ported_path:
-            args.ported = ported_paths_cover(args.ported_path, pending)
+            args.ported = ported_paths_cover(args.ported_path, pending, carried)
         # **The move goes with the record, or not at all.** v0.37.0 moved the wrapper
         # inside the loop, on every run; a conflict elsewhere then held the record
         # back, leaving a tree rendered under the new name whose record named the
@@ -5071,6 +5081,11 @@ def main() -> int:
                 # reports its conflicts as recorded, above, and writes no sidecar.
                 detail("Port them before then, or re-run to regenerate them. The base stays")
                 detail("where it is until they are gone, so nothing expires while you decide.")
+                # The command, not a description of it: a run without the flag is refused on
+                # the tree this run leaves dirty, and that was the route stash.flow reached for.
+                detail("Once they are ported, this records it and advances the base, dirty tree and all:")
+                named = " ".join(f"--ported-path {shlex.quote(rel)}" for rel in pending)
+                detail(f"  skeletor-upgrade {shlex.quote(args.target)} --ref {head_ref} {named}")
 
         if args.normalise and normaliser.bound:
             # Said even when nothing changed: a flag that bound and one that did
