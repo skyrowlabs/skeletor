@@ -10814,7 +10814,36 @@ def moved_symbol_gate(workdir: Path) -> List[Result]:
             ),
         )
     )
+    problems = reexported_symbol(workdir / "moved-symbol-reexport")
+    results.append(Result("moved symbol: a name the head re-exports is not dangling", not problems, 0.0, str(problems)))
     return results
+
+
+def reexported_symbol(root: Path) -> List[str]:
+    """A symbol moved to B and re-exported from A is quiet; drop the re-export and the importer dangles."""
+    upgrade = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "skeletor_upgrade")
+    moved = "def changelogs():\n    return []\n"
+    sides = {
+        "base": {"tests/repo_files.py": moved, "scripts/paths.py": "ROOT = 1\n"},
+        "head": {"tests/repo_files.py": "from scripts.paths import changelogs\n", "scripts/paths.py": moved},
+    }
+    sides["tree"] = {**sides["head"], "tests/test_naming.py": "from tests.repo_files import changelogs\n"}
+    files: Dict[str, Dict[str, Path]] = {}
+    for side, texts in sides.items():
+        files[side] = {}
+        for rel, text in texts.items():
+            (root / side / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / side / rel).write_text(text, encoding="utf-8")
+            files[side][rel] = root / side / rel
+    problems = []
+    _, dangling = upgrade.stale_against_head([], [], files["base"], files["head"], root / "tree")
+    if dangling:
+        problems.append(f"a re-exported name was reported dangling: {dangling}")
+    files["head"]["tests/repo_files.py"].write_text("ROOT = 2\n", encoding="utf-8")
+    _, dangling = upgrade.stale_against_head([], [], files["base"], files["head"], root / "tree")
+    if "tests/test_naming.py" not in dangling:
+        problems.append(f"with the re-export gone the importer was not dangling: {dangling}")
+    return problems
 
 
 def ported_only_conflict_gate(workdir: Path) -> List[Result]:

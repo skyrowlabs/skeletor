@@ -1423,6 +1423,30 @@ def top_level(path: Optional[Path]) -> Dict[str, str]:
     return out
 
 
+def bound_names(path: Optional[Path]) -> Set[str]:
+    """Every name a python file binds at module level: `top_level`'s, plus what it imports.
+
+    An import binds a name an importer can reach, so a definition the template
+    moved to B and re-exports from A is still importable from A. `top_level`
+    alone read that as removed, and v0.86.0's `changelogs`, moved to
+    `scripts/paths.py` and re-exported from `tests/repo_files.py`, was reported
+    dangling in every tree importing it from there.
+    """
+    names = set(top_level(path))
+    if path is None or not path.exists():
+        return names
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (SyntaxError, OSError, UnicodeDecodeError):
+        return names
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            names |= {alias.asname or alias.name for alias in node.names if alias.name != "*"}
+        elif isinstance(node, ast.Import):
+            names |= {alias.asname or alias.name.split(".")[0] for alias in node.names}
+    return names
+
+
 def import_spellings(rel: str) -> List[str]:
     """Every dotted name a repo-relative python path can be imported as.
 
@@ -1625,7 +1649,7 @@ def stale_against_head(
             for source in by_spelling.get(node.module, []):
                 if source == rel:
                     continue
-                now = top_level(head_files.get(source))
+                now = bound_names(head_files.get(source))
                 was = top_level(base_files.get(source))
                 gone += [
                     f"{alias.name} from {node.module} ({source})"
