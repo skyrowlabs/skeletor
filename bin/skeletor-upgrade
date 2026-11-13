@@ -2603,14 +2603,8 @@ _REQUIREMENTS = re.compile(r"(^|/)[^/]*requirements[^/]*\.txt$")
 _REQUIREMENT = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(?:===|==|~=|>=|<=|!=|>|<)")
 
 
-def adopt_floors(base: str, theirs: str, ours: str) -> Tuple[str, str]:
-    """Base and template, given the tree's line for every requirement only the tree moved.
-
-    Dependabot moves a floor in the tree, and a template edit on the next line
-    then conflicted with no disagreement behind it: six trees, v0.66.0's `pyyaml`
-    beside a bumped `click`. A requirement the template also changed keeps its
-    conflict. For the merge only; what is recorded is still the render.
-    """
+def moved_floors(base: str, theirs: str, ours: str) -> Dict[str, str]:
+    """`{package: the tree's line}` for every requirement the tree changed and the template did not."""
 
     def by_name(text: str) -> dict:
         found = {}
@@ -2621,7 +2615,22 @@ def adopt_floors(base: str, theirs: str, ours: str) -> Tuple[str, str]:
         return found
 
     tree, was, now = by_name(theirs), by_name(base), by_name(ours)
-    moved = {name: line for name, line in tree.items() if was.get(name) == now.get(name) not in (None, line)}
+    return {name: line for name, line in tree.items() if was.get(name) == now.get(name) not in (None, line)}
+
+
+def adopt_floors(base: str, theirs: str, ours: str) -> Tuple[str, str]:
+    """Base and template, given the tree's line for every requirement only the tree moved.
+
+    Dependabot moves a floor in the tree, and a template edit on the next line
+    then conflicted with no disagreement behind it: six trees, v0.66.0's `pyyaml`
+    beside a bumped `click`. A requirement the template also changed keeps its
+    conflict. For the merge only; what is recorded is still the render.
+
+    Any change the tree alone made counts, lowered or re-pinned as well as raised:
+    git keeps it when no template edit is adjacent, and adjacency is no reason
+    for the answer to differ.
+    """
+    moved = moved_floors(base, theirs, ours)
 
     def adopt(text: str) -> str:
         lines = text.splitlines(keepends=True)
@@ -4012,6 +4021,8 @@ def main() -> int:
         #: applied them, or the adopter ported them. Not written, and not nothing:
         #: see `already_applied`, and the advance below that has to count them.
         carried: List[str] = []
+        #: `{merged requirements file: packages}` that merged only because the tree's floor was kept.
+        floors_kept: Dict[str, List[str]] = {}
         #: `{conflicted path: lines}` where the merge was clean and would have doubled them.
         repeated: Dict[str, List[str]] = {}
         #: Merged or conflicted files where the template changed comments alone. See `touches_code`.
@@ -4355,6 +4366,9 @@ def main() -> int:
             else:
                 merged.append(rel)
                 written[rel] = (theirs, resolved)
+                # Named only where the rule decided it: the plain merge would have conflicted.
+                if _REQUIREMENTS.search(rel) and merge(base, theirs, ours, workdir) is None:
+                    floors_kept[rel] = sorted(moved_floors(base, theirs, ours))
                 if normaliser.applies(rel) and not touches_code(base, ours):
                     comment_only.append(rel)
                 if not args.dry_run:
@@ -4714,6 +4728,8 @@ def main() -> int:
                         "added": added,
                         "updated": updated,
                         "merged": merged,
+                        # Of `merged`, the requirements files the floor rule merged, by package.
+                        "floors_kept": floors_kept,
                         "conflicted": conflicted,
                         # Whether this run moved the recorded base. A rehearsal reads it:
                         # gates that only fire on the new base cannot have run otherwise.
@@ -4807,6 +4823,12 @@ def main() -> int:
             say("📌", f"{CODEOWNERS}{verb} added with every rule commented out: this tree records no --owner")
             detail("Set one on this run, and doctor stops reporting that nobody owns anything:")
             detail("    --set-arg --owner=@user   (or @org/team; a bare @org requests no review)")
+
+        if floors_kept:
+            say("✅", f"{len(floors_kept)} of those{verb} merged by the floor rule, which keeps your floors")
+            for rel, names in sorted(floors_kept.items()):
+                item(f"{rel}: {', '.join(names)}")
+            detail("Only your tree changed these requirements, so the template's edit beside them is no conflict.")
 
         held_merges = [rel for rel in merged if rel in holds]
         if held_merges:

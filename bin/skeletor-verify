@@ -5367,6 +5367,55 @@ def requirements_floor_gate(workdir: Path) -> Result:
     )
 
 
+def floor_report_gate(workdir: Path) -> Result:
+    """A requirements file the floor rule merged is named with its packages; one git merged anyway is not.
+
+    The rule's own cases are `requirements_floor_gate`'s. This is the report: a real
+    upgrade whose template inserts a line beside the floor the tree moved.
+    """
+    started = time.time()
+    clean = clean_skeletor(workdir)
+    scratch = workdir / "floor-report-skeletor"
+    if not scratch.exists():
+        run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(scratch)], cwd=workdir)
+        source = scratch / "template" / "core" / "scripts" / "requirements.txt"
+        text = source.read_text(encoding="utf-8")
+        if text.count("click>=8.1\n") != 1:
+            return Result("floor report: the template's requirements have no click>=8.1 line", False, 0.0, "")
+        source.write_text(text.replace("click>=8.1\n", "click>=8.1\nrich>=13.0\n"), encoding="utf-8")
+        git_in(scratch, "commit", "--quiet", "-am", "scratch: insert a requirement beside click")
+    rel = "scripts/requirements.txt"
+    problems = []
+    cases = (("adjacent", "click>=8.1", "click>=8.5.0", True), ("apart", "pre-commit>=4.0", "pre-commit>=4.1", False))
+    for case, old, new, named in cases:
+        tree = workdir / f"floor-report-{case}" / "probe"
+        shutil.rmtree(tree.parent, ignore_errors=True)
+        args = ["--name", "Probe", "--cli", CLI_NAME, "--tagline", "t", "--tier", "core", "--language", "python"]
+        code, output = run([sys.executable, str(clean / "bin" / "skeletor-new"), str(tree), *args], cwd=SKELETOR)
+        text = (tree / rel).read_text(encoding="utf-8") if code == 0 else ""
+        if f"{old}\n" not in text:
+            return Result(f"floor report: no {old} line in a fresh tree's {rel}", False, time.time() - started, output)
+        (tree / rel).write_text(text.replace(f"{old}\n", f"{new}\n"), encoding="utf-8")
+        git_in(tree, "commit", "--quiet", "--no-verify", "-am", f"adopter: {new}")
+        upgrade = [sys.executable, str(scratch / "bin" / "skeletor-upgrade"), str(tree), "--from-dir", str(clean)]
+        upgrade += ["--dry-run", "--json"]
+        ran = subprocess.run(upgrade, cwd=tree, capture_output=True, text=True, env=subprocess_env(None))
+        envelope = json.loads(ran.stdout) if ran.stdout.startswith("{") else {}
+        if rel not in envelope.get("merged", []):
+            problems.append(f"{case}: {rel} did not merge: {envelope.get('conflicted')} {ran.stderr[-400:]}")
+        kept = envelope.get("floors_kept")
+        if kept != ({rel: [new.split(">=")[0]]} if named else {}):
+            problems.append(f"{case}: floors_kept is {kept}")
+        if ("merged by the floor rule" in ran.stderr) != named:
+            problems.append(f"{case}: the floor-rule line was {'missing' if named else 'printed'}")
+    return Result(
+        "requirements: a merge the floor rule decided is named, one git made anyway is not",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
+
+
 def pending_added_gate(workdir: Path) -> List[Result]:
     """A file a held-back run added is skeletor's: edited, it is not owned; deleted, it is declined.
 
@@ -15981,6 +16030,7 @@ def main() -> int:
         step(lambda: scheduled_rehearsal_gate(workdir, venv_python))
         step(lambda: foreign_subtree_gate(workdir, venv_python, pyright_ok))
         step(lambda: requirements_floor_gate(workdir))
+        step(lambda: floor_report_gate(workdir))
         step(lambda: prefixed(sidecar_gate(fullest, workdir)))
         step(lambda: prefixed(lint_forecast_gate(fullest, workdir, venv_python)))
         step(lambda: required_contexts_gate(workdir))
