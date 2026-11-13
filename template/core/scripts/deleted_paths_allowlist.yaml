@@ -9,7 +9,6 @@
 # push that deletes the path. An entry whose file no longer names the path, whose
 # file is gone, or whose path is tracked again is stale and fails the check.
 
-
 # ── Nothing below this line is skeletor's ────────────────────────────────────
 #
 # Everything of yours goes between this rule and the closing one below: appends,
