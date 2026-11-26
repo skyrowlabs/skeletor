@@ -16,7 +16,7 @@ and the second person to need it writes it again.
 | `skel docs`   | Index regeneration, plan filing, report windows      |
 | `skel bug`    | Capture an out-of-scope defect without widening scope |
 | `skel task`   | Capture small work that is not a defect              |
-| `skel doctor` | Account facts no file can state (release PRs, required checks) |
+| `skel doctor` | Facts no file can state: release PRs, required checks, the hooks' interpreter, unfrozen releases |
 | `skel settings` | Set GitHub settings to `scripts/repo_settings.py`; previews unless `--apply` |
 | `skel inbox`  | Every open capture per lane, every job at its cap, and every Dependabot PR waiting on a person |
 | `skel pr`     | Land a branch: `check pre-push`, push, pull request, its checks, then the pinned merge command |
