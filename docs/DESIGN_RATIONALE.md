@@ -1292,10 +1292,21 @@ of the generated `cli/check.py`, so a fourth linter added there is covered on
 the next run. Reverting the move turns it red on `node` and on `none` and green
 on `python` and `both`, which is the tier signature the defect predicts.
 
-`--language none` is worth its own line: it was equally broken and it is **not
-in `configurations()`**, because that helper enumerates `LANGUAGE_OVERLAYS` and
-`none` ships no overlay to enumerate. A documented choice that the composition
-gate cannot see is the registry hazard wearing the shape of an absence.
+`--language none` is worth its own line: it was equally broken, and it was
+**not in `configurations()`**, because that helper enumerated `LANGUAGE_OVERLAYS`
+and `none` had no key there. A documented choice that the composition gate
+cannot see is the registry hazard wearing the shape of an absence.
+
+That sentence named the hazard and fixed only this gate's instance of it, and
+the hazard then shipped. At v0.88.1 a `none` tree's `AGENTS.md` and
+`docs/rules/workflows.md` named `docs/rules/javascript.md`, which only `node`
+ships, so `check docs` was red on an untouched scaffold (squirrel.life measured
+it). Three holes hid it: the composition gate never built a `none` tree, the
+grid ran gates on `python` trees only, and the `--agent none` gate scaffolds
+`python`. `none` is a key of `LANGUAGE_OVERLAYS` now, so every reader of the map
+enumerates it, and the grid runs `gates()` on the fullest tier's `none` tree.
+`python.md` moved to `core` with it, because the lint set it documents already
+shipped there, and a `node` tree had been running that lint set with no doc for it.
 
 ### Two questions about one artifact, and only one of them is the tree's
 

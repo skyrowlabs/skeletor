@@ -134,7 +134,7 @@ eslint and prettier run once, on the fullest tier's `both` tree, and the fullest
 tier is scaffolded a second time into a deliberately long path and a third time
 into a directory that already has files in it.
 
-**Tier composition is checked across all 18 configurations at once**, which is
+**Tier composition is checked across every configuration at once**, which is
 the one question no tree's own suite can ask. stash.flow reported the class: two
 `core` files cited `tests/test_state_paths.py`, which shipped only at `agentic`,
 so a `core` reader following either citation found nothing. Inside one tree a
@@ -166,9 +166,7 @@ scaffolded, so an unrendered placeholder is caught, and only python trees have
 their own suites run.
 
 `unlinted_source_gate` asserts that every configuration ships a linter for the
-source it ships, for every `--language` the parser offers — `none` included,
-which is **not** in `configurations()`, since that helper enumerates
-`LANGUAGE_OVERLAYS` and `none` ships no overlay to enumerate. It reads
+source it ships, for every `--language` the parser offers, `none` included. It reads
 `LANGUAGE_CONFIGS` out of the generated `cli/check.py`, so a fourth linter added
 there is covered on the next run. It exists because `.flake8`,
 `pyproject.toml` and `pyrightconfig.json` shipped in `template/python/` while

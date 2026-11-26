@@ -43,7 +43,10 @@ TIERS: Dict[str, List[str]] = {
     "agentic": ["core", "governed", "agentic"],
 }
 
-LANGUAGE_OVERLAYS = {"python": "python", "node": "node", "both": "python,node"}
+#: Language -> the overlays it adds on top of the tiers. Every scaffold is a
+#: python project (the shell, its lint set and `python.md` ship at `core`), so
+#: `python` and `none` add nothing. `none` is a key so every reader enumerates it.
+LANGUAGE_OVERLAYS: Dict[str, List[str]] = {"python": [], "node": ["node"], "both": ["node"], "none": []}
 
 #: Files whose bytes must not be touched by substitution.
 #: Agent -> the overlay directory holding that tool's files, applied after each
@@ -95,6 +98,16 @@ VERSION_BADGE = "docs/assets/skeletor-version.svg"
 ORG_UNSET = "OWNER"
 
 BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".ico", ".woff", ".woff2"}
+
+
+def lang_rules(language: str) -> str:
+    """The rule docs for the blocking lint set, as rendered prose.
+
+    `python.md` always, since its toolchain ships at every tier, then one per
+    overlay that ships its own.
+    """
+    docs = ["python"] + ["javascript" for overlay in LANGUAGE_OVERLAYS[language] if overlay == "node"]
+    return " and ".join(f"`docs/rules/{name}.md`" for name in docs)
 
 
 def setup_commands(language: str) -> List[str]:
@@ -391,7 +404,7 @@ def substitutions(args) -> Dict[str, str]:
         "LINE_LENGTH": str(args.line_length),
         "ORG": args.org,
         "TZ": args.timezone,
-        "LANG_RULES": "python" if args.language in ("python", "both") else "javascript",
+        "LANG_RULES": lang_rules(args.language),
         "SETUP_COMMANDS": "\n".join(setup_commands(args.language)),
         # The shared head of the three setup blocks is exactly what was
         # substituted into all three, since every document's next line is its
@@ -1005,7 +1018,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--language",
-        choices=["python", "node", "both", "none"],
+        choices=list(LANGUAGE_OVERLAYS),
         default="python",
         help=(
             "which language your PRODUCT is in, and nothing more. This does not choose the "
@@ -1646,9 +1659,7 @@ def main() -> int:
     # stays a hard error, because that one is always a bug.
     agent_root = AGENTS[args.agent]
     overlays = []
-    for name in list(TIERS[args.tier]) + (
-        LANGUAGE_OVERLAYS[args.language].split(",") if args.language != "none" else []
-    ):
+    for name in list(TIERS[args.tier]) + (LANGUAGE_OVERLAYS[args.language]):
         overlays.append(name)
         if agent_root and (TEMPLATE / agent_root / name).is_dir():
             overlays.append(f"{agent_root}/{name}")

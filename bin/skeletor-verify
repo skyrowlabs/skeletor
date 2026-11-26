@@ -3886,7 +3886,7 @@ def versioning_gate(tier: str, workdir: Path, venv_python: Path, pyright_ok: boo
     * The tree is green: `check docs`, and the unit suite, which is where a
       dangling link or a doc-table row for a file nobody shipped surfaces.
 
-    Tier composition covers the references across all 36 configurations and
+    Tier composition covers the references across every configuration and
     cannot cover these: it asks whether a path resolves, not whether the
     sentence around it is true, and not whether the tree still runs.
     """
@@ -6265,6 +6265,16 @@ _TREE_REF = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.[A-Za-z]\w*)")
 _OPTIONAL = re.compile(r"SCAFFOLD-OPTIONAL\s+(\S+)")
 
 
+def fullest_language(scaffolder) -> str:
+    """The language whose overlays ship the most, ties going to `both`.
+
+    `node` and `both` add the same overlay today, and an older tag rendered with
+    `both` ships `python.md` from an overlay as well, so the tie is not neutral.
+    """
+    overlays = scaffolder.LANGUAGE_OVERLAYS
+    return max(reversed(list(overlays)), key=lambda name: len(overlays[name]))
+
+
 def configurations(scaffolder) -> List[Tuple[str, str, str, str]]:
     """Every (tier, language, agent, versioning) this scaffolder can produce.
 
@@ -6296,7 +6306,7 @@ def superset_of(scaffolder, a: Tuple[str, str, str, str], b: Tuple[str, str, str
     a_tier, a_lang, a_agent, a_version = a
     b_tier, b_lang, b_agent, b_version = b
     tiers = set(scaffolder.TIERS[a_tier]) <= set(scaffolder.TIERS[b_tier])
-    langs = set(scaffolder.LANGUAGE_OVERLAYS[a_lang].split(",")) <= set(scaffolder.LANGUAGE_OVERLAYS[b_lang].split(","))
+    langs = set(scaffolder.LANGUAGE_OVERLAYS[a_lang]) <= set(scaffolder.LANGUAGE_OVERLAYS[b_lang])
     agents = scaffolder.AGENTS[a_agent] is None or scaffolder.AGENTS[a_agent] == scaffolder.AGENTS[b_agent]
     versions = scaffolder.VERSIONING[b_version] <= scaffolder.VERSIONING[a_version]
     return tiers and langs and agents and versions
@@ -7900,7 +7910,7 @@ def pending_ref_gate(workdir: Path) -> List[Result]:
     started = time.time()
     scaffolder = load_scaffolder()
     tier = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
-    language = max(scaffolder.LANGUAGE_OVERLAYS, key=lambda name: len(scaffolder.LANGUAGE_OVERLAYS[name].split(",")))
+    language = fullest_language(scaffolder)
 
     tags = run(["git", "-C", str(SKELETOR), "tag", "--sort=-creatordate"], cwd=SKELETOR)[1].split()
     candidates = [
@@ -8478,7 +8488,7 @@ def dirty_ref_gate(workdir: Path) -> List[Result]:
     started = time.time()
     scaffolder = load_scaffolder()
     tier = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
-    language = max(scaffolder.LANGUAGE_OVERLAYS, key=lambda name: len(scaffolder.LANGUAGE_OVERLAYS[name].split(",")))
+    language = fullest_language(scaffolder)
 
     tags = run(["git", "-C", str(SKELETOR), "tag", "--sort=-creatordate"], cwd=SKELETOR)[1].split()
     # A cheap pre-filter, not the decision: a tag whose template is identical to
@@ -10947,7 +10957,7 @@ def ported_only_conflict_gate(workdir: Path) -> List[Result]:
     started = time.time()
     scaffolder = load_scaffolder()
     tier = max(scaffolder.TIERS, key=lambda name: len(scaffolder.TIERS[name]))
-    language = max(scaffolder.LANGUAGE_OVERLAYS, key=lambda name: len(scaffolder.LANGUAGE_OVERLAYS[name].split(",")))
+    language = fullest_language(scaffolder)
 
     clean = clean_skeletor(workdir)
     scratch = workdir / "ported-only-skeletor"
@@ -13734,10 +13744,8 @@ def unlinted_source_gate(workdir: Path) -> List[Result]:
     that re-implementation honest, and the python trees run the real `_lint()`
     through `check pre-push` anyway.
 
-    `--language none` is included, and is not in `configurations()` — that
-    helper enumerates `LANGUAGE_OVERLAYS`, which has no `none` key because the
-    choice ships no overlay. It is still a documented choice, and it is the one
-    with the least shipped alongside the python that ships regardless.
+    `--language none` is included: it is the choice with the least shipped
+    alongside the python that ships regardless.
     """
     started = time.time()
     scaffolder = load_scaffolder()
@@ -15850,7 +15858,7 @@ def _shard_arg_refuses(text: str) -> bool:
 def main() -> int:
     scaffolder = load_scaffolder()
     all_tiers = sorted(scaffolder.TIERS)
-    all_languages = sorted(scaffolder.LANGUAGE_OVERLAYS) + ["none"]
+    all_languages = sorted(scaffolder.LANGUAGE_OVERLAYS)
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tier", action="append", choices=all_tiers, help="limit to a tier (repeatable)")
@@ -15917,6 +15925,12 @@ def main() -> int:
         # Every shard scaffolds every tree, and only what reads them is split:
         # later gates reach for `{tier}-python` and `{tier}-both` by path, and
         # one guarded by `.exists()` would skip in silence in a shard without it.
+        def language_gates(language: str, tier: str, tree: Path) -> List[Result]:
+            found = gates(tree, venv_python, pyright_ok)
+            for gate in found:
+                gate.label = f"{tier}: --language {language}: {gate.label}"
+            return found
+
         def tier_gates(tier: str, tree: Path) -> List[Result]:
             found = gates(tree, venv_python, pyright_ok)
             for gate in found:
@@ -15961,6 +15975,17 @@ def main() -> int:
             return found
 
         step(lambda: versioning_gate(fullest, workdir, venv_python, pyright_ok))
+        # A language that adds no overlay ships a python-only tree, so its own
+        # gates can run here; only `gated_language` used to, and a `none` tree
+        # shipped red at v0.88.1 with nothing reading it. Derived from the map.
+        for language in [name for name in languages if not scaffolder.LANGUAGE_OVERLAYS[name]]:
+            if language == gated_language:
+                continue
+            tree = workdir / f"{fullest}-{language}"
+            # A failed scaffold is already a red row of its own.
+            if (tree / ".skeletor.json").exists():
+                (tree / ".venv").symlink_to(venv_python.parents[1])
+                step(lambda tree=tree, language=language: language_gates(language, fullest, tree))
         step(lambda: one_branch_gate(fullest, workdir, venv_python))
         step(lambda: line_length_gate(fullest, workdir, venv_python))
         # One step, because the second reads the tree the first scaffolds.

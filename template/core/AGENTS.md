@@ -81,7 +81,7 @@ result. If the code runs in a container, run it in that container.
 
 ### 3. Lint Before Committing
 
-Run the blocking set after any change — see `docs/rules/{{LANG_RULES}}.md`. CI blocks on
+Run the blocking set after any change — see {{LANG_RULES}}. CI blocks on
 all of it, and the type check is **whole-project**: one stale error anywhere blocks every
 commit, not just commits near it.
 

@@ -320,7 +320,7 @@ Run all tiers when an edit touches `template/core/`, since `governed` and
 | `AGENTS.md` | One-page instruction sheet for an agent doing a setup |
 | `.claude/skills/new-project/` | The skill's source; `bin/skeletor-install-skill` installs it |
 | `template/core/` · `governed/` · `agentic/` | The three tiers, composed in that order |
-| `template/python/` · `node/` | Language overlays — your **product's** language. The python toolchain that lints the shell ships at `core` |
+| `template/node/` | The one language overlay, for a node **product**. The python toolchain that lints the shell, and `python.md`, ship at `core` |
 | `template/agent-claude/` | `.claude/` tooling, applied per tier and omitted by `--agent none` |
 | `upstream.json` | What was harvested from the repository skeletor was extracted from, and what was declined; `upstream.local.json` (gitignored) says where to look |
 | `docs/SETUP_GUIDE.md` | The full procedure, including adoption into an existing repo |
