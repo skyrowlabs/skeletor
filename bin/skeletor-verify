@@ -11500,6 +11500,59 @@ def components_gate(workdir: Path) -> List[Result]:
     return results
 
 
+def dash_shell(workdir: Path) -> Tuple[Optional[List[str]], str]:
+    """A command prefix that runs its argv with `/bin/sh` as dash, and how; `None` and why when it cannot.
+
+    Ubuntu runners' `/bin/sh` is dash and this host's may be bash, and a fake that
+    `echo`es an expansion prints differently under each (v0.82.0). A PATH shim
+    cannot reach a `#!/bin/sh` shebang, which the kernel reads as an absolute path,
+    so on a host whose `/bin/sh` is not dash the directory holding it is overlaid,
+    with `sh -> dash`, inside an unprivileged user and mount namespace. The argv
+    then runs in a nested namespace mapped back to this uid, so permissions hold.
+    """
+    shell = Path(os.path.realpath("/bin/sh"))
+    if shell.name == "dash":
+        return [], f"/bin/sh is {shell}"
+    dash = shutil.which("dash")
+    if dash is None:
+        return None, "dash is not on PATH"
+    if shutil.which("unshare") is None:
+        return None, "unshare is not on PATH"
+    lower = Path(os.path.realpath("/bin/sh")).parent
+    upper, work = workdir / "dash-sh" / "upper", workdir / "dash-sh" / "work"
+    shutil.rmtree(upper.parent, ignore_errors=True)
+    upper.mkdir(parents=True)
+    work.mkdir()
+    (upper / "sh").symlink_to(os.path.realpath(dash))
+    mount = f"mount -t overlay overlay -o lowerdir={lower},upperdir={upper},workdir={work} {lower}"
+    inner = f'exec unshare --user --map-user={os.getuid()} --map-group={os.getgid()} "$@"'
+    prefix = ["unshare", "--user", "--map-root-user", "--mount", "sh", "-c", f"{mount} && {inner}", "_"]
+    code, said = run([*prefix, "sh", "-c", "readlink -f /bin/sh; id -u"], cwd=workdir)
+    lines = said.split()
+    if code != 0 or len(lines) < 2 or Path(lines[0]).name != "dash" or lines[1] != str(os.getuid()):
+        return None, f"the namespace overlay did not take: exit {code}, {said.strip()[-300:]}"
+    return prefix, f"{lower}/sh overlaid with dash in a user and mount namespace, as uid {os.getuid()}"
+
+
+def dash_sh_gate(tree: Path, venv_python: Path, workdir: Path) -> Result:
+    """The fullest tree's unit suite passes with `/bin/sh` as dash, the shell CI's runner has.
+
+    The cheap half is the tree's own `test_shell_fakes_print_with_printf.py`, which
+    reads literals; this runs the suite, so a shebang built at run time or an
+    `sh -c` line is reached too. Skipped loudly where dash cannot be arranged.
+    """
+    started = time.time()
+    prefix, how = dash_shell(workdir)
+    if prefix is None:
+        return Result(f"⚠️  /bin/sh as dash: SKIPPED, {how}", True, time.time() - started, how)
+    code, output = run(
+        [*prefix, str(venv_python), "-m", "pytest", "tests/", "-m", "unit", "-q", "-p", "no:cacheprovider"],
+        cwd=tree,
+        env_extra={"PYTHONPATH": str(tree)},
+    )
+    return Result(f"/bin/sh as dash: pytest -m unit ({how})", code == 0, time.time() - started, output[-3000:])
+
+
 def readme_head_gate(workdir: Path) -> Result:
     """The README from its title through the first `---` renders the same at the last release and at HEAD.
 
@@ -16202,6 +16255,8 @@ def main() -> int:
             return found
 
         step(lambda: versioning_gate(fullest, workdir, venv_python, pyright_ok))
+        if gated_language in languages:
+            step(lambda: dash_sh_gate(workdir / f"{fullest}-{gated_language}", venv_python, workdir))
         # A language that adds no overlay ships a python-only tree, so its own
         # gates can run here; only `gated_language` used to, and a `none` tree
         # shipped red at v0.88.1 with nothing reading it. Derived from the map.
