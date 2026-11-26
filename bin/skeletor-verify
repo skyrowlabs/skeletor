@@ -11709,7 +11709,14 @@ def rename_and_reports_gate(workdir: Path) -> List[Result]:
     added = f"The rules live in `{old}/commits.md`."
     mention.write_text(mention.read_text(encoding="utf-8") + f"\n{added}\n", encoding="utf-8")
     git_in(gap, "commit", "--quiet", "-am", "scratch: move a rule file\n\nReported-as: [probe-report] (probe)")
-    git_in(gap, "tag", "-a", "v99.0.0", "-m", "scratch release\n\nDeclined-as: [other-report] (elsewhere)")
+    git_in(
+        gap,
+        "tag",
+        "-a",
+        "v99.0.0",
+        "-m",
+        "scratch release\n\nDeclined-as: [other-report] (elsewhere)\nDeclined-as: [probe-report] (probe)",
+    )
 
     def up(where: Path, *extra: str) -> Tuple[int, Dict[str, Any], str]:
         ran = subprocess.run(
@@ -11743,10 +11750,12 @@ def rename_and_reports_gate(workdir: Path) -> List[Result]:
     declined = [(r.get("slug"), r.get("tree"), r.get("tag")) for r in dry.get("declined_reports", [])]
     if answered != [("probe-report", "probe")]:
         problems.append(f"answered is {answered}")
-    if declined != [("other-report", "elsewhere", "v99.0.0")]:
+    if declined != [("other-report", "elsewhere", "v99.0.0"), ("probe-report", "probe", "v99.0.0")]:
         problems.append(f"declined is {declined}")
     if "probe-report (probe): answered in skeletor@" not in text or "← yours" not in text:
         problems.append("the answered report is not printed as this tree's")
+    if text.count("probe-report (probe)") != 1 or "partly declined in v99.0.0's note" not in text:
+        problems.append("a report both answered and declined is not one line saying both")
     results.append(Result("reports: the range's answered and declined reports print", not problems,
                           time.time() - started, "\n".join(problems) + f"\n{text[-1500:]}"))  # fmt: skip
 

@@ -3907,13 +3907,17 @@ def main() -> int:
         answered, declined_reports = range_reports(ref, args.ref or "HEAD")
         this_tree = head_flag_value(head_args, "--slug") or target.name
         if answered or declined_reports:
-            say("📬", f"{len(answered) + len(declined_reports)} report(s) answered between {ref} and {head_ref}")
-            for report in answered:
-                mine = "   ← yours" if report["tree"] == this_tree else ""
-                item(f"{report['slug']} ({report['tree']}): answered in skeletor@{report['sha']}{mine}")
-            for report in declined_reports:
-                mine = "   ← yours" if report["tree"] == this_tree else ""
-                item(f"{report['slug']} ({report['tree']}): declined, in {report['tag']}'s note{mine}")
+            count = len({(r["slug"], r["tree"]) for r in [*answered, *declined_reports]})
+            say("📬", f"{count} report(s) answered between {ref} and {head_ref}")
+            # One line per report: a split answer, part built and part declined, is one answer (stash.flow).
+            built = {(r["slug"], r["tree"]): r for r in answered}
+            refused = {(r["slug"], r["tree"]): r for r in declined_reports}
+            for key in dict.fromkeys([*built, *refused]):
+                parts = ([f"answered in skeletor@{built[key]['sha']}"] if key in built else []) + (
+                    [f"declined in {refused[key]['tag']}'s note"] if key in refused else []
+                )
+                mine = "   ← yours" if key[1] == this_tree else ""
+                item(f"{key[0]} ({key[1]}): {', partly '.join(parts)}{mine}")
         for index, flag in enumerate(head_args):
             if flag.startswith("--") and flag not in recorded and flag not in set_args_applied:
                 value = (
