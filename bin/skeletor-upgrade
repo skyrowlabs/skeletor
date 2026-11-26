@@ -3910,7 +3910,7 @@ def main() -> int:
             say("📬", f"{len(answered) + len(declined_reports)} report(s) answered between {ref} and {head_ref}")
             for report in answered:
                 mine = "   ← yours" if report["tree"] == this_tree else ""
-                item(f"{report['slug']} ({report['tree']}): fixed in skeletor@{report['sha']}{mine}")
+                item(f"{report['slug']} ({report['tree']}): answered in skeletor@{report['sha']}{mine}")
             for report in declined_reports:
                 mine = "   ← yours" if report["tree"] == this_tree else ""
                 item(f"{report['slug']} ({report['tree']}): declined, in {report['tag']}'s note{mine}")
