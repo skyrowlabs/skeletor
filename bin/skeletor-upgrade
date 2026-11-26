@@ -1135,6 +1135,8 @@ DIVERGENCE_RECORD = "scripts/template_divergence_allowlist.yaml"
 #: Read with the head render's copy: the tree's may be older, or edited, and this
 #: tool holds no parser of its own for a format the template owns.
 ALLOWLIST_READER = "scripts/allowlist.py"
+#: The record's anchors, read with the head render's copy for the same reason.
+HOLD_ANCHORS = "scripts/hold_anchors.py"
 #: Its number moves with the suite, and no reason could say more than that it moved.
 #: `tests/skip_budget.json` is not state: raising it is a decision, so it takes a reason.
 COVERAGE_BUDGET = "tests/coverage_budget.json"
@@ -1147,29 +1149,58 @@ RELEASE_MANIFEST = ".github/.release-please-manifest.json"
 HELD_CAVEAT = "recorded for the file, not this hunk"
 
 
-def divergence_holds(target: Path, head_files: Dict[str, Path]) -> Tuple[Dict[str, Dict[str, str]], Optional[str]]:
-    """`{path: {entry key: reason}}` from the tree's record, and why it could not be read, if so.
+def head_module(head_files: Dict[str, Path], rel: str, name: str) -> Any:
+    """The head render's copy of `rel`, loaded, or `None` when it does not ship one."""
+    path = head_files.get(rel)
+    if path is None:
+        return None
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return module
 
+
+def divergence_holds(
+    target: Path, head_files: Dict[str, Path]
+) -> Tuple[Dict[str, Dict[str, str]], Dict[str, Dict[str, str]], Any, Optional[str]]:
+    """`(holds, anchors, anchor module, why unread)` from the tree's record.
+
+    Holds are `{path: {entry key: reason}}` and anchors `{path: {"path:label": line}}`.
     An unreadable record costs the reasons and nothing else, because no outcome
-    here depends on them.
+    here depends on them. A head render without the anchor module reads every
+    entry as a hold, which is what that release's record meant.
     """
     record = target / DIVERGENCE_RECORD
     if not record.exists():
-        return {}, None
-    reader = head_files.get(ALLOWLIST_READER)
-    if reader is None:
-        return {}, f"the head render ships no {ALLOWLIST_READER}"
-    loader = importlib.machinery.SourceFileLoader("_head_allowlist", str(reader))
-    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+        return {}, {}, None, None
+    if ALLOWLIST_READER not in head_files:
+        return {}, {}, None, f"the head render ships no {ALLOWLIST_READER}"
     try:
-        loader.exec_module(module)
-        entries = module.read(record)
+        entries = head_module(head_files, ALLOWLIST_READER, "_head_allowlist").read(record)
+        anchoring = head_module(head_files, HOLD_ANCHORS, "_head_hold_anchors")
     except (OSError, ValueError) as error:
-        return {}, str(error)
+        return {}, {}, None, str(error)
+    found: Dict[str, str] = {}
+    if anchoring is not None:
+        entries, found = anchoring.split(entries)
     holds: Dict[str, Dict[str, str]] = {}
     for key, reason in entries.items():
         holds.setdefault(key.partition(":")[0], {})[key] = reason
-    return holds, None
+    anchors: Dict[str, Dict[str, str]] = {}
+    for label, line in found.items():
+        anchors.setdefault(label.partition(":")[0], {})[label] = line
+    return holds, anchors, anchoring, None
+
+
+def stale_anchors(anchors: Dict[str, Dict[str, str]], anchoring: Any, render: Dict[str, Path]) -> List[str]:
+    """Labels whose anchor is not exactly one line of `render`'s copy of their file."""
+    stale = []
+    for rel, labelled in sorted(anchors.items()):
+        text = read(render.get(rel))
+        for label, line in sorted(labelled.items()):
+            if text is None or anchoring.region(text.splitlines(), line, rel.endswith(".md")) is None:
+                stale.append(label)
+    return stale
 
 
 def state_files(target: Path) -> Set[str]:
@@ -1228,7 +1259,7 @@ def split_standing(
                     return True
         return False
 
-    parts: Dict[str, Any] = {"decided": {}, "state": [], "appended": [], "undecided": []}
+    parts: Dict[str, Any] = {"decided": {}, "state": [], "appended": [], "undecided": [], "moved": []}
     for rel in diverged:
         if rel in holds:
             parts["decided"][rel] = holds[rel]
@@ -1323,7 +1354,7 @@ def report_divergence_parts(parts: Dict[str, Any]) -> None:
     if parts["decided"]:
         say("📌", f"{len(parts['decided'])} file(s) decided — differ from the template, with a recorded reason")
         for rel, entries in parts["decided"].items():
-            item(rel)
+            item(f"{rel}   (the template has changed it since: re-read this reason)" if rel in parts["moved"] else rel)
             for key, reason in entries.items():
                 detail(f"    {key}: {reason}" if ":" in key else f"    {reason}")
     if parts["state"]:
@@ -4021,8 +4052,10 @@ def main() -> int:
 
         added, updated, merged, conflicted, collided, declined, dropped = [], [], [], [], [], [], []
         # Read once, before anything is written, so a dry run and a real run agree.
-        holds, holds_unread = divergence_holds(target, head_files)
+        holds, anchors, anchoring, holds_unread = divergence_holds(target, head_files)
         hunk_lines: Dict[str, str] = {}
+        #: Per conflicted anchored file: each hunk's head lines and the labels it falls inside.
+        hunk_regions: Dict[str, List[Tuple[str, List[str]]]] = {}
         owned_files: List[str] = []
         #: Conflicts that a run of the tree's own formatters over both rendered
         #: sides would have resolved. Reported, never acted on without the flag.
@@ -4340,6 +4373,10 @@ def main() -> int:
                     repeated[rel] = doubled_lines(base, theirs, ours, again)
                 if rel in holds:
                     hunk_lines[rel] = template_lines(base, ours)
+                if rel in anchors:
+                    hunk_regions[rel] = anchoring.hunk_regions(
+                        base.splitlines(), ours.splitlines(), anchors[rel], rel.endswith(".md")
+                    )
                 # All or nothing. A partial count cannot tell a region the adopter
                 # deleted from one they reformatted — mind.head's test file showed
                 # "1 of 4" for lines ruff had merely rewrapped — so only the case
@@ -4619,7 +4656,18 @@ def main() -> int:
 
         renders = [files for files in (base_files, head_files) if files]
         divergence = split_standing(diverged, holds, target, renders, normalising)
+        # Decided files the template has changed since the recorded base: the test
+        # the declined list already uses, so a reason can be re-read when it may have aged.
+        divergence["moved"] = sorted(
+            rel
+            for rel in divergence["decided"]
+            if rel in head_files and sha256(head_files[rel]) != (hashes or {}).get(rel, pending_added.get(rel))
+        )
         retired = retired_holds(holds, target, renders, normalising)
+        # Against the render that is the base once this run is read: the head after
+        # an advance, the recorded base otherwise. Printed, never red.
+        anchors_at = head_ref if advanced else ref
+        anchors_gone = stale_anchors(anchors, anchoring, head_files if advanced or not base_files else base_files)
         hints = adoption_hints(target, declined, diverged, base_files, head_files, hashes or {})
         held_reached = [
             f"`{rel}` ({what}): {reason} ({held_note(hunk_lines.get(rel, ''))})"
@@ -4794,6 +4842,11 @@ def main() -> int:
                         # longer hold anything. Reported only: no outcome reads them.
                         "divergence": divergence,
                         "divergence_stale": retired,
+                        "hold_regions": {
+                            rel: [{"lines": lines, "inside": inside} for lines, inside in found]
+                            for rel, found in hunk_regions.items()
+                        },
+                        "anchors_stale": anchors_gone,
                         "adoption_hints": hints,
                         "dropped": dropped,
                         # Both halves of `stale_against_head`, for the reason
@@ -4936,7 +4989,15 @@ def main() -> int:
         def report_held_conflict(rel: str) -> None:
             for reason in holds.get(rel, {}).values():
                 detail(f"    held: {reason}")
-            if rel in holds:
+            if rel in hunk_regions:
+                for lines, inside in hunk_regions[rel]:
+                    where = ", ".join(f"`{label}`" for label in inside)
+                    detail(
+                        f"    template lines {lines}: inside {where}"
+                        if inside
+                        else f"    template lines {lines}: outside every labelled region, so it needs a real read"
+                    )
+            elif rel in holds:
                 detail(f"    {held_note(hunk_lines.get(rel, ''))}")
 
         if conflicted and advanced:
@@ -5287,6 +5348,12 @@ def main() -> int:
             for rel in undecided:
                 item(rel)
             report_divergence_parts(divergence)
+            if anchors_gone:
+                say("⚓", f"{len(anchors_gone)} hold anchor(s) not found once in the template's text at {anchors_at}")
+                for label in anchors_gone:
+                    item(label)
+                detail(f"Re-anchor each in {DIVERGENCE_RECORD}, in the same commit as any --ported run.")
+                detail("An anchor only names a region in this report, so nothing else is affected.")
             # ## How many of those "decisions" are a formatter's, counted here
             #
             # This block hashes raw bytes while the merge honours `--normalise`, so a

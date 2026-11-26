@@ -5416,14 +5416,15 @@ def floor_report_gate(workdir: Path) -> Result:
     )
 
 
-def pending_added_gate(workdir: Path) -> List[Result]:
+def pending_added_gate(workdir: Path, venv_python: Path) -> List[Result]:
     """A file a held-back run added is skeletor's: edited, it is not owned; deleted, it is declined.
 
     mind.head's sequence: a conflicted upgrade added three files, the tree
     lint-fixed them, and the `--ported` re-run read them as collisions and
     recorded them as owned. Planted through `--no-base`: one tampered hash with an
     edited file holds the base back, and one file deleted with its entry is an
-    addition the base does not have.
+    addition the base does not have. The tree's own `test_upgrade_is_finished.py`
+    is red while the base is held and green once `--ported` advances it.
     """
     started = time.time()
     manifest_name = load_scaffolder().MANIFEST_NAME
@@ -5455,10 +5456,25 @@ def pending_added_gate(workdir: Path) -> List[Result]:
         problems = []
         if not (tree / added).exists() or added not in (held.get("pending_added") or {}):
             problems.append(f"the held-back run did not add {added} and record it:\n{first[-800:]}")
+        finished = [
+            str(venv_python),
+            "-m",
+            "pytest",
+            "tests/test_upgrade_is_finished.py",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+        ]
         if case == "edited":
+            code_held, output_held = run(finished, cwd=tree, env_extra={"PYTHONPATH": str(tree)})
+            if code_held == 0 or "pending_added holds" not in output_held or "--dry-run" not in output_held:
+                problems.append(f"the tree's own test passed with the base held back:\n{output_held[-800:]}")
             (tree / added).write_text((tree / added).read_text(encoding="utf-8") + "\nlint-fixed\n", encoding="utf-8")
             code, second = run([*upgrade, "--ported"], cwd=tree)
             after = json.loads((tree / manifest_name).read_text(encoding="utf-8"))
+            code_done, output_done = run(finished, cwd=tree, env_extra={"PYTHONPATH": str(tree)})
+            if code_done != 0:
+                problems.append(f"the tree's own test is red after --ported advanced the base:\n{output_done[-800:]}")
             if added in (after.get("owned") or []) or added not in after["files"] or "pending_added" in after:
                 problems.append(
                     f"after --ported: owned={after.get('owned')}, recorded={added in after['files']}, "
@@ -11585,8 +11601,39 @@ def divergence_record_gate(workdir: Path, venv_python: Path) -> List[Result]:
     control.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(tree, control, symlinks=True)
 
+    def block_start(rel: str, line: str) -> str:
+        """The first line of the block holding `line` in the tree's render, which is the base."""
+        lines = (tree / rel).read_text(encoding="utf-8").splitlines()
+        at = next(i for i, text in enumerate(lines) if text.startswith(line))
+        while at > 0 and lines[at - 1].strip():
+            at -= 1
+        assert lines.count(lines[at]) == 1 and lines[at].strip("\"'") == lines[at], f"no clean anchor: {lines[at]!r}"
+        return lines[at]
+
+    # Anchors on the conflicting file: the block it conflicts in, one far from it,
+    # and one the template never had. Stated by hand, never through `hold_anchors`.
+    def far_heading(rel: str, line: str) -> str:
+        """A `## ` heading whose section does not hold `line`."""
+        lines = (tree / rel).read_text(encoding="utf-8").splitlines()
+        at = next(i for i, text in enumerate(lines) if text.startswith(line))
+        heads = [i for i, text in enumerate(lines) if text.startswith(("# ", "## "))] + [len(lines)]
+        return next(
+            lines[i]
+            for i, end in zip(heads, heads[1:])
+            if lines[i].startswith("## ") and not i <= at < end and lines.count(lines[i]) == 1
+        )
+
+    near, far = block_start(conflict, conflict_line), far_heading(conflict, conflict_line)
+    assert near != far, "the plant did not land: the near and far anchors are one block"
+    gone = "This line is in no render of the file."
     entries = {
         conflict: "the commit rules are our own",
+        f"{conflict}:near": "the block the template and I both edit",
+        f"{conflict}:near:anchor": f'"{near}"',
+        f"{conflict}:far": "a block away from that edit",
+        f"{conflict}:far:anchor": f'"{far}"',
+        f"{conflict}:gone": "an anchor the template never had",
+        f"{conflict}:gone:anchor": f'"{gone}"',
         merges: "the suite here is ordered differently",
         f"{decided}:one": "first hold on this file",
         f"{decided}:two": "second hold on this file",
@@ -11675,7 +11722,8 @@ def divergence_record_gate(workdir: Path, venv_python: Path) -> List[Result]:
         problems.append(f"the fixture missed: conflicted {dry.get('conflicted')}, merged {dry.get('merged')}")
     for wanted in (
         f"held: {entries[conflict]}",
-        f"{upgrade_tool.HELD_CAVEAT}; template lines {changed_at}",
+        f"template lines {changed_at}: inside `{conflict}:near`",
+        f"{conflict}   (the template has changed it since: re-read this reason)",
         "a template change on a clean merge",
         entries[merges],
         f"{decided}:one: {entries[f'{decided}:one']}",
@@ -11685,6 +11733,25 @@ def divergence_record_gate(workdir: Path, venv_python: Path) -> List[Result]:
             problems.append(f"not printed: {wanted}")
     if dry.get("divergence_stale") != [untouched]:
         problems.append(f"tool-side stale is {dry.get('divergence_stale')}, not the one entry on an untouched file")
+    if dry.get("hold_regions", {}).get(conflict) != [{"lines": str(changed_at), "inside": [f"{conflict}:near"]}]:
+        problems.append(f"the conflicting hunk was placed as {dry.get('hold_regions')}, not inside `{conflict}:near`")
+    if f"{decided}   (the template has changed" in text:
+        problems.append(f"{decided} is marked for a re-read, and the template never moved it")
+    if dry.get("anchors_stale") != [f"{conflict}:gone"]:
+        problems.append(f"stale anchors are {dry.get('anchors_stale')}, not the one the template never had")
+    if dry.get("divergence", {}).get("moved") != sorted([conflict, merges]):
+        problems.append(
+            f"re-read marks {dry.get('divergence', {}).get('moved')}: want the two files the template moved"
+        )
+    # Only the far anchor: the same hunk is now outside every labelled region.
+    far_only = {k: v for k, v in entries.items() if not k.startswith((f"{conflict}:near", f"{conflict}:gone"))}
+    record.write_text(with_entries("".join(f"{k}: {v}\n" for k, v in far_only.items())), encoding="utf-8")
+    _, outside, outside_text = up(tree, "--dry-run")
+    record.write_text(with_entries(body), encoding="utf-8")
+    if outside.get("hold_regions", {}).get(conflict) != [{"lines": str(changed_at), "inside": []}]:
+        problems.append(f"with only a far anchor the hunk was placed as {outside.get('hold_regions')}")
+    if f"template lines {changed_at}: outside every labelled region" not in outside_text:
+        problems.append("a hunk outside every region did not say it needs a real read")
     results.append(
         Result(
             "divergence record: a reason prints where the template reaches it",
@@ -16056,7 +16123,7 @@ def main() -> int:
         step(lambda: components_gate(workdir))
         step(lambda: prefixed(declined_gate(fullest, workdir)))
         step(lambda: owned_gate(workdir))
-        step(lambda: pending_added_gate(workdir))
+        step(lambda: pending_added_gate(workdir, venv_python))
         step(lambda: cron_notice_gate(workdir))
         step(lambda: scheduled_rehearsal_gate(workdir, venv_python))
         step(lambda: foreign_subtree_gate(workdir, venv_python, pyright_ok))
