@@ -11049,10 +11049,11 @@ def ported_only_conflict_gate(workdir: Path) -> List[Result]:
     git_in(scratch, "commit", "--quiet", "-am", "scratch: one template file")
     head_ref = run(["git", "-C", str(scratch), "describe", "--tags", "--always", "--dirty"], cwd=scratch)[1].strip()
 
+    # The tree REPLACES the last line rather than appending: a tree that only
+    # appended now keeps its tail below the template's new end, cleanly.
     for tree in (taken, left):
-        (tree / subject).write_text(
-            (tree / subject).read_text(encoding="utf-8") + "\nA THIRD VALUE, BELONGING TO NEITHER.\n", encoding="utf-8"
-        )
+        kept = (tree / subject).read_text(encoding="utf-8").rstrip("\n").rsplit("\n", 1)[0]
+        (tree / subject).write_text(kept + "\nA THIRD VALUE, BELONGING TO NEITHER.\n", encoding="utf-8")
         run(["git", "-C", str(tree), "commit", "--quiet", "-am", "local edit"], cwd=tree)
 
     def ref_of(tree: Path) -> str:
@@ -11551,6 +11552,46 @@ def dash_sh_gate(tree: Path, venv_python: Path, workdir: Path) -> Result:
         env_extra={"PYTHONPATH": str(tree)},
     )
     return Result(f"/bin/sh as dash: pytest -m unit ({how})", code == 0, time.time() - started, output[-3000:])
+
+
+def upgrade_helpers_gate(workdir: Path) -> List[Result]:
+    """An append-only tree keeps its tail below the template's new end, and a hand-edited arg is named.
+
+    Both are mind.head's and node-zero's shapes from the v0.93.1 round, run through
+    the real helpers with git rather than a whole upgrade.
+    """
+    upgrade = load_tool(SKELETOR / "bin" / "skeletor-upgrade", "_upgrade_helpers")
+    started = time.time()
+    scratch = workdir / "upgrade-helpers"
+    scratch.mkdir(parents=True, exist_ok=True)
+    base = "a\nb\n"
+    placed = upgrade.merge_file("tests/x.py", base, base + "mine\n", base + "template\n", scratch)
+    edited = upgrade.merge_file("tests/x.py", base, "a\nB\nmine\n", base + "template\n", scratch)
+    problems = []
+    if placed != "a\nb\ntemplate\nmine\n":
+        problems.append(f"the appended tail was placed as {placed!r}")
+    if edited is not None:
+        problems.append(f"an edit above the tail merged as {edited!r} instead of conflicting")
+    results = [Result("upgrade: an appended tail goes below the template's new end", not problems,
+                      time.time() - started, "\n".join(problems))]  # fmt: skip
+
+    started = time.time()
+    tree = scratch / "tree"
+    tree.mkdir()
+    git_in(tree, "init", "-q")
+    manifest = {"skeletor_ref": "v1.0.0", "args": ["--tagline", "old words", "--tier", "core"], "files": {}}
+    (tree / ".skeletor.json").write_text(json.dumps(manifest), encoding="utf-8")
+    git_in(tree, "add", ".skeletor.json")
+    git_in(tree, "commit", "-q", "-m", "upgrade")
+    manifest["args"][1] = "new words"
+    (tree / ".skeletor.json").write_text(json.dumps(manifest), encoding="utf-8")
+    git_in(tree, "commit", "-q", "-am", "hand edit")
+    found = upgrade.hand_edited_args(tree, manifest)
+    unchanged = upgrade.hand_edited_args(tree, {**manifest, "args": ["--tagline", "old words", "--tier", "core"]})
+    ok = found == [("--tagline", "old words", "new words")] and unchanged == []
+    results.append(Result("upgrade: a hand-edited recorded arg is named", ok, time.time() - started,
+                          f"found {found}, unchanged {unchanged}"))  # fmt: skip
+    return results
 
 
 def readme_head_gate(workdir: Path) -> Result:
@@ -16318,6 +16359,7 @@ def main() -> int:
         step(lambda: divergence_record_gate(workdir, venv_python))
         step(lambda: rename_and_reports_gate(workdir))
         step(lambda: readme_head_gate(workdir))
+        step(lambda: upgrade_helpers_gate(workdir))
         step(lambda: seam_record_scope_gate(workdir))
         step(lambda: adoption_hint_gate(workdir))
         step(lambda: plant_gate(workdir, venv_python))

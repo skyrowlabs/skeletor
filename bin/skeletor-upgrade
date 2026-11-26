@@ -892,6 +892,44 @@ def record_owned(target: Path, owned: List[str]) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
+def hand_edited_args(target: Path, manifest: Dict[str, Any]) -> List[Tuple[str, str, str]]:
+    """Flags whose recorded value differs from the commit that last moved `skeletor_ref`.
+
+    Read from the tree's own history; empty when git cannot say.
+    """
+
+    def at(sha: str) -> Optional[Dict[str, Any]]:
+        shown = subprocess.run(
+            ["git", "-C", str(target), "show", f"{sha}:{MANIFEST_NAME}"], capture_output=True, text=True
+        )
+        try:
+            return json.loads(shown.stdout) if shown.returncode == 0 else None
+        except ValueError:
+            return None
+
+    logged = subprocess.run(
+        ["git", "-C", str(target), "log", "--format=%H", "--", MANIFEST_NAME], capture_output=True, text=True
+    )
+    recorded = None
+    for sha in logged.stdout.split() if logged.returncode == 0 else []:
+        then = at(sha)
+        if then is None or then.get("skeletor_ref") != manifest.get("skeletor_ref"):
+            break
+        recorded = then
+    if recorded is None:
+        return []
+
+    def flags(args: List[str]) -> Dict[str, str]:
+        return {flag: head_flag_value(args, flag) for flag in args if flag.startswith("--")}
+
+    then, now = flags(recorded.get("args") or []), flags(manifest.get("args") or [])
+    return [
+        (flag, then.get(flag, ""), now.get(flag, ""))
+        for flag in sorted(set(then) | set(now))
+        if then.get(flag) != now.get(flag)
+    ]
+
+
 def record_renamed(target: Path, renamed: Dict[str, str]) -> None:
     """Write `renamed` into the manifest: skeletor paths this tree moved, old to new."""
     path = target / MANIFEST_NAME
@@ -2769,7 +2807,20 @@ def merge_file(rel: str, base: str, theirs: str, ours: str, workdir: Path) -> Op
     if _REQUIREMENTS.search(rel):
         base, ours = adopt_floors(base, theirs, ours)
     merged = merge(base, theirs, ours, workdir)
+    if merged is None:
+        merged = appended_tail(base, theirs, ours)
     return None if merged is not None and doubled_lines(base, theirs, ours, merged) else merged
+
+
+def appended_tail(base: str, theirs: str, ours: str) -> Optional[str]:
+    """The template's new text with the tree's own tail after it, when the tree only appended.
+
+    A file that is the base render plus lines at the end has one right answer when
+    the template also changed its end: the template's text, then the tree's (mind.head).
+    """
+    if not base.endswith("\n") or not theirs.startswith(base) or theirs == base:
+        return None
+    return (ours if ours.endswith("\n") else ours + "\n") + theirs[len(base) :]
 
 
 def doubled_lines(base: str, theirs: str, ours: str, merged: str) -> List[str]:
@@ -4132,6 +4183,15 @@ def main() -> int:
                         detail("Do NOT --repair-manifest to silence this: it rewrites the hashes from")
                         detail("whatever base you named and leaves the ref alone.")
                     else:
+                        edited = hand_edited_args(target, manifest)
+                        if edited:
+                            # A recorded value changed outside the tool re-renders the base
+                            # differently; --repair-manifest would bury it (node-zero).
+                            say("✏️ ", f"{MANIFEST_NAME}'s args changed since the commit that recorded {ref}:")
+                            for flag, then, now in edited:
+                                item(f"{flag}: {then!r} → {now!r}")
+                            detail("Restore the recorded value, commit, and change it with")
+                            detail("--set-arg <flag>=<value>, which records it only on a clean run.")
                         detail("If the manifest was written by an older skeletor rather than edited by")
                         detail("hand, --repair-manifest rewrites it from this base render.")
                     # The full list on stdout when something is parsing this. A
