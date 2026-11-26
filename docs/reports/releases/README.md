@@ -10,6 +10,11 @@ in an `## Errata` block on the *current* in-flight edition, naming the release i
 corrects. Rewriting a frozen edition destroys the audit trail the anchoring exists
 to create.
 
+## v0.94.2
+
+- [the window](v0.94.2/WINDOW.md)
+- [repository-report.md](v0.94.2/repository-report.md)
+
 ## v0.94.1
 
 - [the window](v0.94.1/WINDOW.md)
