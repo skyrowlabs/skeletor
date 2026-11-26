@@ -155,6 +155,7 @@ def test_a_publishing_job_lands_through_an_auto_merging_pull_request(tree, origi
     row = _run_with(monkeypatch, _report_commit(tree), tree)
     topic = f"report/{JOB.key}-{row['committed']}"
     assert row["outcome"] == "ok" and "auto-merge" in row["reason"], row
+    assert row["pull"] == "https://example.invalid/pull/7", row
     assert _git(origin, "rev-parse", "--short", topic) == row["committed"]
     assert _git(origin, "rev-parse", "main") == base and _git(tree, "rev-parse", "HEAD") == base
     calls = _gh_calls(tree)

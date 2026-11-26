@@ -6793,7 +6793,7 @@ def shadow_gate(workdir: Path, venv_python: Path) -> Result:
 
 
 def coverage_gate(workdir: Path, venv_python: Path) -> Result:
-    """`<cli> test coverage` passes, and fails when the budget is breached.
+    """`<cli> test coverage` reports no subject on a fresh tree, and fails when the budget is breached.
 
     It could not pass in any tree, and the reason it survived is the second
     half. `coverage` asked pytest for `term-missing` only while
@@ -6838,9 +6838,11 @@ def coverage_gate(workdir: Path, venv_python: Path) -> Result:
     (target / ".venv").symlink_to(venv_python.parents[1])
 
     code, output = run([str(target / CLI_NAME), "test", "coverage"], cwd=target)
-    if code != 0:
+    # A fresh tree measures only the scaffold's statements, so it has no subject:
+    # exit 3, never a green 0 (dream-doll). Anything else is a crash or a vacuous pass.
+    if code != 3 or "no subject" not in output:
         return Result(
-            "coverage: `test coverage` passes on a fresh tree",
+            "coverage: `test coverage` reports no subject on a fresh tree",
             False,
             time.time() - started,
             f"exited {code}\n{output[-1500:]}",
