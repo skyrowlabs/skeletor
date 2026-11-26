@@ -892,6 +892,85 @@ def record_owned(target: Path, owned: List[str]) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
+def record_renamed(target: Path, renamed: Dict[str, str]) -> None:
+    """Write `renamed` into the manifest: skeletor paths this tree moved, old to new."""
+    path = target / MANIFEST_NAME
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if renamed:
+        data["renamed"] = dict(sorted(renamed.items()))
+    else:
+        data.pop("renamed", None)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def relocated_path(rel: str, renamed: Dict[str, str]) -> Optional[str]:
+    """Where a recorded rename put `rel`, or None when no rename covers it."""
+    for old, new in renamed.items():
+        if rel == old:
+            return new
+        if rel.startswith(old + "/"):
+            return new + rel[len(old) :]
+    return None
+
+
+def rename_mentions(renamed: Dict[str, str], base_files: Dict[str, Path], head_files: Dict[str, Path]) -> List[str]:
+    """Lines this release ADDS to a rendered file that name a path this tree renamed.
+
+    Only added lines: a standing mention is in every release and would be reported
+    on every run (proto.pilot's rename reached them through `NARRATIVE`).
+    """
+    hits = []
+    for rel in sorted(head_files):
+        ours = read(head_files[rel])
+        if ours is None:
+            continue
+        kept = set((read(base_files.get(rel)) or "").splitlines())
+        for number, line in enumerate(ours.splitlines(), start=1):
+            if line in kept:
+                continue
+            for old, new in sorted(renamed.items()):
+                if old in line:
+                    hits.append(f"`{rel}:{number}` names {old}, which this tree moved to {new}: {line.strip()[:100]}")
+    return hits
+
+
+#: `<slug> (<tree>)`: the value of a `Reported-as:` trailer or a `Declined-as:` line.
+_REPORT = re.compile(r"^\s*\[?([\w./-]+)\]?\s*\(([^)]+)\)\s*$")
+
+
+def range_reports(base: str, head: str) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
+    """Reports skeletor answered between `base` and `head`: fixed, by commit trailer, and declined, by tag note.
+
+    The slug is the one the workspace relay assigned; skeletor records it and never
+    coins one. Empty when either end does not resolve here.
+    """
+
+    def git(*argv: str) -> Optional[str]:
+        done = subprocess.run(["git", "-C", str(SKELETOR), *argv], capture_output=True, text=True)
+        return done.stdout if done.returncode == 0 else None
+
+    answered: List[Dict[str, str]] = []
+    declined: List[Dict[str, str]] = []
+    if not base or git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}") is None:
+        return answered, declined
+    logged = git("log", "--format=%H%x1f%(trailers:key=Reported-as,valueonly,separator=%x1e)%x1d", f"{base}..{head}")
+    for record in (logged or "").split("\x1d"):
+        sha, _, values = record.strip().partition("\x1f")
+        for value in values.split("\x1e"):
+            found = _REPORT.match(value)
+            if sha and found:
+                answered.append({"slug": found.group(1), "tree": found.group(2), "sha": sha[:9]})
+    tags = git("tag", "--list", "v*", "--merged", head, "--no-merged", base) or ""
+    for tag in tags.split():
+        note = git("for-each-ref", f"refs/tags/{tag}", "--format=%(contents)") or ""
+        for line in note.splitlines():
+            key, _, value = line.partition(":")
+            found = _REPORT.match(value) if key.strip() == "Declined-as" else None
+            if found:
+                declined.append({"slug": found.group(1), "tree": found.group(2), "tag": tag})
+    return answered, declined
+
+
 def record_pending_added(target: Path, pending: Dict[str, str]) -> None:
     """Write `pending_added` into the manifest: what a held-back run added, by hash."""
     path = target / MANIFEST_NAME
@@ -3526,7 +3605,9 @@ def main() -> int:
         "after this tree was scaffolded — a tree scaffolds once, so there is no other way "
         "to reach one. The base still renders from the recorded arguments, so nothing about "
         "how the tree was made is rewritten; the new value is recorded only if the run applies "
-        "cleanly, exactly like any other upgrade.",
+        "cleanly, exactly like any other upgrade. --org, --visibility, --versioning, "
+        "--release-branch and --slug re-render README.md's badge row, so changing one is a "
+        "README hunk this run causes.",
     )
     parser.add_argument(
         "--ref",
@@ -3546,6 +3627,16 @@ def main() -> int:
         help="this file is yours: never merge a template change into it, and report only when the "
         "template's version moves. Repeatable, and recorded under `owned` in the manifest. "
         "`--ported` records it for you on a collision (a file you had before the template claimed it).",
+    )
+    parser.add_argument(
+        "--rename",
+        action="append",
+        default=[],
+        metavar="OLD=NEW",
+        help="a path skeletor wrote that this tree moved, file or directory, recorded under "
+        "`renamed` in the manifest. Repeatable. A template change to a file under OLD is then "
+        "written beside NEW as tmp/upgrade/<new path>.patch instead of reading as a decline, and "
+        "lines the release adds that name OLD are reported. Nothing is merged into NEW.",
     )
     parser.add_argument(
         "--ported-path",
@@ -3626,6 +3717,18 @@ def main() -> int:
     #: Paths the adopter owns. Beside `files`, never in it: `files` must stay a
     #: bijection with the base render, and ownership is a decision, not a render.
     owned = set(manifest.get("owned") or []) | {Path(own).as_posix().removeprefix("./") for own in args.own}
+    #: Paths of skeletor's this tree moved, old to new: a decision, beside `files` like `owned`.
+    renamed: Dict[str, str] = dict(manifest.get("renamed") or {})
+    for pair in args.rename:
+        old, sep, new = pair.partition("=")
+        old, new = (Path(side).as_posix().removeprefix("./").rstrip("/") for side in (old, new))
+        if not sep or not old or not new:
+            die(f"--rename {pair}: want OLD=NEW")
+        if not any(rel == old or rel.startswith(old + "/") for rel in (manifest.get("files") or {})):
+            die(f"--rename {pair}: the manifest records nothing at {old}, so skeletor never wrote it")
+        if not (target / new).exists():
+            die(f"--rename {pair}: {new} is not in this tree")
+        renamed[old] = new
 
     # Its worktrees are registered here, in skeletor, so a sweep prunes here.
     sweep_dead(UPGRADE_PREFIX, prune=SKELETOR)
@@ -3750,6 +3853,16 @@ def main() -> int:
         # A flag the head render records and this tree's record lacks is a
         # decision taken by default; say so, since nothing else on screen will.
         head_args = json.loads((head_tree / MANIFEST_NAME).read_text(encoding="utf-8")).get("args") or []
+        answered, declined_reports = range_reports(ref, args.ref or "HEAD")
+        this_tree = head_flag_value(head_args, "--slug") or target.name
+        if answered or declined_reports:
+            say("📬", f"{len(answered) + len(declined_reports)} report(s) answered between {ref} and {head_ref}")
+            for report in answered:
+                mine = "   ← yours" if report["tree"] == this_tree else ""
+                item(f"{report['slug']} ({report['tree']}): fixed in skeletor@{report['sha']}{mine}")
+            for report in declined_reports:
+                mine = "   ← yours" if report["tree"] == this_tree else ""
+                item(f"{report['slug']} ({report['tree']}): declined, in {report['tag']}'s note{mine}")
         for index, flag in enumerate(head_args):
             if flag.startswith("--") and flag not in recorded and flag not in set_args_applied:
                 value = (
@@ -4051,6 +4164,8 @@ def main() -> int:
                     detail("no file this scaffold ships. Nothing below is an artefact of them.")
 
         added, updated, merged, conflicted, collided, declined, dropped = [], [], [], [], [], [], []
+        #: Recorded files under a renamed path, old to new; see `--rename`.
+        relocated: Dict[str, str] = {}
         # Read once, before anything is written, so a dry run and a real run agree.
         holds, anchors, anchoring, holds_unread = divergence_holds(target, head_files)
         hunk_lines: Dict[str, str] = {}
@@ -4239,6 +4354,15 @@ def main() -> int:
                 # manifest would be a second home for a fact the filesystem
                 # already states, and would go stale the moment somebody changed
                 # their mind by restoring the file.
+                moved_to = relocated_path(rel, renamed)
+                if hashes and (rel in hashes or rel in pending_added) and moved_to and (target / moved_to).exists():
+                    # Moved, not declined: the change goes beside the new path, never into it.
+                    relocated[rel] = moved_to
+                    if sha256(head_files[rel]) != hashes.get(rel, pending_added.get(rel)) and not args.dry_run:
+                        patch = patches / f"{moved_to}.patch"
+                        patch.parent.mkdir(parents=True, exist_ok=True)
+                        patch.write_text(unified(base or "", ours, rel), encoding="utf-8")
+                    continue
                 if hashes and (rel in hashes or rel in pending_added):
                     declined.append(rel)
                     # Only worth a sidecar if there is something new to look at:
@@ -4624,6 +4748,7 @@ def main() -> int:
                     detail("again — that is what the flag asserts, and it cannot be undone by")
                     detail("re-running.")
                 shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
+                record_renamed(target, renamed)
                 refresh_version_badge(target, head_tree, head_ref)
                 advanced = True
                 # **Announced where it happens, whatever else the run did.** v0.33.0
@@ -4664,6 +4789,8 @@ def main() -> int:
             if rel in head_files and sha256(head_files[rel]) != (hashes or {}).get(rel, pending_added.get(rel))
         )
         retired = retired_holds(holds, target, renders, normalising)
+        # Needs the base render to know what a release added; offline, nothing is claimed.
+        mentions = rename_mentions(renamed, base_files, head_files) if renamed and base_files else []
         # Against the render that is the base once this run is read: the head after
         # an advance, the recorded base otherwise. Printed, never red.
         anchors_at = head_ref if advanced else ref
@@ -4831,6 +4958,14 @@ def main() -> int:
                         "entangled": entangled,
                         "declined": declined,
                         "owned": owned_files,
+                        # `--rename`: the record, the recorded files it moved, and the lines
+                        # this release adds that still name an old path.
+                        # Reports answered in this range, read from skeletor's own history.
+                        "answered": answered,
+                        "declined_reports": declined_reports,
+                        "renames": dict(sorted(renamed.items())),
+                        "relocated": relocated,
+                        "rename_mentions": mentions,
                         # The machine half of the `standing state` block. It was
                         # human-only for a release, which is the asymmetry
                         # `head_ref` was added here to close: a consumer that has
@@ -5216,6 +5351,22 @@ def main() -> int:
         owned_final = sorted((owned | (set(collided) if args.ported else set())) & set(head_files))
         if not args.dry_run:
             record_owned(target, owned_final)
+            record_renamed(target, renamed)
+        if renamed:
+            say("↪️ ", f"{len(renamed)} path(s) you moved — recorded, never merged into")
+            for old, new in sorted(renamed.items()):
+                item(f"{old} → {new}")
+            changed = sorted(new for rel, new in relocated.items() if sha256(head_files[rel]) != hashes.get(rel))
+            if changed:
+                where = "a real run would write" if args.dry_run else "the template's change is in"
+                detail(f"The template changed {len(changed)} file(s) under them; {where}")
+                detail("tmp/upgrade/<new path>.patch, to port by hand: " + ", ".join(changed))
+        if mentions:
+            say("📛", f"{len(mentions)} line(s) this release adds name a path you moved; none was edited")
+            for hit in mentions[:CLAIMS_SHOWN]:
+                item(hit)
+            if len(mentions) > CLAIMS_SHOWN:
+                detail(f"… and {len(mentions) - CLAIMS_SHOWN} more.")
         if owned_final:
             moved_since = [rel for rel in owned_final if sha256(head_files[rel]) != hashes.get(rel)]
             say("🏠", f"{len(owned_final)} file(s) you own — never merged: {', '.join(owned_final)}")
@@ -5744,6 +5895,7 @@ def main() -> int:
                     shutil.copy2(head_tree / MANIFEST_NAME, target / MANIFEST_NAME)
                     refresh_version_badge(target, head_tree, head_ref)
                     record_owned(target, sorted(owned & set(head_files)))
+                    record_renamed(target, renamed)
                     say("📌", f"{MANIFEST_NAME}: {ref} → {head_ref}")
                     detail("The two renders are identical, so only the recorded ref moved. Your")
                     detail("files were not touched, and the next upgrade now renders its base from")

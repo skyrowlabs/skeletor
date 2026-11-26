@@ -226,6 +226,13 @@ def badges(args, slug: str) -> str:
     The trailing blank line is part of the return value: an empty row must leave
     the tagline sitting directly under the title, with no double blank line for
     `prettier` to reformat on the first commit.
+
+    **Frozen.** No release changes what this renders, nor README.md down to its
+    first `---`: every adopter replaces this row, so each change was a README
+    conflict in every tree (`readme_head_gate` holds it). A new badge ships as a
+    release-note line the adopter adds by hand. `--org`, `--visibility`,
+    `--versioning`, `--release-branch` and the slug still re-render it, so a
+    `--set-arg` of one of them is a README hunk that run causes.
     """
     if args.org == ORG_UNSET:
         return ""

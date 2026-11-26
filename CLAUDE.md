@@ -1879,6 +1879,11 @@ interlock, and which you cannot understand from one file:
   the log already carried `docs(readme):` commits against a root file, which is
   how a path predicate fails: it is cheap to state, cheap to violate, and
   nothing reads it. Ported from jam.sense (`jam-sense@e6e14d8cf`).
+- A commit that closes a relayed report carries a `Reported-as: <slug> (<tree>)`
+  trailer, the slug verbatim from the workspace relay; a decline goes in the
+  release tag's note as `Declined-as: <slug> (<tree>)`. skeletor never coins a
+  slug. `bin/skeletor-upgrade` prints both for the range it carries, so a tree
+  sees its report answered without a ledger of its own.
 - Template content is prose as much as code — match the surrounding voice:
   specific, causal, and willing to say what went wrong.
 

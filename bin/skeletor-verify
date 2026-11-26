@@ -11500,6 +11500,164 @@ def components_gate(workdir: Path) -> List[Result]:
     return results
 
 
+def readme_head_gate(workdir: Path) -> Result:
+    """The README from its title through the first `---` renders the same at the last release and at HEAD.
+
+    The promise is that no release changes that region (breeze.brain, node-zero):
+    every adopter replaces the badge row, so each change there was a README
+    conflict in every tree. Compared rendered, because the conflicts came from
+    `badges()` and not the template line. The last release is the newest tag
+    before HEAD's commit, so the release commit is compared with the one before it.
+    """
+    started = time.time()
+    code, last = run(["git", "-C", str(SKELETOR), "describe", "--tags", "--abbrev=0", "HEAD^"], cwd=SKELETOR)
+    last = last.strip()
+    if code != 0 or not last:
+        return Result("README head: find the last release", False, time.time() - started, last)
+    released = workdir / "readme-released-skeletor"
+    run(["git", "clone", "--quiet", "--no-hardlinks", str(SKELETOR), str(released)], cwd=workdir)
+    run(["git", "-C", str(released), "checkout", "--quiet", last], cwd=workdir)
+
+    def head_of(scaffolder: Path, name: str, extra: List[str]) -> Tuple[Optional[List[str]], str]:
+        tree = workdir / "readme-head" / name / "probe"
+        code, output = run(
+            [sys.executable, str(scaffolder), str(tree), "--allow-dirty", "--name", "Probe", "--cli", CLI_NAME,
+             "--tagline", "t", "--tier", "core", "--language", "python", *extra],
+            cwd=workdir,
+        )  # fmt: skip
+        if code != 0:
+            return None, output
+        lines = (tree / "README.md").read_text(encoding="utf-8").splitlines()
+        end = next((i for i, line in enumerate(lines[:30]) if line.strip() == "---"), None)
+        return (lines[: end + 1] if end is not None else None), output
+
+    problems: List[str] = []
+    seen: Dict[str, List[str]] = {}
+    for org in ("", "acme"):
+        for visibility in ("private", "public"):
+            for versioning in ("release-please", "tag"):
+                extra = ["--visibility", visibility, "--versioning", versioning] + (["--org", org] if org else [])
+                name = f"{org or 'unset'}-{visibility}-{versioning}"
+                then, said_then = head_of(released / "bin" / "skeletor-new", f"{name}-released", extra)
+                now, said_now = head_of(SCAFFOLDER, f"{name}-head", extra)
+                if then is None or now is None:
+                    problems.append(
+                        f"{name}: no `---` in the first 30 lines, or no scaffold\n{said_then[-300:]}{said_now[-300:]}"
+                    )
+                elif then != now:
+                    problems.append(
+                        f"{name}: {last} renders\n  " + "\n  ".join(then) + "\nHEAD renders\n  " + "\n  ".join(now)
+                    )
+                else:
+                    seen[name] = now
+    # A comparison over regions that never differ by configuration would pass a renderer that ignored its arguments.
+    if seen and len({tuple(region) for region in seen.values()}) < 3:
+        problems.append(
+            f"the matrix rendered {len({tuple(r) for r in seen.values()})} distinct region(s); the badges are not varying"
+        )
+    return Result(
+        f"README head: lines up to the first `---` render as {last} did ({len(seen)} configurations)",
+        not problems,
+        time.time() - started,
+        "\n".join(problems),
+    )
+
+
+def rename_and_reports_gate(workdir: Path) -> List[Result]:
+    """A recorded rename relocates a template change, and the range's answered reports print.
+
+    A real version gap, the shape `divergence_record_gate` uses: a second clone
+    carries one template commit that edits a file under the renamed path and adds
+    a line naming it elsewhere, with a `Reported-as:` trailer, and a tag whose
+    note holds a `Declined-as:` line. The control is the same tree without the
+    record, where the moved file reads as declined.
+    """
+    started = time.time()
+    clean = clean_skeletor(workdir)
+    gap = workdir / "rename-skeletor"
+    run(["git", "clone", "--quiet", "--no-hardlinks", str(clean), str(gap)], cwd=workdir)
+    tree = workdir / "rename-tree" / "probe"
+    code, output = run(
+        [sys.executable, str(clean / "bin" / "skeletor-new"), str(tree), "--name", "Probe", "--cli", CLI_NAME,
+         "--tagline", "t", "--tier", "core", "--language", "python", "--force"],
+        cwd=SKELETOR,
+    )  # fmt: skip
+    if code != 0:
+        return [Result("rename: scaffold the tree", False, time.time() - started, output)]
+    old, new, moved = "docs/rules", "docs/conventions", "docs/rules/testing.md"
+    git_in(tree, "mv", old, new)
+    git_in(tree, "commit", "--quiet", "-m", "adopter: rename the rules folder")
+    control = workdir / "rename-control" / "probe"
+    control.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(tree, control, symlinks=True)
+
+    template_file = gap / "template" / "core" / moved
+    assert template_file.is_file(), f"the plant did not land: no {template_file}"
+    template_file.write_text(template_file.read_text(encoding="utf-8") + "\nA template line.\n", encoding="utf-8")
+    mention = gap / "template" / "core" / "docs" / "DEVELOPMENT.md"
+    assert mention.is_file(), f"the plant did not land: no {mention}"
+    added = f"The rules live in `{old}/commits.md`."
+    mention.write_text(mention.read_text(encoding="utf-8") + f"\n{added}\n", encoding="utf-8")
+    git_in(gap, "commit", "--quiet", "-am", "scratch: move a rule file\n\nReported-as: [probe-report] (probe)")
+    git_in(gap, "tag", "-a", "v99.0.0", "-m", "scratch release\n\nDeclined-as: [other-report] (elsewhere)")
+
+    def up(where: Path, *extra: str) -> Tuple[int, Dict[str, Any], str]:
+        ran = subprocess.run(
+            [sys.executable, str(gap / "bin" / "skeletor-upgrade"), str(where), "--allow-untagged", "--json", *extra],
+            cwd=where, capture_output=True, text=True, env=subprocess_env(None),
+        )  # fmt: skip
+        try:
+            return ran.returncode, json.loads(ran.stdout), ran.stderr
+        except ValueError:
+            return ran.returncode, {}, ran.stderr + ran.stdout
+
+    results: List[Result] = []
+    started = time.time()
+    _, dry, text = up(tree, "--rename", f"{old}={new}", "--dry-run")
+    _, bare, _ = up(control, "--dry-run")
+    problems = []
+    if dry.get("relocated", {}).get(moved) != f"{new}/testing.md":
+        problems.append(f"relocated is {dry.get('relocated')}, not {moved} at {new}/testing.md")
+    if moved in dry.get("declined", []) or moved not in bare.get("declined", []):
+        problems.append(f"declined with the record {dry.get('declined')}, without it {bare.get('declined')}")
+    if not any("docs/DEVELOPMENT.md" in hit and old in hit for hit in dry.get("rename_mentions", [])):
+        problems.append(f"the added line naming {old} was not reported: {dry.get('rename_mentions')}")
+    if any("DEVELOPMENT" not in hit for hit in dry.get("rename_mentions", [])):
+        problems.append(f"a standing mention was reported as added: {dry.get('rename_mentions')}")
+    results.append(Result("rename: a moved file is relocated, not declined", not problems, time.time() - started,
+                          "\n".join(problems) + f"\n{text[-1500:]}"))  # fmt: skip
+
+    started = time.time()
+    problems = []
+    answered = [(r.get("slug"), r.get("tree")) for r in dry.get("answered", [])]
+    declined = [(r.get("slug"), r.get("tree"), r.get("tag")) for r in dry.get("declined_reports", [])]
+    if answered != [("probe-report", "probe")]:
+        problems.append(f"answered is {answered}")
+    if declined != [("other-report", "elsewhere", "v99.0.0")]:
+        problems.append(f"declined is {declined}")
+    if "probe-report (probe): fixed in skeletor@" not in text or "← yours" not in text:
+        problems.append("the answered report is not printed as this tree's")
+    results.append(Result("reports: the range's answered and declined reports print", not problems,
+                          time.time() - started, "\n".join(problems) + f"\n{text[-1500:]}"))  # fmt: skip
+
+    started = time.time()
+    code, real, real_text = up(tree, "--rename", f"{old}={new}")
+    _, again, _ = up(tree, "--dry-run")
+    problems = []
+    sidecar = tree / "tmp" / "upgrade" / f"{new}/testing.md.patch"
+    if not sidecar.is_file() or "A template line." not in sidecar.read_text(encoding="utf-8"):
+        problems.append(f"no sidecar at {sidecar.relative_to(tree)} carrying the template's change")
+    if json.loads((tree / ".skeletor.json").read_text(encoding="utf-8")).get("renamed") != {old: new}:
+        problems.append("the manifest does not record the rename")
+    if again.get("renames") != {old: new}:
+        problems.append(f"a later run without the flag read the record as {again.get('renames')}")
+    if (tree / moved).exists():
+        problems.append(f"{moved} was written back")
+    results.append(Result("rename: recorded, kept, and nothing merged into the new path", not problems,
+                          time.time() - started, "\n".join(problems) + f"\n{real_text[-1500:]}"))  # fmt: skip
+    return results
+
+
 def divergence_record_gate(workdir: Path, venv_python: Path) -> List[Result]:
     """The standing list splits in four, and the record never changes an outcome.
 
@@ -16103,6 +16261,8 @@ def main() -> int:
         step(lambda: dirty_ref_gate(workdir))
         step(lambda: pending_ref_gate(workdir))
         step(lambda: divergence_record_gate(workdir, venv_python))
+        step(lambda: rename_and_reports_gate(workdir))
+        step(lambda: readme_head_gate(workdir))
         step(lambda: seam_record_scope_gate(workdir))
         step(lambda: adoption_hint_gate(workdir))
         step(lambda: plant_gate(workdir, venv_python))
