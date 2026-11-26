@@ -548,6 +548,14 @@ Do it in this order, one commit each:
    twelve permanent merge points against seventeen one-line declines — the
    larger cost, and the one that is invisible until you run this on a repository
    that already exists. Budget for it before adopting, not after.
+
+   **Pick one copy of anything you already had.** If your tree had its own link
+   ratchet, source-reference check or status vocabulary, it now has two:
+   `scripts/check_doc_links.py`, `scripts/check_source_doc_refs.py` and
+   `scripts/output.py` are skeletor's. Two copies drift. breeze.brain kept its own
+   aggregator and lost the exit code v0.75.0 added, so a crash read as green.
+   `<cli> doctor` names a second module defining `summarize`, the one overlap a
+   tool can see. The others only you can judge.
 2. **Baseline every ratchet at what you inherited**, not at zero:
    ```bash
    python scripts/check_doc_links.py --update-baseline
