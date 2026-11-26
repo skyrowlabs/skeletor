@@ -127,7 +127,7 @@ def origin(tree, tmp_path, monkeypatch):
 
 
 GH = """#!/bin/sh
-echo "$*" >> {log}
+printf '%s\n' "$*" >> {log}
 if [ "$1" = issue ]; then
   [ -z "$FAKE_GH_NO_ISSUES" ] || {{ echo refused >&2; exit 1; }}
   printf '%s\n' "${{FAKE_GH_ISSUES:-[]}}"; exit 0
