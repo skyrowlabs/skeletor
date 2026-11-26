@@ -11594,6 +11594,22 @@ def upgrade_helpers_gate(workdir: Path) -> List[Result]:
     return results
 
 
+def like_ci_gate(tree: Path) -> Result:
+    """`test like-ci` runs the fullest tree's unit job green, in its own checkout.
+
+    The command's own tests stub the run; v0.94.0's copy had no `.git`, so every
+    suite that lists tracked files found none, and only three adopters saw it.
+    Exit 2 is the command saying this host cannot imitate the runner, and skips loudly.
+    """
+    started = time.time()
+    code, output = run([str(tree / CLI_NAME), "test", "like-ci"], cwd=tree)
+    if code == 2:
+        reason = next((line for line in output.splitlines() if "not like CI" in line), output.strip()[-200:])
+        return Result(f"⚠️  like-ci: SKIPPED, {reason.strip()}", True, time.time() - started, output[-1500:])
+    return Result("like-ci: the unit job runs green in a fresh checkout of the tree", code == 0,
+                  time.time() - started, output[-3000:])  # fmt: skip
+
+
 def readme_head_gate(workdir: Path) -> Result:
     """The README from its title through the first `---` renders the same at the last release and at HEAD.
 
@@ -16298,6 +16314,7 @@ def main() -> int:
         step(lambda: versioning_gate(fullest, workdir, venv_python, pyright_ok))
         if gated_language in languages:
             step(lambda: dash_sh_gate(workdir / f"{fullest}-{gated_language}", venv_python, workdir))
+            step(lambda: like_ci_gate(workdir / f"{fullest}-{gated_language}"))
         # A language that adds no overlay ships a python-only tree, so its own
         # gates can run here; only `gated_language` used to, and a `none` tree
         # shipped red at v0.88.1 with nothing reading it. Derived from the map.
