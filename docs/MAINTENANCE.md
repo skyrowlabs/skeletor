@@ -194,7 +194,12 @@ own gates first:
 ./skel check pre-push
 git tag -a vX.Y.Z -m "what moved, and why somebody would want it"
 git push origin vX.Y.Z
+python3 scripts/docs/freeze_release.py --tag vX.Y.Z   # commit as docs(reports):
 ```
+
+**Every release freezes its edition**, patches included, from v0.93.0 on (Jeston,
+2026-11-26). The releases before it are held in `scripts/release_freeze_allowlist.yaml`,
+so `./skel doctor` reports a release that missed its freeze.
 
 **The grid does not cover that first line.** `bin/skeletor-verify` tests the
 template, so a tag commit can pass it and go red here. A tag precedes the

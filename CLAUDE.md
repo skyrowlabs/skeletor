@@ -1901,4 +1901,6 @@ scaffold records `v0.1.0` or `v0.1.0-3-gabc1234`.
 
 So: tag after a change users would scaffold against, `git tag -a vX.Y.Z` with a
 message saying what moved, and push the tag — an unpushed tag describes a base
-only this machine can resolve.
+only this machine can resolve. Then freeze its edition,
+`python3 scripts/docs/freeze_release.py --tag vX.Y.Z`, as `docs/MAINTENANCE.md`
+§ 5 says.
